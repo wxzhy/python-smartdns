@@ -1,0 +1,36 @@
+{% extends "base.html" %}
+{% block body %}
+<h1>配置编辑</h1>
+<div class="panel">
+  <a href="/">返回首页</a>
+  {% if message %}
+  <div class="ok">{{ message }}</div>
+  {% endif %}
+  {% if error %}
+  <div class="error">{{ error }}</div>
+  {% endif %}
+</div>
+
+<div class="panel">
+  <h2>插件 schema 摘要</h2>
+  {% for plugin in plugins %}
+  <div style="margin-bottom: 1rem;">
+    <strong>{{ plugin.name }}</strong>
+    {% if plugin.ui_meta.description %}
+    <div>{{ plugin.ui_meta.description }}</div>
+    {% endif %}
+    <pre>{{ plugin.config_schema }}</pre>
+  </div>
+  {% else %}
+  <div>当前没有启用插件。</div>
+  {% endfor %}
+</div>
+
+<form method="post" action="/config">
+  <div class="panel">
+    <h2>config.yaml</h2>
+    <textarea name="config_text">{{ config_text }}</textarea>
+  </div>
+  <button type="submit">保存配置</button>
+</form>
+{% endblock %}

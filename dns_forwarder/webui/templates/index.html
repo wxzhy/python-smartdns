@@ -1,0 +1,53 @@
+{% extends "base.html" %}
+{% block body %}
+<h1>dns-forwarder</h1>
+<div class="panel">
+  <div>配置文件：<strong>{{ config_path }}</strong></div>
+  <div>默认 upstream group：<strong>{{ default_group }}</strong></div>
+  {% if error %}
+  <div class="error">Reload 失败：{{ error }}</div>
+  {% endif %}
+</div>
+
+<div class="row">
+  <div class="panel" style="flex: 1 1 280px;">
+    <h2>运行概览</h2>
+    <div>listeners: {{ listeners|length }}</div>
+    <div>upstreams: {{ upstreams|length }}</div>
+    <div>groups: {{ groups|length }}</div>
+    <div>rules: {{ rules|length }}</div>
+    <div>plugins: {{ plugins|length }}</div>
+  </div>
+  <div class="panel" style="flex: 1 1 280px;">
+    <h2>操作</h2>
+    <div><a href="/config">编辑配置</a></div>
+    <form method="post" action="{{ reload_endpoint }}" style="margin-top: 1rem;">
+      <button type="submit">手动 reload</button>
+    </form>
+  </div>
+</div>
+
+<div class="panel">
+  <h2>监听地址</h2>
+  <ul>
+    {% for listener in listeners %}
+    <li>{{ listener.name }} ({{ listener.protocol }}) - {{ listener.address or "未启动" }}</li>
+    {% endfor %}
+  </ul>
+</div>
+
+<div class="panel">
+  <h2>插件</h2>
+  {% for plugin in plugins %}
+  <div style="margin-bottom: 0.8rem;">
+    <strong>{{ plugin.name }}</strong>
+    <span class="pill">{{ plugin.module }}</span>
+    {% if plugin.ui_meta.description %}
+    <div>{{ plugin.ui_meta.description }}</div>
+    {% endif %}
+  </div>
+  {% else %}
+  <div>当前没有启用插件。</div>
+  {% endfor %}
+</div>
+{% endblock %}

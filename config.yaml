@@ -1,0 +1,70 @@
+runtime:
+  plugin_dirs:
+    - plugins
+  loop_policy: auto
+  default_upstream_group: default
+
+listeners:
+  - name: udp-default
+    protocol: udp
+    host: 127.0.0.1
+    port: 5300
+    enabled: true
+  - name: tcp-default
+    protocol: tcp
+    host: 127.0.0.1
+    port: 5300
+    enabled: true
+
+upstreams:
+  - name: cloudflare
+    protocol: do53
+    host: 1.1.1.1
+    port: 53
+    timeout: 1.0
+    lifetime: 3.0
+    use_tcp: false
+  - name: google
+    protocol: do53
+    host: 8.8.8.8
+    port: 53
+    timeout: 1.0
+    lifetime: 3.0
+    use_tcp: false
+
+groups:
+  - name: default
+    strategy: race
+    upstreams:
+      - cloudflare
+      - google
+
+rules:
+  - name: sample-static
+    enabled: true
+    match:
+      exact_domains:
+        - sample.internal
+      suffix_domains: []
+      qtypes:
+        - A
+    action:
+      upstream_group: default
+
+plugins:
+  - name: sample
+    module: sample_plugin
+    enabled: true
+    config:
+      domains:
+        - sample.internal
+      answer_name: sample.static_a
+    variables:
+      address: 127.0.0.1
+      ttl: 30
+
+webui:
+  enabled: true
+  host: 127.0.0.1
+  port: 8080
+  reload_endpoint: /admin/reload

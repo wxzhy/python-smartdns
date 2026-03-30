@@ -1,0 +1,22 @@
+[project]
+name = "python-smartdns"
+version = "0.1.0"
+description = "Async dns-forwarder skeleton built with dnspython and FastAPI"
+readme = "README.md"
+requires-python = ">=3.14"
+dependencies = [
+    "dnspython[doh,doq,idna]>=2.8.0",
+    "fastapi[all]>=0.135.2",
+    "pydantic>=2.11.0",
+    "pydantic-settings>=2.10.0",
+    "PyYAML>=6.0.2",
+    "uvicorn>=0.35.0",
+    "winuvloop>=0.2.0; sys_platform == 'win32'",
+]
+
+[dependency-groups]
+dev = [
+    "httpx>=0.28.1",
+    "pytest>=8.4.1",
+    "pytest-asyncio>=1.2.0",
+]

@@ -5,11 +5,16 @@ import time
 import dns.asyncresolver
 import dns.edns
 import dns.nameserver
+import dns.rdatatype
 import dns.resolver
 
-from dns_forwarder.config import AppConfig, UpstreamConfig
+from dns_forwarder.config import AppConfig, UpstreamConfig, UpstreamGroupConfig
+from dns_forwarder.logging import get_logger
 from dns_forwarder.pipeline.context import RequestContext, UpstreamResult
 from dns_forwarder.plugin_api import PluginRegistry
+
+
+logger = get_logger("resolver.manager")
 
 
 class UpstreamResolver:
@@ -32,10 +37,24 @@ class UpstreamResolver:
                     )
                 )
             self.resolver.use_edns(edns=0, payload=config.edns.payload, options=options or None)
+            logger.debug(
+                "上游启用 EDNS request_target=%s payload=%s ecs=%s",
+                config.name,
+                config.edns.payload,
+                config.edns.client_subnet.address if config.edns.client_subnet is not None else "",
+            )
 
     async def resolve(self, context: RequestContext) -> UpstreamResult:
         question = context.request.question[0]
         started = time.perf_counter()
+        logger.debug(
+            "发起上游查询 request_id=%s upstream=%s qname=%s qtype=%s tcp=%s",
+            context.request_id,
+            self.config.name,
+            question.name.to_text().rstrip("."),
+            dns.rdatatype.to_text(question.rdtype),
+            self.config.use_tcp,
+        )
 
         try:
             answer = await self.resolver.resolve(
@@ -45,21 +64,44 @@ class UpstreamResolver:
                 tcp=self.config.use_tcp,
                 raise_on_no_answer=False,
             )
+            duration_ms = (time.perf_counter() - started) * 1000
+            logger.debug(
+                "上游查询成功 request_id=%s upstream=%s duration_ms=%.2f rrset_size=%s",
+                context.request_id,
+                self.config.name,
+                duration_ms,
+                len(answer),
+            )
             return UpstreamResult(
                 upstream_name=self.config.name,
-                duration_ms=(time.perf_counter() - started) * 1000,
+                duration_ms=duration_ms,
                 answer=answer,
             )
         except dns.resolver.NXDOMAIN as exc:
+            duration_ms = (time.perf_counter() - started) * 1000
+            logger.info(
+                "上游返回 NXDOMAIN request_id=%s upstream=%s duration_ms=%.2f",
+                context.request_id,
+                self.config.name,
+                duration_ms,
+            )
             return UpstreamResult(
                 upstream_name=self.config.name,
-                duration_ms=(time.perf_counter() - started) * 1000,
+                duration_ms=duration_ms,
                 error=exc,
             )
         except Exception as exc:
+            duration_ms = (time.perf_counter() - started) * 1000
+            logger.warning(
+                "上游查询失败 request_id=%s upstream=%s duration_ms=%.2f error=%s",
+                context.request_id,
+                self.config.name,
+                duration_ms,
+                type(exc).__name__,
+            )
             return UpstreamResult(
                 upstream_name=self.config.name,
-                duration_ms=(time.perf_counter() - started) * 1000,
+                duration_ms=duration_ms,
                 error=exc,
             )
 
@@ -76,5 +118,6 @@ class ResolverManager:
     async def resolve(self, upstream_name: str, context: RequestContext) -> UpstreamResult:
         custom_resolver = self._plugin_registry.resolver_registry.get(upstream_name)
         if custom_resolver is not None:
+            logger.debug("使用插件 resolver request_id=%s upstream=%s", context.request_id, upstream_name)
             return await custom_resolver.resolve(context)
         return await self._resolvers[upstream_name].resolve(context)

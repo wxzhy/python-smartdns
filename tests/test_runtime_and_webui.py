@@ -1,12 +1,13 @@
 from __future__ import annotations
 
+import sys
 from pathlib import Path
 
 import dns.message
 from httpx import ASGITransport, AsyncClient
 import yaml
 
-from dns_forwarder.core.runtime import RuntimeManager
+from dns_forwarder.core.runtime import RuntimeManager, main
 from dns_forwarder.webui import ManagedUvicornServer, create_webui_app
 
 
@@ -17,6 +18,7 @@ def write_config(path: Path, *, upstream_port: int = 5301, webui_enabled: bool =
             "plugin_dirs": [plugin_dir],
             "default_upstream_group": "default",
             "loop_policy": "asyncio",
+            "log_level": "INFO",
         },
         "listeners": [
             {
@@ -87,7 +89,8 @@ async def test_sample_plugin_short_circuits_request(tmp_path: Path) -> None:
     assert response.answer[0][0].address == "127.0.0.1"
 
 
-async def test_webui_save_and_reload_success(tmp_path: Path) -> None:
+async def test_webui_save_and_reload_success(tmp_path: Path, capture_dns_logs, caplog) -> None:
+    capture_dns_logs("INFO")
     config_path = tmp_path / "config.yaml"
     write_config(config_path)
     manager = RuntimeManager(config_path)
@@ -106,6 +109,8 @@ async def test_webui_save_and_reload_success(tmp_path: Path) -> None:
 
         reloaded = await client.post("/admin/reload", follow_redirects=False)
         assert reloaded.status_code == 303
+        assert "保存配置成功" in caplog.text
+        assert "手动 reload 完成" in caplog.text
 
     response = await manager.process_query(
         dns.message.make_query("sample.internal", "A"),
@@ -115,7 +120,8 @@ async def test_webui_save_and_reload_success(tmp_path: Path) -> None:
     assert response.answer[0][0].address == "127.0.0.2"
 
 
-async def test_webui_reload_failure_keeps_old_runtime(tmp_path: Path) -> None:
+async def test_webui_reload_failure_keeps_old_runtime(tmp_path: Path, capture_dns_logs, caplog) -> None:
+    capture_dns_logs("INFO")
     config_path = tmp_path / "config.yaml"
     write_config(config_path)
     manager = RuntimeManager(config_path)
@@ -130,6 +136,8 @@ async def test_webui_reload_failure_keeps_old_runtime(tmp_path: Path) -> None:
         failed = await client.post("/admin/reload")
         assert failed.status_code == 400
         assert "需要重启进程" in failed.text
+        assert "手动 reload 失败" in caplog.text
+        assert "reload 失败" in caplog.text
 
     response = await manager.process_query(
         dns.message.make_query("sample.internal", "A"),
@@ -143,3 +151,22 @@ async def test_webui_reload_failure_keeps_old_runtime(tmp_path: Path) -> None:
 def test_webui_server_uses_current_event_loop() -> None:
     server = ManagedUvicornServer(create_webui_app(RuntimeManager(Path("config.yaml"))), "127.0.0.1", 8080)
     assert server._config.loop == "none"
+
+
+def test_check_config_logs_instead_of_print(
+    tmp_path: Path,
+    monkeypatch,
+    capsys,
+    capture_dns_logs,
+    caplog,
+) -> None:
+    capture_dns_logs("INFO")
+    config_path = tmp_path / "config.yaml"
+    write_config(config_path)
+    monkeypatch.setattr(sys, "argv", ["main.py", "--config", str(config_path), "check-config"])
+
+    main()
+
+    captured = capsys.readouterr()
+    assert captured.out == ""
+    assert "config ok:" in caplog.text

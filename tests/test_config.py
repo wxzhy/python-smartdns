@@ -99,3 +99,33 @@ webui:
   enabled: false
             """
         )
+
+
+def test_parse_config_text_rejects_invalid_log_level() -> None:
+    with pytest.raises(ValueError):
+        parse_config_text(
+            """
+runtime:
+  plugin_dirs: ["plugins"]
+  default_upstream_group: default
+  log_level: verbose
+listeners:
+  - name: udp
+    protocol: udp
+    host: 127.0.0.1
+    port: 5300
+upstreams:
+  - name: local
+    protocol: do53
+    host: 127.0.0.1
+    port: 5301
+groups:
+  - name: default
+    strategy: sequential
+    upstreams: [local]
+rules: []
+plugins: []
+webui:
+  enabled: false
+            """
+        )

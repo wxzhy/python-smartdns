@@ -3,6 +3,7 @@ runtime:
     - plugins
   loop_policy: auto
   default_upstream_group: default
+  log_level: INFO
 
 listeners:
   - name: udp-default

@@ -11,8 +11,10 @@ from fastapi.templating import Jinja2Templates
 import uvicorn
 
 from dns_forwarder.config import dump_config_text, parse_config_text, save_config
+from dns_forwarder.logging import get_logger
 
 TEMPLATES = Jinja2Templates(directory=str(Path(__file__).parent / "templates"))
+logger = get_logger("webui.app")
 
 if TYPE_CHECKING:
     from dns_forwarder.core.runtime import RuntimeManager
@@ -51,7 +53,9 @@ def create_webui_app(runtime_manager: "RuntimeManager") -> FastAPI:
         try:
             config = parse_config_text(config_text)
             save_config(config, runtime_manager.config_path)
+            logger.info("保存配置成功 path=%s", runtime_manager.config_path)
         except Exception as exc:
+            logger.warning("保存配置失败 path=%s error=%s", runtime_manager.config_path, exc)
             return TEMPLATES.TemplateResponse(
                 request=request,
                 name="config.html",
@@ -78,14 +82,17 @@ def create_webui_app(runtime_manager: "RuntimeManager") -> FastAPI:
     @app.post(runtime_manager.reload_endpoint, response_model=None)
     async def manual_reload(request: Request):
         try:
+            logger.info("收到手动 reload 请求 path=%s", runtime_manager.config_path)
             await runtime_manager.reload()
         except Exception as exc:
+            logger.error("手动 reload 失败 path=%s error=%s", runtime_manager.config_path, exc)
             return TEMPLATES.TemplateResponse(
                 request=request,
                 name="index.html",
                 context=runtime_manager.get_status() | {"error": str(exc)},
                 status_code=400,
             )
+        logger.info("手动 reload 完成 path=%s", runtime_manager.config_path)
         return RedirectResponse(url="/", status_code=303)
 
     return app
@@ -104,9 +111,11 @@ class ManagedUvicornServer:
         self._task = asyncio.create_task(self._server.serve())
         while not self._server.started:
             await asyncio.sleep(0.01)
+        logger.info("webui server 就绪 address=%s:%s", self._config.host, self._config.port)
 
     async def stop(self) -> None:
         self._server.should_exit = True
         if self._task is not None:
             await self._task
             self._task = None
+            logger.info("webui server 已停止 address=%s:%s", self._config.host, self._config.port)

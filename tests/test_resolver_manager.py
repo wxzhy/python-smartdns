@@ -1,10 +1,13 @@
 from __future__ import annotations
 
-from unittest.mock import patch
+from unittest.mock import AsyncMock, patch
 
+import dns.message
 import dns.edns
+import dns.rrset
 
 from dns_forwarder.config import EDNSClientSubnetConfig, EDNSConfig, UpstreamConfig
+from dns_forwarder.pipeline import RequestContext, build_answer_from_response
 from dns_forwarder.resolver.manager import UpstreamResolver
 
 
@@ -42,3 +45,21 @@ def test_upstream_resolver_skips_edns_when_not_configured() -> None:
         UpstreamResolver(config)
 
     use_edns.assert_not_called()
+
+
+async def test_upstream_resolver_emits_debug_logs(capture_dns_logs, caplog) -> None:
+    capture_dns_logs("DEBUG")
+    config = UpstreamConfig(name="local", host="127.0.0.1", port=53)
+    request = dns.message.make_query("example.test", "A")
+    response = dns.message.make_response(request)
+    response.answer.append(dns.rrset.from_text("example.test.", 30, "IN", "A", "198.51.100.10"))
+    answer = build_answer_from_response(request, response)
+    resolver = UpstreamResolver(config)
+    context = RequestContext(request=request, clientaddr=("127.0.0.1", 5300), listener_name="udp")
+
+    with patch.object(resolver.resolver, "resolve", AsyncMock(return_value=answer)):
+        result = await resolver.resolve(context)
+
+    assert result.answer is answer
+    assert "发起上游查询" in caplog.text
+    assert "上游查询成功" in caplog.text

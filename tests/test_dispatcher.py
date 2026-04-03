@@ -59,7 +59,11 @@ async def test_sequential_dispatcher_falls_back_only_on_error() -> None:
             "b": await _success("b"),
         }
     )
-    context = RequestContext(request=dns.message.make_query("example.test", "A"), client=("127.0.0.1", 1), listener_name="udp")
+    context = RequestContext(
+        request=dns.message.make_query("example.test", "A"),
+        clientaddr=("127.0.0.1", 1),
+        listener_name="udp",
+    )
 
     result = await registry.get(group.strategy).dispatch(context, group, manager)
 
@@ -76,7 +80,11 @@ async def test_race_dispatcher_returns_first_success() -> None:
             "fast": await _success("fast", delay=0.01),
         }
     )
-    context = RequestContext(request=dns.message.make_query("example.test", "A"), client=("127.0.0.1", 1), listener_name="udp")
+    context = RequestContext(
+        request=dns.message.make_query("example.test", "A"),
+        clientaddr=("127.0.0.1", 1),
+        listener_name="udp",
+    )
 
     result = await registry.get(group.strategy).dispatch(context, group, manager)
 
@@ -96,7 +104,11 @@ async def test_sequential_dispatcher_stops_on_nxdomain() -> None:
             "b": await _success("b"),
         }
     )
-    context = RequestContext(request=dns.message.make_query("missing.test", "A"), client=("127.0.0.1", 1), listener_name="udp")
+    context = RequestContext(
+        request=dns.message.make_query("missing.test", "A"),
+        clientaddr=("127.0.0.1", 1),
+        listener_name="udp",
+    )
 
     result = await registry.get(group.strategy).dispatch(context, group, manager)
 
@@ -116,8 +128,34 @@ async def test_race_dispatcher_prefers_answer_over_nxdomain() -> None:
             "ok": await _success("ok", delay=0.01),
         }
     )
-    context = RequestContext(request=dns.message.make_query("example.test", "A"), client=("127.0.0.1", 1), listener_name="udp")
+    context = RequestContext(
+        request=dns.message.make_query("example.test", "A"),
+        clientaddr=("127.0.0.1", 1),
+        listener_name="udp",
+    )
 
     result = await registry.get(group.strategy).dispatch(context, group, manager)
 
     assert result.upstream_name == "ok"
+
+
+async def test_sequential_dispatcher_emits_fallback_debug_log(capture_dns_logs, caplog) -> None:
+    capture_dns_logs("DEBUG")
+    registry = DispatcherRegistry()
+    group = UpstreamGroupConfig(name="default", strategy=DispatchStrategyType.SEQUENTIAL, upstreams=["a", "b"])
+    manager = StubResolverManager(
+        {
+            "a": await _failure("a"),
+            "b": await _success("b"),
+        }
+    )
+    context = RequestContext(
+        request=dns.message.make_query("example.test", "A"),
+        clientaddr=("127.0.0.1", 1),
+        listener_name="udp",
+    )
+
+    result = await registry.get(group.strategy).dispatch(context, group, manager)
+
+    assert result.upstream_name == "b"
+    assert "顺序调度回退" in caplog.text

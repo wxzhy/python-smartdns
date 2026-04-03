@@ -8,11 +8,14 @@ from typing import Any
 
 from dns_forwarder.config import AppConfig, ListenerProtocol, load_config
 from dns_forwarder.dispatcher import DispatcherRegistry
+from dns_forwarder.logging import configure_logging, get_logger
 from dns_forwarder.pipeline.engine import PipelineEngine
 from dns_forwarder.plugin_api import PluginManager
 from dns_forwarder.resolver import ResolverManager
 from dns_forwarder.server import TcpDnsServer, UdpDnsServer
 from dns_forwarder.webui import ManagedUvicornServer, create_webui_app
+
+logger = get_logger("core.runtime")
 
 
 @dataclass(slots=True)
@@ -41,6 +44,7 @@ class RuntimeManager:
     async def load(self) -> RuntimeState:
         async with self._lock:
             self._state = await self._build_state()
+            logger.info("运行时已加载 config=%s", self.config_path)
             return self._state
 
     async def start(self) -> None:
@@ -48,11 +52,14 @@ class RuntimeManager:
             if self._state is None:
                 self._state = await self._build_state()
             if self._listeners or self._webui_server is not None:
+                logger.debug("运行时已启动，忽略重复 start config=%s", self.config_path)
                 return
+            logger.info("启动运行时 config=%s", self.config_path)
             await self._start_services(self._state.config)
 
     async def stop(self) -> None:
         async with self._lock:
+            logger.info("停止运行时 config=%s", self.config_path)
             if self._webui_server is not None:
                 await self._webui_server.stop()
                 self._webui_server = None
@@ -62,16 +69,20 @@ class RuntimeManager:
 
     async def reload(self) -> RuntimeState:
         async with self._lock:
+            logger.info("开始 reload config=%s", self.config_path)
             new_state = await self._build_state()
             if self._state is not None and self._services_started():
                 if self._service_signature(self._state.config) != self._service_signature(new_state.config):
-                    raise RuntimeError("listener 或 webui 地址变更需要重启进程")
+                    message = "listener 或 webui 地址变更需要重启进程"
+                    logger.error("reload 失败 config=%s error=%s", self.config_path, message)
+                    raise RuntimeError(message)
             self._state = new_state
+            logger.info("reload 完成 config=%s", self.config_path)
             return new_state
 
-    async def process_query(self, request: Any, client: Any, listener_name: str) -> Any:
+    async def process_query(self, request: Any, clientaddr: Any, listener_name: str) -> Any:
         state = self.get_state()
-        return await state.pipeline.handle_message(request, client, listener_name)
+        return await state.pipeline.handle_message(request, clientaddr, listener_name)
 
     def get_state(self) -> RuntimeState:
         if self._state is None:
@@ -114,6 +125,15 @@ class RuntimeManager:
 
     async def _build_state(self) -> RuntimeState:
         config = load_config(self.config_path)
+        configure_logging(config.runtime.log_level)
+        logger.info(
+            "加载配置完成 config=%s listeners=%s upstreams=%s plugins=%s log_level=%s",
+            self.config_path,
+            len(config.listeners),
+            len(config.upstreams),
+            len(config.plugins),
+            config.runtime.log_level,
+        )
         plugin_manager = await PluginManager.build(config.plugins, config.runtime.plugin_dirs)
         resolver_manager = ResolverManager(config, plugin_manager.registry)
         dispatcher_registry = DispatcherRegistry()
@@ -137,6 +157,14 @@ class RuntimeManager:
                 service = TcpDnsServer(listener, self)
             await service.start()
             listeners.append(service)
+            bound_address = service.bound_address()
+            logger.info(
+                "listener 已启动 name=%s protocol=%s address=%s:%s",
+                listener.name,
+                listener.protocol.value,
+                bound_address[0] if bound_address else listener.host,
+                bound_address[1] if bound_address else listener.port,
+            )
         self._listeners = listeners
 
         if config.webui.enabled:
@@ -144,6 +172,7 @@ class RuntimeManager:
             server = ManagedUvicornServer(app, config.webui.host, config.webui.port)
             await server.start()
             self._webui_server = server
+            logger.info("webui 已启动 address=%s:%s", config.webui.host, config.webui.port)
 
     def _services_started(self) -> bool:
         return bool(self._listeners) or self._webui_server is not None
@@ -167,15 +196,19 @@ def install_loop_policy(loop_policy: str) -> None:
     if loop_policy not in {"auto", "winuvloop", "asyncio"}:
         raise ValueError(f"未知 loop_policy: {loop_policy}")
     if loop_policy == "asyncio":
+        logger.info("使用 asyncio 默认事件循环")
         return
     if loop_policy in {"auto", "winuvloop"}:
         try:
             import winuvloop
         except ImportError:
             if loop_policy == "winuvloop":
+                logger.error("请求使用 winuvloop，但依赖未安装")
                 raise
+            logger.info("winuvloop 不可用，回退到 asyncio 默认事件循环")
             return
         winuvloop.install()
+        logger.info("已安装 winuvloop 事件循环策略")
 
 
 async def serve(config_path: Path) -> None:
@@ -198,19 +231,22 @@ def main() -> None:
     parser = build_parser()
     args = parser.parse_args()
     config_path = Path(args.config)
+
+    configure_logging("INFO")
     config = load_config(config_path)
+    configure_logging(config.runtime.log_level)
     install_loop_policy(config.runtime.loop_policy)
 
     if args.command == "check-config":
-        print(
-            "config ok:",
-            f"listeners={len(config.listeners)}",
-            f"upstreams={len(config.upstreams)}",
-            f"plugins={len(config.plugins)}",
+        logger.info(
+            "config ok: listeners=%s upstreams=%s plugins=%s",
+            len(config.listeners),
+            len(config.upstreams),
+            len(config.plugins),
         )
         return
 
     try:
         asyncio.run(serve(config_path))
     except KeyboardInterrupt:
-        pass
+        logger.info("收到退出信号，服务停止")

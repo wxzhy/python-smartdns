@@ -45,6 +45,7 @@ class RuntimeConfig(BaseModel):
     plugin_dirs: list[str] = Field(default_factory=lambda: ["plugins"])
     loop_policy: str = "auto"
     default_upstream_group: str = "default"
+    log_level: str = "INFO"
 
     @field_validator("plugin_dirs")
     @classmethod
@@ -52,6 +53,14 @@ class RuntimeConfig(BaseModel):
         if not value:
             raise ValueError("至少需要一个插件目录")
         return value
+
+    @field_validator("log_level")
+    @classmethod
+    def validate_log_level(cls, value: str) -> str:
+        normalized = value.strip().upper()
+        if normalized not in {"CRITICAL", "ERROR", "WARNING", "INFO", "DEBUG"}:
+            raise ValueError(f"未知 log_level: {value}")
+        return normalized
 
 
 class ListenerConfig(BaseModel):

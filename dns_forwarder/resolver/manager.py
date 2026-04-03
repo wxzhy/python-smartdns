@@ -1,116 +1,39 @@
 from __future__ import annotations
 
-import time
+from collections.abc import Mapping
 
-import dns.asyncresolver
-import dns.edns
-import dns.nameserver
-import dns.rdatatype
-import dns.resolver
-
-from dns_forwarder.config import AppConfig, UpstreamConfig, UpstreamGroupConfig
+from dns_forwarder.config import AppConfig, UpstreamConfig, UpstreamGroupConfig, UpstreamProtocol
 from dns_forwarder.logging import get_logger
 from dns_forwarder.pipeline.context import RequestContext, UpstreamResult
 from dns_forwarder.plugin_api import PluginRegistry
+
+from .base import BaseUpstreamResolver
+from .do53 import UpstreamResolver
 
 
 logger = get_logger("resolver.manager")
 
 
-class UpstreamResolver:
-    def __init__(self, config: UpstreamConfig) -> None:
-        self.config = config
-        self.resolver = dns.asyncresolver.Resolver(configure=False)
-        self.resolver.timeout = config.timeout
-        self.resolver.lifetime = config.lifetime
-        self.resolver.use_search_by_default = False
-        self.resolver.search = []
-        self.resolver.nameservers = [dns.nameserver.Do53Nameserver(config.host, config.port)]
-        if config.edns and config.edns.enabled:
-            options: list[dns.edns.Option] = []
-            if config.edns.client_subnet is not None:
-                options.append(
-                    dns.edns.ECSOption(
-                        str(config.edns.client_subnet.address),
-                        srclen=config.edns.client_subnet.source_prefix,
-                        scopelen=config.edns.client_subnet.scope_prefix,
-                    )
-                )
-            self.resolver.use_edns(edns=0, payload=config.edns.payload, options=options or None)
-            logger.debug(
-                "上游启用 EDNS request_target=%s payload=%s ecs=%s",
-                config.name,
-                config.edns.payload,
-                config.edns.client_subnet.address if config.edns.client_subnet is not None else "",
-            )
-
-    async def resolve(self, context: RequestContext) -> UpstreamResult:
-        question = context.request.question[0]
-        started = time.perf_counter()
-        logger.debug(
-            "发起上游查询 request_id=%s upstream=%s qname=%s qtype=%s tcp=%s",
-            context.request_id,
-            self.config.name,
-            question.name.to_text().rstrip("."),
-            dns.rdatatype.to_text(question.rdtype),
-            self.config.use_tcp,
-        )
-
-        try:
-            answer = await self.resolver.resolve(
-                question.name,
-                rdtype=question.rdtype,
-                rdclass=question.rdclass,
-                tcp=self.config.use_tcp,
-                raise_on_no_answer=False,
-            )
-            duration_ms = (time.perf_counter() - started) * 1000
-            logger.debug(
-                "上游查询成功 request_id=%s upstream=%s duration_ms=%.2f rrset_size=%s",
-                context.request_id,
-                self.config.name,
-                duration_ms,
-                len(answer),
-            )
-            return UpstreamResult(
-                upstream_name=self.config.name,
-                duration_ms=duration_ms,
-                answer=answer,
-            )
-        except dns.resolver.NXDOMAIN as exc:
-            duration_ms = (time.perf_counter() - started) * 1000
-            logger.info(
-                "上游返回 NXDOMAIN request_id=%s upstream=%s duration_ms=%.2f",
-                context.request_id,
-                self.config.name,
-                duration_ms,
-            )
-            return UpstreamResult(
-                upstream_name=self.config.name,
-                duration_ms=duration_ms,
-                error=exc,
-            )
-        except Exception as exc:
-            duration_ms = (time.perf_counter() - started) * 1000
-            logger.warning(
-                "上游查询失败 request_id=%s upstream=%s duration_ms=%.2f error=%s",
-                context.request_id,
-                self.config.name,
-                duration_ms,
-                type(exc).__name__,
-            )
-            return UpstreamResult(
-                upstream_name=self.config.name,
-                duration_ms=duration_ms,
-                error=exc,
-            )
+DEFAULT_RESOLVER_TYPES: dict[UpstreamProtocol, type[BaseUpstreamResolver]] = {
+    UpstreamResolver.protocol: UpstreamResolver,
+}
 
 
 class ResolverManager:
-    def __init__(self, config: AppConfig, plugin_registry: PluginRegistry) -> None:
+    def __init__(
+        self,
+        config: AppConfig,
+        plugin_registry: PluginRegistry,
+        resolver_types: Mapping[UpstreamProtocol, type[BaseUpstreamResolver]] | None = None,
+    ) -> None:
         self._groups = {group.name: group for group in config.groups}
-        self._resolvers = {upstream.name: UpstreamResolver(upstream) for upstream in config.upstreams}
         self._plugin_registry = plugin_registry
+        self._resolver_types = (
+            dict(DEFAULT_RESOLVER_TYPES) if resolver_types is None else dict(resolver_types)
+        )
+        self._resolvers = {
+            upstream.name: self._build_resolver(upstream) for upstream in config.upstreams
+        }
 
     def get_group(self, group_name: str) -> UpstreamGroupConfig:
         return self._groups[group_name]
@@ -121,3 +44,22 @@ class ResolverManager:
             logger.debug("使用插件 resolver request_id=%s upstream=%s", context.request_id, upstream_name)
             return await custom_resolver.resolve(context)
         return await self._resolvers[upstream_name].resolve(context)
+
+    def _build_resolver(self, upstream: UpstreamConfig) -> BaseUpstreamResolver:
+        resolver_type = self._resolver_types.get(upstream.protocol)
+        if resolver_type is None:
+            raise ValueError(f"不支持的 upstream protocol: {upstream.protocol}")
+        logger.debug(
+            "装配上游 resolver upstream=%s protocol=%s implementation=%s",
+            upstream.name,
+            upstream.protocol.value,
+            resolver_type.__name__,
+        )
+        return resolver_type(upstream)
+
+
+__all__ = [
+    "BaseUpstreamResolver",
+    "ResolverManager",
+    "UpstreamResolver",
+]

@@ -1,4 +1,7 @@
-from .policies import DispatchStrategy, DispatcherRegistry, RaceDispatchStrategy, SequentialDispatchStrategy
+from .base import DispatchStrategy
+from .race import RaceDispatchStrategy
+from .registry import DispatcherRegistry
+from .sequential import SequentialDispatchStrategy
 
 __all__ = [
     "DispatchStrategy",

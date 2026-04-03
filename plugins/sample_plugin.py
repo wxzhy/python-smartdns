@@ -4,6 +4,7 @@ import dns.message
 import dns.rrset
 from pydantic import BaseModel, Field, field_validator
 
+from dns_forwarder.pipeline import build_answer_from_response, sync_answer_response
 from dns_forwarder.plugin_api import Plugin, PluginRegistry
 
 
@@ -37,7 +38,7 @@ class SamplePlugin(Plugin):
     variables_model = SamplePluginVariables
     ui_meta = {
         "title": "Sample Plugin",
-        "description": "示例插件：对指定域名直接返回一个静态 A 记录。",
+        "description": "示例插件：通过修改 dns.resolver.Answer.rrset 返回一个静态 A 记录。",
     }
 
     async def setup(self, registry: PluginRegistry) -> None:
@@ -51,19 +52,18 @@ class SamplePlugin(Plugin):
         if qname not in self.runtime_config.domains:
             return
         builder = context.answer_registry_refs[self.runtime_config.answer_name]
-        context.final_response = builder(context)
-
-    def _build_static_answer(self, context) -> dns.message.Message:
-        question = context.request.question[0]
-        response = dns.message.make_response(context.request)
-        rrset = dns.rrset.from_text(
+        answer = build_answer_from_response(context.request, builder(context))
+        answer.rrset = dns.rrset.from_text(
             question.name.to_text(),
             self.runtime_variables.ttl,
             "IN",
             "A",
             self.runtime_variables.address,
         )
-        response.answer.append(rrset)
+        context.final_answer = sync_answer_response(answer)
+
+    def _build_static_answer(self, context) -> dns.message.Message:
+        response = dns.message.make_response(context.request)
         return response
 
 

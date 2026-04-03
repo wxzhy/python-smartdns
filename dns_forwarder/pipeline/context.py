@@ -67,6 +67,43 @@ def build_answer_from_response(
     return answer
 
 
+def sync_answer_response(answer: dns.resolver.Answer) -> dns.resolver.Answer:
+    rrset = answer.rrset
+    if rrset is not None and (rrset.rdtype != answer.rdtype or rrset.rdclass != answer.rdclass):
+        raise ValueError("answer.rrset 的类型或 class 与查询不一致")
+
+    source_response = answer.response
+    target_index: int | None = None
+    for index, item in enumerate(source_response.answer):
+        if item.rdtype == answer.rdtype and item.rdclass == answer.rdclass:
+            target_index = index
+
+    if rrset is None:
+        if target_index is not None:
+            del source_response.answer[target_index]
+    elif target_index is not None:
+        source_response.answer[target_index] = rrset
+    else:
+        source_response.answer.append(rrset)
+
+    response = dns.message.from_wire(source_response.to_wire())
+
+    rebuilt = dns.resolver.Answer(
+        answer.qname,
+        answer.rdtype,
+        answer.rdclass,
+        response,
+        nameserver=answer.nameserver,
+        port=answer.port,
+    )
+    answer.response = rebuilt.response
+    answer.chaining_result = rebuilt.chaining_result
+    answer.canonical_name = rebuilt.canonical_name
+    answer.rrset = rebuilt.rrset
+    answer.expiration = rebuilt.expiration
+    return answer
+
+
 def make_error_response(request: dns.message.Message, rcode: dns.rcode.Rcode) -> dns.message.Message:
     response = dns.message.make_response(request)
     response.set_rcode(rcode)

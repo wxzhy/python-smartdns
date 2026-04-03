@@ -16,6 +16,7 @@ from dns_forwarder.pipeline.context import (
     build_answer_from_response,
     clone_response_for_request,
     make_error_response,
+    sync_answer_response,
 )
 from dns_forwarder.plugin_api import PluginManager
 from dns_forwarder.resolver import ResolverManager
@@ -192,6 +193,7 @@ class PipelineEngine:
             return
 
         if context.final_response is None and context.final_answer is not None:
+            sync_answer_response(context.final_answer)
             context.final_response = clone_response_for_request(context.final_answer.response, context.request)
             return
 
@@ -199,3 +201,8 @@ class PipelineEngine:
             self._logger.error("未生成最终答案 request_id=%s，使用 SERVFAIL", context.request_id)
             context.final_response = make_error_response(context.request, dns.rcode.SERVFAIL)
             context.final_answer = build_answer_from_response(context.request, context.final_response)
+            return
+
+        if context.final_answer is not None and context.final_response is not None:
+            sync_answer_response(context.final_answer)
+            context.final_response = clone_response_for_request(context.final_answer.response, context.request)

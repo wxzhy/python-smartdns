@@ -63,8 +63,7 @@ class SamplePlugin(Plugin):
         context.final_answer = sync_answer_response(answer)
 
     def _build_static_answer(self, context) -> dns.message.Message:
-        response = dns.message.make_response(context.request)
-        return response
+        return dns.message.make_response(context.request)
 
 
 plugin = SamplePlugin()

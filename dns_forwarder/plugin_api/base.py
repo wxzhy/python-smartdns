@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import importlib.util
+import sys
 from dataclasses import dataclass, field
 from pathlib import Path
 from types import ModuleType
@@ -21,16 +22,31 @@ class EmptyModel(BaseModel):
 
 
 AnswerBuilder = Callable[["RequestContext"], "dns.message.Message"]
+ContextFactory = Callable[[], Any]
+
+
+@dataclass(frozen=True, slots=True)
+class ContextRegistration:
+    value: Any = None
+    factory: ContextFactory | None = None
+
+    def build(self) -> Any:
+        if self.factory is not None:
+            return self.factory()
+        return self.value
 
 
 @dataclass(slots=True)
 class PluginRegistry:
-    context_registry: dict[str, Any] = field(default_factory=dict)
+    context_registry: dict[str, ContextRegistration] = field(default_factory=dict)
     resolver_registry: dict[str, Any] = field(default_factory=dict)
     answer_registry: dict[str, AnswerBuilder] = field(default_factory=dict)
 
     def register_context(self, name: str, value: Any) -> None:
-        self._register(self.context_registry, name, value)
+        self._register(self.context_registry, name, ContextRegistration(value=value))
+
+    def register_context_factory(self, name: str, factory: ContextFactory) -> None:
+        self._register(self.context_registry, name, ContextRegistration(factory=factory))
 
     def register_resolver(self, name: str, value: Any) -> None:
         self._register(self.resolver_registry, name, value)
@@ -113,13 +129,19 @@ class PluginManager:
     @staticmethod
     def _load_module(module_name: str, plugin_dirs: list[str]) -> ModuleType:
         module_path = PluginManager._find_module_path(module_name, plugin_dirs)
-        unique_name = f"dns_forwarder.plugins.{module_path.stem}_{abs(hash(module_path))}"
+        normalized_name = module_name.replace("\\", ".").replace("/", ".").strip(".")
+        unique_name = f"dns_forwarder.plugins.{normalized_name}_{abs(hash(module_path))}"
         spec = importlib.util.spec_from_file_location(unique_name, module_path)
         if spec is None or spec.loader is None:
             raise ImportError(f"无法加载插件模块: {module_name}")
 
         module = importlib.util.module_from_spec(spec)
-        spec.loader.exec_module(module)
+        sys.modules[unique_name] = module
+        try:
+            spec.loader.exec_module(module)
+        except Exception:
+            sys.modules.pop(unique_name, None)
+            raise
         return module
 
     @staticmethod
@@ -136,7 +158,9 @@ class PluginManager:
         raise FileNotFoundError(f"未找到插件模块: {module_name}")
 
     def build_context_extensions(self) -> dict[str, Any]:
-        return dict(self.registry.context_registry)
+        return {
+            name: registration.build() for name, registration in self.registry.context_registry.items()
+        }
 
     def build_answer_registry(self) -> dict[str, AnswerBuilder]:
         return dict(self.registry.answer_registry)

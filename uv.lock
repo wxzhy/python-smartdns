@@ -59,6 +59,15 @@ wheels = [
 ]
 
 [[package]]
+name = "async-lru"
+version = "2.3.0"
+source = { registry = "https://mirrors.cernet.edu.cn/pypi/web/simple" }
+sdist = { url = "https://mirror.nju.edu.cn/pypi/web/packages/e8/1f/989ecfef8e64109a489fff357450cb73fa73a865a92bd8c272170a6922c2/async_lru-2.3.0.tar.gz", hash = "sha256:89bdb258a0140d7313cf8f4031d816a042202faa61d0ab310a0a538baa1c24b6" }
+wheels = [
+    { url = "https://mirror.nju.edu.cn/pypi/web/packages/e5/e2/c2e3abf398f80732e58b03be77bde9022550d221dd8781bf586bd4d97cc1/async_lru-2.3.0-py3-none-any.whl", hash = "sha256:eea27b01841909316f2cc739807acea1c623df2be8c5cfad7583286397bb8315" },
+]
+
+[[package]]
 name = "attrs"
 version = "26.1.0"
 source = { registry = "https://mirrors.cernet.edu.cn/pypi/web/simple" }
@@ -411,6 +420,15 @@ wheels = [
 ]
 
 [[package]]
+name = "icmplib"
+version = "3.0.4"
+source = { registry = "https://mirrors.cernet.edu.cn/pypi/web/simple" }
+sdist = { url = "https://mirror.nju.edu.cn/pypi/web/packages/6d/78/ca07444be85ec718d4a7617f43fdb5b4eaae40bc15a04a5c888b64f3e35f/icmplib-3.0.4.tar.gz", hash = "sha256:57868f2cdb011418c0e1d5586b16d1fabd206569fe9652654c27b6b2d6a316de" }
+wheels = [
+    { url = "https://mirror.nju.edu.cn/pypi/web/packages/38/ab/a47a2fdcf930e986914c642242ce2823753d7b08fda485f52323132f1240/icmplib-3.0.4-py3-none-any.whl", hash = "sha256:336b75c6c23c5ce99ddec33f718fab09661f6ad698e35b6f1fc7cc0ecf809398" },
+]
+
+[[package]]
 name = "idna"
 version = "3.11"
 source = { registry = "https://mirrors.cernet.edu.cn/pypi/web/simple" }
@@ -725,8 +743,10 @@ name = "python-smartdns"
 version = "0.1.0"
 source = { virtual = "." }
 dependencies = [
+    { name = "async-lru" },
     { name = "dnspython", extra = ["doh", "doq", "idna"] },
     { name = "fastapi", extra = ["all"] },
+    { name = "icmplib" },
     { name = "pydantic" },
     { name = "pydantic-settings" },
     { name = "pyyaml" },
@@ -743,8 +763,10 @@ dev = [
 
 [package.metadata]
 requires-dist = [
+    { name = "async-lru", specifier = ">=2.0.5" },
     { name = "dnspython", extras = ["doh", "doq", "idna"], specifier = ">=2.8.0" },
     { name = "fastapi", extras = ["all"], specifier = ">=0.135.2" },
+    { name = "icmplib", specifier = ">=3.0.4" },
     { name = "pydantic", specifier = ">=2.11.0" },
     { name = "pydantic-settings", specifier = ">=2.10.0" },
     { name = "pyyaml", specifier = ">=6.0.2" },

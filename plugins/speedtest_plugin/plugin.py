@@ -2,7 +2,9 @@ from __future__ import annotations
 
 import asyncio
 
+import dns.rdataclass
 import dns.rdatatype
+import dns.rrset
 import dns.resolver
 from pydantic import BaseModel, Field
 
@@ -18,12 +20,13 @@ from .service import SpeedTestService
 
 
 class SpeedTestPluginConfig(BaseModel):
-    cache_ttl_seconds: int = Field(default=3600, ge=1)
+    cache_ttl_seconds: int = Field(default=900, ge=1)
     cache_maxsize: int = Field(default=4096, ge=1)
     max_concurrency: int = Field(default=64, ge=1)
     probe_timeout: float = Field(default=1.5, gt=0)
     ping_count: int = Field(default=1, ge=1, le=10)
     ping_privileged: bool = False
+    response_ip_limit: int = Field(default=2, ge=1)
 
 
 def get_speedtest_context(context: RequestContext) -> SpeedTestContext:
@@ -63,7 +66,71 @@ class SpeedTestPlugin(Plugin):
             return
 
         speedtest_context = get_speedtest_context(context)
-        candidate_ips = await speedtest_context.reserve_ips(self._extract_unique_ips(result.answer))
+        await self._measure_new_ips(speedtest_context, self._extract_unique_ips(result.answer))
+
+    @staticmethod
+    def _extract_unique_ips(answer: dns.resolver.Answer) -> list[str]:
+        if answer.rdtype not in {dns.rdatatype.A, dns.rdatatype.AAAA}:
+            return []
+        if answer.rdclass != dns.rdataclass.IN or answer.rrset is None:
+            return []
+
+        ips: list[str] = []
+        seen: set[str] = set()
+        for record in answer.rrset:
+            address = getattr(record, "address", None)
+            if address is None or address in seen:
+                continue
+            seen.add(address)
+            ips.append(address)
+        return ips
+
+    async def on_response(self, context: RequestContext) -> None:
+        answer = context.final_answer
+        if answer is None or answer.rrset is None:
+            return
+        if answer.rdtype not in {dns.rdatatype.A, dns.rdatatype.AAAA}:
+            return
+        if answer.rdclass != dns.rdataclass.IN:
+            return
+
+        speedtest_context = get_speedtest_context(context)
+        current_ips = self._extract_unique_ips(answer)
+        if not current_ips:
+            return
+        await self._measure_new_ips(speedtest_context, current_ips)
+
+        measured_results = {
+            item.ip: item for item in speedtest_context.ip_rtt_results if item.best_ms is not None and item.ip in current_ips
+        }
+        if not measured_results:
+            return
+
+        original_order = {ip: index for index, ip in enumerate(current_ips)}
+        sorted_ips = [
+            item.ip
+            for item in sorted(
+                measured_results.values(),
+                key=lambda item: (item.best_ms if item.best_ms is not None else float("inf"), original_order[item.ip]),
+            )
+        ]
+        sorted_ips = sorted_ips[: self.runtime_config.response_ip_limit]
+        if sorted_ips == current_ips:
+            return
+
+        answer.rrset = dns.rrset.from_text_list(
+            answer.rrset.name,
+            answer.rrset.ttl,
+            answer.rdclass,
+            answer.rdtype,
+            sorted_ips,
+        )
+
+    async def _measure_new_ips(self, speedtest_context: SpeedTestContext, ips: list[str]) -> None:
+        if self._service is None or not ips:
+            return
+
+        candidate_ips = await speedtest_context.reserve_ips(ips)
         if not candidate_ips:
             return
 
@@ -71,23 +138,12 @@ class SpeedTestPlugin(Plugin):
             *(self._service.measure(ip) for ip in candidate_ips),
             return_exceptions=True,
         )
-        successful_results = [item for item in measurements if not isinstance(item, Exception)]
-        await speedtest_context.add_results(successful_results)
-
-    @staticmethod
-    def _extract_unique_ips(answer: dns.resolver.Answer) -> list[str]:
-        ips: list[str] = []
-        seen: set[str] = set()
-        for rrset in answer.response.answer:
-            if rrset.rdtype not in {dns.rdatatype.A, dns.rdatatype.AAAA}:
+        successful_results = []
+        for item in measurements:
+            if isinstance(item, Exception):
                 continue
-            for record in rrset:
-                address = getattr(record, "address", None)
-                if address is None or address in seen:
-                    continue
-                seen.add(address)
-                ips.append(address)
-        return ips
+            successful_results.append(item)
+        await speedtest_context.add_results(successful_results)
 
 
 plugin = SpeedTestPlugin()

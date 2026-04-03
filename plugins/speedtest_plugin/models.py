@@ -25,9 +25,12 @@ class SpeedTestContext:
     _lock: asyncio.Lock = field(default_factory=asyncio.Lock, init=False, repr=False)
 
     async def reserve_ips(self, ips: Iterable[str]) -> list[str]:
+        ordered_ips = list(dict.fromkeys(ips))
+        incoming_ip_set = set(ordered_ips)
         async with self._lock:
-            candidates = [ip for ip in ips if ip not in self._seen_ips]
-            self._seen_ips.update(candidates)
+            new_ip_set = incoming_ip_set - self._seen_ips
+            candidates = [ip for ip in ordered_ips if ip in new_ip_set]
+            self._seen_ips.update(new_ip_set)
             return candidates
 
     async def add_results(self, results: Iterable[IpRttResult]) -> None:

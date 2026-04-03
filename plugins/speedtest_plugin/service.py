@@ -43,16 +43,45 @@ class SpeedTestService:
         self._measure_cached.cache_clear()
 
     async def _measure_ip_uncached(self, ip: str) -> IpRttResult:
-        ping_task = asyncio.create_task(self._run_probe(self._probe_icmp(ip)))
-        tcp80_task = asyncio.create_task(self._run_probe(self._probe_tcp(ip, 80)))
-        tcp443_task = asyncio.create_task(self._run_probe(self._probe_tcp(ip, 443)))
-        ping_ms, tcp80_ms, tcp443_ms = await asyncio.gather(ping_task, tcp80_task, tcp443_task)
+        probes = {
+            "ping_ms": asyncio.create_task(self._run_probe(self._probe_icmp(ip))),
+            "tcp80_ms": asyncio.create_task(self._run_probe(self._probe_tcp(ip, 80))),
+            "tcp443_ms": asyncio.create_task(self._run_probe(self._probe_tcp(ip, 443))),
+        }
+        first_success_key: str | None = None
+        first_success_value: float | None = None
+
+        try:
+            pending_map = dict(probes)
+            while pending_map:
+                task_map = {task: name for name, task in pending_map.items()}
+                done, _ = await asyncio.wait(task_map, return_when=asyncio.FIRST_COMPLETED)
+                for task in done:
+                    key = task_map[task]
+                    pending_map.pop(key, None)
+                    result = await task
+                    if result is not None:
+                        first_success_key = key
+                        first_success_value = result
+                        return IpRttResult(
+                            ip=ip,
+                            ping_ms=result if key == "ping_ms" else None,
+                            tcp80_ms=result if key == "tcp80_ms" else None,
+                            tcp443_ms=result if key == "tcp443_ms" else None,
+                            best_ms=result,
+                        )
+        finally:
+            for task in probes.values():
+                if not task.done():
+                    task.cancel()
+            await asyncio.gather(*probes.values(), return_exceptions=True)
+
         return IpRttResult(
             ip=ip,
-            ping_ms=ping_ms,
-            tcp80_ms=tcp80_ms,
-            tcp443_ms=tcp443_ms,
-            best_ms=self._best_rtt(ping_ms, tcp80_ms, tcp443_ms),
+            ping_ms=first_success_value if first_success_key == "ping_ms" else None,
+            tcp80_ms=first_success_value if first_success_key == "tcp80_ms" else None,
+            tcp443_ms=first_success_value if first_success_key == "tcp443_ms" else None,
+            best_ms=first_success_value,
         )
 
     async def _run_probe(self, probe: Awaitable[float | None]) -> float | None:
@@ -115,10 +144,3 @@ class SpeedTestService:
         if not socket.has_ipv6:
             raise ValueError("当前环境不支持 IPv6")
         return socket.AF_INET6, (ip, port, 0, 0)
-
-    @staticmethod
-    def _best_rtt(*values: float | None) -> float | None:
-        available = [value for value in values if value is not None]
-        if not available:
-            return None
-        return min(available)

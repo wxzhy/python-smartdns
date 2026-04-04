@@ -1,27 +1,60 @@
 from __future__ import annotations
 
 import asyncio
+import secrets
 from pathlib import Path
 from typing import Annotated
 from typing import TYPE_CHECKING
 
-from fastapi import FastAPI, Form, Request
+from fastapi import Depends, FastAPI, Form, HTTPException, Request, status
+from fastapi.security import HTTPBasic, HTTPBasicCredentials
 from fastapi.responses import HTMLResponse, RedirectResponse
 from fastapi.templating import Jinja2Templates
 import uvicorn
 
-from dns_forwarder.config import dump_config_text, parse_config_text, save_config
+from dns_forwarder.config import build_config_json_schema, dump_config_text, parse_config_text, save_config
+from dns_forwarder.plugin_api import discover_available_plugins
 from dns_forwarder.logging import get_logger
 
 TEMPLATES = Jinja2Templates(directory=str(Path(__file__).parent / "templates"))
 logger = get_logger("webui.app")
+JSONEDITOR_JS_URL = "https://cdn.jsdelivr.net/npm/jsoneditor@10.4.2/dist/jsoneditor.min.js"
+JSONEDITOR_CSS_URL = "https://cdn.jsdelivr.net/npm/jsoneditor@10.4.2/dist/jsoneditor.min.css"
+WEBUI_RELOAD_ENDPOINT = "/admin/reload"
 
 if TYPE_CHECKING:
     from dns_forwarder.core.runtime import RuntimeManager
 
 
 def create_webui_app(runtime_manager: "RuntimeManager") -> FastAPI:
-    app = FastAPI(title="dns-forwarder webui", docs_url=None, redoc_url=None)
+    security = HTTPBasic()
+
+    def authorize_webui(
+        credentials: HTTPBasicCredentials = Depends(security),
+    ) -> None:
+        webui_config = runtime_manager.get_state().config.webui
+        expected_username = webui_config.username.encode("utf-8")
+        expected_password = webui_config.password.encode("utf-8")
+        current_username = credentials.username.encode("utf-8")
+        current_password = credentials.password.encode("utf-8")
+        is_valid = secrets.compare_digest(current_username, expected_username) and secrets.compare_digest(
+            current_password,
+            expected_password,
+        )
+        if is_valid:
+            return
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Incorrect username or password",
+            headers={"WWW-Authenticate": "Basic"},
+        )
+
+    app = FastAPI(
+        title="dns-forwarder webui",
+        docs_url=None,
+        redoc_url=None,
+        dependencies=[Depends(authorize_webui)],
+    )
 
     @app.get("/", response_class=HTMLResponse)
     async def index(request: Request) -> HTMLResponse:
@@ -34,12 +67,19 @@ def create_webui_app(runtime_manager: "RuntimeManager") -> FastAPI:
     @app.get("/config", response_class=HTMLResponse)
     async def config_editor(request: Request) -> HTMLResponse:
         state = runtime_manager.get_state()
+        available_plugins = discover_available_plugins(state.config.runtime.plugin_dirs)
         return TEMPLATES.TemplateResponse(
             request=request,
             name="config.html",
             context=runtime_manager.get_status()
             | {
                 "config_text": dump_config_text(state.config),
+                "config_schema": build_config_json_schema(state.config.runtime.plugin_dirs),
+                "available_plugins": [item.describe() for item in available_plugins],
+                "editor_mode": "tree",
+                "config_filename": runtime_manager.config_path.name,
+                "jsoneditor_js_url": JSONEDITOR_JS_URL,
+                "jsoneditor_css_url": JSONEDITOR_CSS_URL,
                 "message": "",
                 "error": "",
             },
@@ -56,30 +96,46 @@ def create_webui_app(runtime_manager: "RuntimeManager") -> FastAPI:
             logger.info("保存配置成功 path=%s", runtime_manager.config_path)
         except Exception as exc:
             logger.warning("保存配置失败 path=%s error=%s", runtime_manager.config_path, exc)
+            state = runtime_manager.get_state()
             return TEMPLATES.TemplateResponse(
                 request=request,
                 name="config.html",
                 context=runtime_manager.get_status()
                 | {
                     "config_text": config_text,
+                    "config_schema": build_config_json_schema(state.config.runtime.plugin_dirs),
+                    "available_plugins": [
+                        item.describe() for item in discover_available_plugins(state.config.runtime.plugin_dirs)
+                    ],
+                    "editor_mode": "code",
+                    "config_filename": runtime_manager.config_path.name,
+                    "jsoneditor_js_url": JSONEDITOR_JS_URL,
+                    "jsoneditor_css_url": JSONEDITOR_CSS_URL,
                     "message": "",
                     "error": str(exc),
                 },
                 status_code=400,
             )
 
+        available_plugins = discover_available_plugins(config.runtime.plugin_dirs)
         return TEMPLATES.TemplateResponse(
             request=request,
             name="config.html",
             context=runtime_manager.get_status()
             | {
-                "config_text": config_text,
+                "config_text": dump_config_text(config),
+                "config_schema": build_config_json_schema(config.runtime.plugin_dirs),
+                "available_plugins": [item.describe() for item in available_plugins],
+                "editor_mode": "tree",
+                "config_filename": runtime_manager.config_path.name,
+                "jsoneditor_js_url": JSONEDITOR_JS_URL,
+                "jsoneditor_css_url": JSONEDITOR_CSS_URL,
                 "message": "配置已保存，请手动 reload 使其生效。",
                 "error": "",
             },
         )
 
-    @app.post(runtime_manager.reload_endpoint, response_model=None)
+    @app.post(WEBUI_RELOAD_ENDPOINT, response_model=None)
     async def manual_reload(request: Request):
         try:
             logger.info("收到手动 reload 请求 path=%s", runtime_manager.config_path)

@@ -1,13 +1,13 @@
 from __future__ import annotations
 
 import asyncio
+import json
 from pathlib import Path
 
 import dns.asyncquery
 import dns.message
 import dns.rcode
 import dns.rrset
-import yaml
 
 from dns_forwarder.core.runtime import RuntimeManager
 
@@ -71,14 +71,20 @@ def write_integration_config(path: Path, upstream_port: int) -> None:
         ],
         "rules": [],
         "plugins": [],
-        "webui": {"enabled": False, "host": "127.0.0.1", "port": 0, "reload_endpoint": "/admin/reload"},
+        "webui": {
+            "enabled": False,
+            "host": "127.0.0.1",
+            "port": 0,
+            "username": "admin",
+            "password": "change-me",
+        },
     }
-    path.write_text(yaml.safe_dump(data, sort_keys=False), encoding="utf-8")
+    path.write_text(json.dumps(data, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
 
 
 async def test_udp_and_tcp_listeners_forward_queries(tmp_path: Path) -> None:
     upstream_transport, upstream_port = await start_fake_upstream("203.0.113.10")
-    config_path = tmp_path / "config.yaml"
+    config_path = tmp_path / "config.json"
     write_integration_config(config_path, upstream_port)
     manager = RuntimeManager(config_path)
     await manager.start()
@@ -111,7 +117,7 @@ async def test_udp_and_tcp_listeners_forward_queries(tmp_path: Path) -> None:
 
 async def test_nxdomain_from_upstream_returns_nxdomain(tmp_path: Path) -> None:
     upstream_transport, upstream_port = await start_fake_upstream(None, rcode=dns.rcode.NXDOMAIN)
-    config_path = tmp_path / "config.yaml"
+    config_path = tmp_path / "config.json"
     write_integration_config(config_path, upstream_port)
     manager = RuntimeManager(config_path)
     await manager.start()

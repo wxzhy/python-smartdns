@@ -11,7 +11,6 @@ dependencies = [
     "icmplib>=3.0.4",
     "pydantic>=2.11.0",
     "pydantic-settings>=2.10.0",
-    "PyYAML>=6.0.2",
     "uvicorn>=0.35.0",
     "winuvloop>=0.2.0; sys_platform == 'win32'",
 ]

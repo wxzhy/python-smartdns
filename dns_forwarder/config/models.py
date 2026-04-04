@@ -5,7 +5,8 @@ from ipaddress import IPv4Address, IPv6Address
 from typing import Any
 
 from pydantic import BaseModel, Field, field_validator, model_validator
-from pydantic_settings import BaseSettings, PydanticBaseSettingsSource, SettingsConfigDict, YamlConfigSettingsSource
+from pydantic_settings import BaseSettings, PydanticBaseSettingsSource, SettingsConfigDict
+from pydantic_settings.sources.providers.json import JsonConfigSettingsSource
 
 
 def _normalize_domain(value: str) -> str:
@@ -158,7 +159,8 @@ class WebUIConfig(BaseModel):
     enabled: bool = True
     host: str = "127.0.0.1"
     port: int = Field(default=8080, ge=0, le=65535)
-    reload_endpoint: str = "/admin/reload"
+    username: str = Field(default="admin", min_length=1)
+    password: str = Field(default="change-me", min_length=1)
 
 
 class AppConfig(BaseSettings):
@@ -168,8 +170,8 @@ class AppConfig(BaseSettings):
         extra="ignore",
         env_prefix="DNS_FORWARDER_",
         env_nested_delimiter="__",
-        yaml_file="config.yaml",
-        yaml_file_encoding="utf-8",
+        json_file="config.json",
+        json_file_encoding="utf-8",
     )
 
     runtime: RuntimeConfig = Field(default_factory=RuntimeConfig)
@@ -193,7 +195,7 @@ class AppConfig(BaseSettings):
             init_settings,
             env_settings,
             dotenv_settings,
-            YamlConfigSettingsSource(settings_cls),
+            JsonConfigSettingsSource(settings_cls),
             file_secret_settings,
         )
 

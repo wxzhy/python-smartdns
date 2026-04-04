@@ -1,4 +1,4 @@
-from .loader import dump_config_text, load_config, parse_config_text, save_config
+from .loader import build_config_json_schema, dump_config_text, load_config, parse_config_text, save_config
 from .models import (
     AppConfig,
     DispatchStrategyType,
@@ -33,6 +33,7 @@ __all__ = [
     "UpstreamGroupConfig",
     "UpstreamProtocol",
     "WebUIConfig",
+    "build_config_json_schema",
     "dump_config_text",
     "load_config",
     "parse_config_text",

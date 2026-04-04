@@ -1,4 +1,16 @@
 {% extends "base.html" %}
+{% block head %}
+<link rel="stylesheet" href="{{ jsoneditor_css_url }}">
+<style>
+  #jsoneditor { height: 38rem; }
+  .plugin-card { margin-bottom: 1rem; padding-bottom: 1rem; border-bottom: 1px solid #e5e7eb; }
+  .plugin-card:last-child { border-bottom: 0; margin-bottom: 0; padding-bottom: 0; }
+  .editor-toolbar { display: flex; justify-content: space-between; gap: 1rem; flex-wrap: wrap; align-items: center; }
+  .editor-errors { margin-top: 1rem; }
+  .editor-errors ul { margin: 0.5rem 0 0; }
+</style>
+<script src="{{ jsoneditor_js_url }}"></script>
+{% endblock %}
 {% block body %}
 <h1>配置编辑</h1>
 <div class="panel">
@@ -12,25 +24,118 @@
 </div>
 
 <div class="panel">
-  <h2>插件 schema 摘要</h2>
-  {% for plugin in plugins %}
-  <div style="margin-bottom: 1rem;">
-    <strong>{{ plugin.name }}</strong>
+  <h2>已安装插件</h2>
+  <div class="muted">这些插件 schema 会被合并进配置编辑器，用于新增或校验 plugins 条目。</div>
+  {% for plugin in available_plugins %}
+  <div class="plugin-card">
+    <strong>{{ plugin.ui_meta.title or plugin.plugin_name }}</strong>
+    <span class="pill">{{ plugin.module }}</span>
     {% if plugin.ui_meta.description %}
     <div>{{ plugin.ui_meta.description }}</div>
     {% endif %}
-    <pre>{{ plugin.config_schema }}</pre>
   </div>
   {% else %}
-  <div>当前没有启用插件。</div>
+  <div>当前没有可用插件。</div>
   {% endfor %}
 </div>
 
-<form method="post" action="/config">
+<form method="post" action="/config" id="config-form">
   <div class="panel">
-    <h2>config.yaml</h2>
-    <textarea name="config_text">{{ config_text }}</textarea>
+    <div class="editor-toolbar">
+      <div>
+        <h2 style="margin-bottom: 0;">{{ config_filename }}</h2>
+        <div class="muted">支持 tree / form / code 模式，保存前会做 JSON 与 schema 校验。</div>
+      </div>
+      <button type="submit">保存配置</button>
+    </div>
+    <div id="jsoneditor" style="margin-top: 1rem;"></div>
+    <div id="editor-errors" class="error editor-errors" hidden></div>
+    <textarea id="config_text_input" name="config_text" hidden></textarea>
   </div>
-  <button type="submit">保存配置</button>
 </form>
+
+<script>
+  const initialConfigText = {{ config_text | tojson }};
+  const configSchema = {{ config_schema | tojson }};
+  const initialMode = {{ editor_mode | tojson }};
+  const form = document.getElementById("config-form");
+  const hiddenInput = document.getElementById("config_text_input");
+  const errorContainer = document.getElementById("editor-errors");
+  const editor = new JSONEditor(document.getElementById("jsoneditor"), {
+    mode: initialMode,
+    modes: ["tree", "form", "code"],
+    schema: configSchema,
+    search: true,
+    history: true,
+    allowSchemaSuggestions: true,
+    mainMenuBar: true,
+    navigationBar: true,
+    statusBar: true,
+    indentation: 2,
+    onError(error) {
+      renderErrors([{ type: "error", error: { message: error.message } }]);
+    },
+    onValidationError(errors) {
+      renderErrors(errors);
+    },
+  });
+
+  function formatPath(path) {
+    if (Array.isArray(path) && path.length > 0) {
+      return path.join(".");
+    }
+    return "";
+  }
+
+  function formatValidationError(item) {
+    if (item.type === "error") {
+      return item.error?.message || "JSON 解析失败";
+    }
+    const schemaPath = item.error?.dataPath || item.error?.instancePath || "";
+    const customPath = formatPath(item.path);
+    const path = customPath || schemaPath;
+    const message = item.error?.message || "校验失败";
+    return path ? `${path}: ${message}` : message;
+  }
+
+  function renderErrors(errors) {
+    if (!errors || errors.length === 0) {
+      errorContainer.hidden = true;
+      errorContainer.innerHTML = "";
+      return;
+    }
+    const items = errors.map((item) => `<li>${formatValidationError(item)}</li>`).join("");
+    errorContainer.hidden = false;
+    errorContainer.innerHTML = `<strong>编辑器校验失败</strong><ul>${items}</ul>`;
+  }
+
+  try {
+    editor.set(JSON.parse(initialConfigText));
+  } catch (error) {
+    editor.setMode("code");
+    editor.setText(initialConfigText);
+    renderErrors([{ type: "error", error: { message: error.message } }]);
+  }
+
+  form.addEventListener("submit", async (event) => {
+    event.preventDefault();
+    let text;
+    try {
+      text = editor.getText();
+      JSON.parse(text);
+    } catch (error) {
+      renderErrors([{ type: "error", error: { message: error.message } }]);
+      return;
+    }
+
+    const errors = await Promise.resolve(editor.validate());
+    if (errors.length > 0) {
+      renderErrors(errors);
+      return;
+    }
+
+    hiddenInput.value = text;
+    form.submit();
+  });
+</script>
 {% endblock %}

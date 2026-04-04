@@ -16,7 +16,7 @@
 项目约定：
 
 - 主包固定为 `dns_forwarder`，核心目录为 `config`、`core`、`server`、`resolver`、`pipeline`、`dispatcher`、`plugin_api`、`webui`。
-- 配置文件固定为单一 `config.yaml`；配置校验统一走 `pydantic` / `pydantic-settings`。
+- 配置文件固定为单一 `config.json`；配置校验统一走 `pydantic` / `pydantic-settings`。
 - DNS 处理核心统一使用 `dnspython`；不要手写协议编解码替代 `dnspython` 已有能力。
 - WebUI 基于 `FastAPI + Jinja`，首版支持配置保存与手动 reload，不引入额外前端构建链。
 - 插件从本地 `plugins/` 目录加载；插件模块必须导出 `plugin` 实例，并遵守 `Plugin` 协议。

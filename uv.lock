@@ -749,7 +749,6 @@ dependencies = [
     { name = "icmplib" },
     { name = "pydantic" },
     { name = "pydantic-settings" },
-    { name = "pyyaml" },
     { name = "uvicorn" },
     { name = "winuvloop", marker = "sys_platform == 'win32'" },
 ]
@@ -769,7 +768,6 @@ requires-dist = [
     { name = "icmplib", specifier = ">=3.0.4" },
     { name = "pydantic", specifier = ">=2.11.0" },
     { name = "pydantic-settings", specifier = ">=2.10.0" },
-    { name = "pyyaml", specifier = ">=6.0.2" },
     { name = "uvicorn", specifier = ">=0.35.0" },
     { name = "winuvloop", marker = "sys_platform == 'win32'", specifier = ">=0.2.0" },
 ]

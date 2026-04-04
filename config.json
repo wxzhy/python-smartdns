@@ -1,0 +1,124 @@
+{
+  "runtime": {
+    "plugin_dirs": [
+      "plugins"
+    ],
+    "loop_policy": "auto",
+    "default_upstream_group": "default",
+    "log_level": "DEBUG"
+  },
+  "listeners": [
+    {
+      "name": "udp-default",
+      "protocol": "udp",
+      "host": "127.0.0.1",
+      "port": 5300,
+      "enabled": true
+    },
+    {
+      "name": "tcp-default",
+      "protocol": "tcp",
+      "host": "127.0.0.1",
+      "port": 5300,
+      "enabled": true
+    }
+  ],
+  "upstreams": [
+    {
+      "name": "cloudflare",
+      "protocol": "do53",
+      "host": "1.1.1.1",
+      "port": 53,
+      "timeout": 1.0,
+      "lifetime": 3.0,
+      "use_tcp": false,
+      "edns": null
+    },
+    {
+      "name": "google",
+      "protocol": "do53",
+      "host": "8.8.8.8",
+      "port": 53,
+      "timeout": 1.0,
+      "lifetime": 3.0,
+      "use_tcp": false,
+      "edns": null
+    }
+  ],
+  "groups": [
+    {
+      "name": "default",
+      "strategy": "race",
+      "upstreams": [
+        "cloudflare",
+        "google"
+      ]
+    }
+  ],
+  "rules": [
+    {
+      "name": "sample-static",
+      "enabled": false,
+      "match": {
+        "exact_domains": [
+          "sample.internal"
+        ],
+        "suffix_domains": [],
+        "qtypes": [
+          "A"
+        ]
+      },
+      "action": {
+        "upstream_group": "default"
+      }
+    }
+  ],
+  "plugins": [
+    {
+      "name": "sample",
+      "module": "sample_plugin",
+      "enabled": false,
+      "config": {
+        "domains": [
+          "sample.internal"
+        ],
+        "answer_name": "sample.static_a"
+      },
+      "variables": {
+        "address": "127.0.0.1",
+        "ttl": 30
+      }
+    },
+    {
+      "name": "cache_plugin",
+      "module": "cache_plugin",
+      "enabled": true,
+      "config": {
+        "max_size": 100000
+      },
+      "variables": {}
+    },
+    {
+      "name": "speedtest_plugin",
+      "module": "speedtest_plugin",
+      "enabled": false,
+      "config": {
+        "cache_ttl_seconds": 900,
+        "cache_maxsize": 4096,
+        "max_concurrency": 64,
+        "probe_timeout": 1.5,
+        "ping_count": 1,
+        "ping_privileged": false,
+        "response_ip_limit": 2
+      },
+      "variables": {}
+    }
+  ],
+  "webui": {
+    "enabled": true,
+    "host": "127.0.0.1",
+    "port": 8080,
+    "username": "admin",
+    "password": "admin"
+  }
+}

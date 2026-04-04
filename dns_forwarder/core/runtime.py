@@ -13,7 +13,7 @@ from dns_forwarder.pipeline.engine import PipelineEngine
 from dns_forwarder.plugin_api import PluginManager
 from dns_forwarder.resolver import ResolverManager
 from dns_forwarder.server import TcpDnsServer, UdpDnsServer
-from dns_forwarder.webui import ManagedUvicornServer, create_webui_app
+from dns_forwarder.webui import ManagedUvicornServer, WEBUI_RELOAD_ENDPOINT, create_webui_app
 
 logger = get_logger("core.runtime")
 
@@ -28,7 +28,7 @@ class RuntimeState:
 
 
 class RuntimeManager:
-    def __init__(self, config_path: str | Path = "config.yaml") -> None:
+    def __init__(self, config_path: str | Path = "config.json") -> None:
         self.config_path = Path(config_path)
         self._lock = asyncio.Lock()
         self._state: RuntimeState | None = None
@@ -37,9 +37,7 @@ class RuntimeManager:
 
     @property
     def reload_endpoint(self) -> str:
-        if self._state is None:
-            return "/admin/reload"
-        return self._state.config.webui.reload_endpoint
+        return WEBUI_RELOAD_ENDPOINT
 
     async def load(self) -> RuntimeState:
         async with self._lock:
@@ -119,7 +117,7 @@ class RuntimeManager:
             "groups": [item.name for item in state.config.groups],
             "rules": [item.name for item in state.config.rules],
             "plugins": state.plugin_manager.describe(),
-            "reload_endpoint": state.config.webui.reload_endpoint,
+            "reload_endpoint": self.reload_endpoint,
             "error": "",
         }
 
@@ -187,7 +185,6 @@ class RuntimeManager:
             config.webui.enabled,
             config.webui.host,
             config.webui.port,
-            config.webui.reload_endpoint,
         )
         return listeners, webui
 
@@ -222,7 +219,7 @@ async def serve(config_path: Path) -> None:
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="dns-forwarder skeleton")
-    parser.add_argument("--config", default="config.yaml", help="配置文件路径")
+    parser.add_argument("--config", default="config.json", help="配置文件路径")
     parser.add_argument("command", nargs="?", default="serve", choices=["serve", "check-config"])
     return parser
 

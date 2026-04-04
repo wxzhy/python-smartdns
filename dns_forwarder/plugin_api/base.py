@@ -66,6 +66,9 @@ class Plugin:
     config_model: type[BaseModel] = EmptyModel
     variables_model: type[BaseModel] = EmptyModel
     ui_meta: dict[str, Any] = {}
+    request_order: int = 0
+    upstream_response_order: int = 0
+    response_order: int = 0
     runtime_config: BaseModel = EmptyModel()
     runtime_variables: BaseModel = EmptyModel()
 
@@ -165,17 +168,20 @@ class PluginManager:
     def build_answer_registry(self) -> dict[str, AnswerBuilder]:
         return dict(self.registry.answer_registry)
 
+    def _ordered_plugins(self, order_attr: str) -> list[LoadedPlugin]:
+        return sorted(self.loaded_plugins, key=lambda item: getattr(item.instance, order_attr))
+
     async def on_request(self, context: "RequestContext") -> None:
-        for plugin in self.loaded_plugins:
+        for plugin in self._ordered_plugins("request_order"):
             context.metadata.setdefault("plugin_order", []).append(plugin.instance.name)
             await plugin.instance.on_request(context)
 
     async def on_upstream_response(self, context: "RequestContext", result: "UpstreamResult") -> None:
-        for plugin in self.loaded_plugins:
+        for plugin in self._ordered_plugins("upstream_response_order"):
             await plugin.instance.on_upstream_response(context, result)
 
     async def on_response(self, context: "RequestContext") -> None:
-        for plugin in self.loaded_plugins:
+        for plugin in self._ordered_plugins("response_order"):
             await plugin.instance.on_response(context)
 
     def describe(self) -> list[dict[str, Any]]:

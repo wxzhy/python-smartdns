@@ -200,6 +200,24 @@ async def test_dns_cache_service_uses_dnspython_lru_cache() -> None:
     assert cached[0].address == "203.0.113.30"
 
 
+async def test_dns_cache_service_reduces_ttl_on_cache_hit(monkeypatch) -> None:
+    service = DnsCacheService(max_size=16)
+    request = dns.message.make_query("example.test", "A")
+    answer = make_answer(request, "203.0.113.31")
+    answer.expiration = 1060.0
+
+    monkeypatch.setattr("plugins.cache_plugin.service.time.time", lambda: 1000.0)
+    service.put_answer(answer)
+
+    monkeypatch.setattr("plugins.cache_plugin.service.time.time", lambda: 1012.4)
+    cached = service.get_for_request(request)
+
+    assert cached is not None
+    assert cached.rrset is not None
+    assert cached.rrset.ttl == 47
+    assert cached.response.answer[0].ttl == 47
+
+
 async def test_cache_plugin_runs_last_in_response_hooks_and_caches_mutated_answer() -> None:
     manager, _ = await build_plugin_manager_with_mutator()
     request = dns.message.make_query("example.test", "A")

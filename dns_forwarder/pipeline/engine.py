@@ -8,7 +8,7 @@ import dns.rdatatype
 import dns.rcode
 import dns.resolver
 
-from dns_forwarder.config import AppConfig, RuleConfig
+from dns_forwarder.config import AppConfig
 from dns_forwarder.dispatcher import DispatcherRegistry
 from dns_forwarder.logging import get_logger
 from dns_forwarder.pipeline.context import (
@@ -20,6 +20,7 @@ from dns_forwarder.pipeline.context import (
 )
 from dns_forwarder.plugin_api import PluginManager
 from dns_forwarder.resolver import ResolverManager
+from dns_forwarder.rules import RuleEngine
 
 
 class PipelineEngine:
@@ -30,10 +31,10 @@ class PipelineEngine:
         dispatcher_registry: DispatcherRegistry,
         plugin_manager: PluginManager,
     ) -> None:
-        self._config = config
         self._resolver_manager = resolver_manager
         self._dispatcher_registry = dispatcher_registry
         self._plugin_manager = plugin_manager
+        self._rule_engine = RuleEngine(config.rules, config.runtime.default_upstream_group)
         self._logger = get_logger("pipeline.engine")
 
     async def handle_message(
@@ -85,15 +86,33 @@ class PipelineEngine:
                 return None
 
             if context.final_answer is None and context.final_response is None:
-                context.selected_group = self._match_upstream_group(request)
+                selection = self._rule_engine.select(request)
+                context.selected_rule = selection.rule_name
+                context.selected_group = selection.upstream_group
                 self._logger.debug(
-                    "选择上游组 request_id=%s group=%s",
+                    "选择上游组 request_id=%s rule=%s group=%s dispatcher=%s",
                     context.request_id,
+                    context.selected_rule or "",
                     context.selected_group,
+                    selection.dispatcher.value if selection.dispatcher is not None else "",
                 )
                 group = self._resolver_manager.get_group(context.selected_group)
-                strategy = self._dispatcher_registry.get(group.strategy)
-                result = await strategy.dispatch(context, group, self._resolver_manager)
+                context.selected_dispatcher = (
+                    selection.dispatcher.value if selection.dispatcher is not None else group.strategy.value
+                )
+                if selection.dispatcher is None:
+                    result = await self._dispatcher_registry.dispatch_group(
+                        context,
+                        group,
+                        self._resolver_manager,
+                    )
+                else:
+                    result = await self._dispatcher_registry.dispatch_with_strategy(
+                        context,
+                        group,
+                        selection.dispatcher,
+                        self._resolver_manager,
+                    )
                 context.upstream_results.append(result)
                 self._logger.debug(
                     "dispatcher 返回 request_id=%s upstream=%s success=%s error=%s",
@@ -142,50 +161,6 @@ class PipelineEngine:
                 context.clientaddr,
             )
             return make_error_response(request, dns.rcode.SERVFAIL)
-
-    def _match_upstream_group(self, request: dns.message.Message) -> str:
-        question = request.question[0]
-        qname = question.name.to_text().rstrip(".").lower()
-        qtype = dns.rdatatype.to_text(question.rdtype).upper()
-
-        for rule in self._config.rules:
-            if not rule.enabled:
-                continue
-            if self._rule_matches(rule, qname, qtype):
-                self._logger.debug(
-                    "规则命中 request_id=%s rule=%s upstream_group=%s",
-                    request.id,
-                    rule.name,
-                    rule.action.upstream_group,
-                )
-                return rule.action.upstream_group
-
-        self._logger.debug(
-            "未命中规则 request_id=%s 使用默认 upstream_group=%s",
-            request.id,
-            self._config.runtime.default_upstream_group,
-        )
-        return self._config.runtime.default_upstream_group
-
-    @staticmethod
-    def _rule_matches(rule: RuleConfig, qname: str, qtype: str) -> bool:
-        match = rule.match
-
-        if match.qtypes and qtype not in match.qtypes:
-            return False
-
-        exact_matched = not match.exact_domains or qname in match.exact_domains
-        suffix_matched = not match.suffix_domains or any(
-            qname == suffix or qname.endswith(f".{suffix}") for suffix in match.suffix_domains
-        )
-
-        if match.exact_domains and match.suffix_domains:
-            return exact_matched or suffix_matched
-        if match.exact_domains:
-            return exact_matched
-        if match.suffix_domains:
-            return suffix_matched
-        return True
 
     def _finalize_context(self, context: RequestContext) -> None:
         if context.final_answer is None and context.final_response is not None:

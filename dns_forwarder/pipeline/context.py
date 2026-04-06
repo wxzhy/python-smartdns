@@ -28,7 +28,9 @@ class RequestContext:
     listener_name: str
     request_id: int = field(init=False)
     received_at: float = field(default_factory=time.monotonic)
+    selected_rule: str | None = None
     selected_group: str | None = None
+    selected_dispatcher: str | None = None
     final_answer: dns.resolver.Answer | None = None
     final_response: dns.message.Message | None = None
     drop_request: bool = False

@@ -84,7 +84,7 @@ class RecordingPluginManager:
 
 class StaticResolverManager:
     def __init__(self, config: AppConfig, result: UpstreamResult | None = None) -> None:
-        self._group = config.groups[0]
+        self._groups = {group.name: group for group in config.groups}
         self._result = result or UpstreamResult(
             upstream_name="upstream-a",
             duration_ms=0.0,
@@ -92,7 +92,10 @@ class StaticResolverManager:
         )
 
     def get_group(self, group_name: str):
-        return self._group
+        return self._groups[group_name]
+
+    def has_group(self, group_name: str) -> bool:
+        return group_name in self._groups
 
     async def resolve(self, upstream_name: str, context: RequestContext) -> UpstreamResult:
         return self._result
@@ -270,3 +273,51 @@ async def test_pipeline_syncs_rrset_change_from_on_response() -> None:
     assert plugin_manager.last_context is not None
     assert plugin_manager.last_context.final_answer is answer
     assert plugin_manager.last_context.final_answer.response.answer[0][0].address == "192.0.2.55"
+
+
+async def test_pipeline_supports_nested_dispatch_groups() -> None:
+    config = AppConfig.model_validate(
+        {
+            "runtime": {
+                "plugin_dirs": ["plugins"],
+                "default_upstream_group": "default",
+                "loop_policy": "asyncio",
+                "log_level": "DEBUG",
+            },
+            "listeners": [
+                {"name": "udp", "protocol": "udp", "host": "127.0.0.1", "port": 0, "enabled": True},
+            ],
+            "upstreams": [
+                {
+                    "name": "upstream-a",
+                    "protocol": "do53",
+                    "host": "127.0.0.1",
+                    "port": 53,
+                },
+            ],
+            "groups": [
+                {"name": "default", "strategy": "sequential", "upstreams": ["nested"]},
+                {"name": "nested", "strategy": "race", "upstreams": ["upstream-a"]},
+            ],
+            "rules": [],
+            "plugins": [],
+            "webui": {"enabled": False},
+        }
+    )
+    request = dns.message.make_query("example.test", "A")
+    response = dns.message.make_response(request)
+    response.answer.append(dns.rrset.from_text("example.test.", 60, "IN", "A", "203.0.113.88"))
+    answer = build_answer_from_response(request, response)
+    plugin_manager = RecordingPluginManager()
+    resolver_manager = StaticResolverManager(
+        config,
+        UpstreamResult(upstream_name="upstream-a", duration_ms=5.0, answer=answer),
+    )
+    engine = PipelineEngine(config, resolver_manager, DispatcherRegistry(), plugin_manager)
+
+    final_response = await engine.handle_message(request, ("127.0.0.1", 20000), "udp")
+
+    assert final_response is not None
+    assert final_response.answer[0][0].address == "203.0.113.88"
+    assert plugin_manager.last_context is not None
+    assert plugin_manager.last_context.upstream_results[0].upstream_name == "upstream-a"

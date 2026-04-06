@@ -11,6 +11,7 @@ from dns_forwarder.pipeline.context import RequestContext, UpstreamResult
 from .base import DispatchStrategy
 
 if TYPE_CHECKING:
+    from .registry import DispatcherRegistry
     from dns_forwarder.resolver import ResolverManager
 
 
@@ -25,31 +26,35 @@ class SequentialDispatchStrategy(DispatchStrategy):
         context: RequestContext,
         group: UpstreamGroupConfig,
         resolver_manager: "ResolverManager",
+        registry: "DispatcherRegistry",
     ) -> UpstreamResult:
         last_result: UpstreamResult | None = None
-        for upstream_name in group.upstreams:
-            result = await resolver_manager.resolve(upstream_name, context)
+        for target_name in group.upstreams:
+            result = await registry.dispatch_target(context, target_name, resolver_manager)
             if result.answer is not None:
                 logger.debug(
-                    "顺序调度命中 request_id=%s group=%s upstream=%s duration_ms=%.2f",
+                    "顺序调度命中 request_id=%s group=%s target=%s upstream=%s duration_ms=%.2f",
                     context.request_id,
                     group.name,
+                    target_name,
                     result.upstream_name,
                     result.duration_ms,
                 )
                 return result
             if isinstance(result.error, dns.resolver.NXDOMAIN):
                 logger.debug(
-                    "顺序调度收到 NXDOMAIN，停止回退 request_id=%s group=%s upstream=%s",
+                    "顺序调度收到 NXDOMAIN，停止回退 request_id=%s group=%s target=%s upstream=%s",
                     context.request_id,
                     group.name,
+                    target_name,
                     result.upstream_name,
                 )
                 return result
             logger.debug(
-                "顺序调度回退 request_id=%s group=%s upstream=%s error=%s",
+                "顺序调度回退 request_id=%s group=%s target=%s upstream=%s error=%s",
                 context.request_id,
                 group.name,
+                target_name,
                 result.upstream_name,
                 self.error_name(result),
             )

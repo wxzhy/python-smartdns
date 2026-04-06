@@ -40,6 +40,7 @@ class UpstreamProtocol(StrEnum):
 class DispatchStrategyType(StrEnum):
     SEQUENTIAL = "sequential"
     RACE = "race"
+    WAIT_ALL = "wait_all"
 
 
 class RuntimeConfig(BaseModel):
@@ -137,7 +138,14 @@ class RuleMatchConfig(BaseModel):
 
 
 class RuleActionConfig(BaseModel):
-    upstream_group: str
+    upstream_group: str | None = None
+    dispatcher: DispatchStrategyType | None = None
+
+    @model_validator(mode="after")
+    def validate_action_target(self) -> "RuleActionConfig":
+        if self.upstream_group is None and self.dispatcher is None:
+            raise ValueError("rule action 至少需要 upstream_group 或 dispatcher")
+        return self
 
 
 class RuleConfig(BaseModel):
@@ -209,6 +217,7 @@ class AppConfig(BaseSettings):
 
         upstream_names = {item.name for item in self.upstreams}
         group_names = {item.name for item in self.groups}
+        duplicated_target_names = sorted(upstream_names & group_names)
 
         if not self.listeners:
             raise ValueError("至少需要一个 listener")
@@ -218,21 +227,54 @@ class AppConfig(BaseSettings):
             raise ValueError("至少需要一个 upstream group")
         if self.runtime.default_upstream_group not in group_names:
             raise ValueError(f"default_upstream_group 未定义: {self.runtime.default_upstream_group}")
+        if duplicated_target_names:
+            duplicated_names = ", ".join(duplicated_target_names)
+            raise ValueError(f"group 与 upstream 名称冲突: {duplicated_names}")
 
         for upstream in self.upstreams:
             if upstream.protocol is not UpstreamProtocol.DO53:
                 raise ValueError(f"当前版本仅支持 do53 upstream: {upstream.name}")
 
+        available_target_names = upstream_names | group_names
         for group in self.groups:
-            missing = set(group.upstreams) - upstream_names
+            missing = set(group.upstreams) - available_target_names
             if missing:
                 missing_names = ", ".join(sorted(missing))
-                raise ValueError(f"group {group.name} 引用了不存在的 upstream: {missing_names}")
+                raise ValueError(f"group {group.name} 引用了不存在的 target: {missing_names}")
+
+        self._validate_group_cycles(group_names)
 
         for rule in self.rules:
-            if rule.action.upstream_group not in group_names:
+            if rule.action.upstream_group is not None and rule.action.upstream_group not in group_names:
                 raise ValueError(
                     f"rule {rule.name} 引用了不存在的 upstream_group: {rule.action.upstream_group}"
                 )
 
         return self
+
+    def _validate_group_cycles(self, group_names: set[str]) -> None:
+        adjacency = {
+            group.name: [target for target in group.upstreams if target in group_names]
+            for group in self.groups
+        }
+        visiting: set[str] = set()
+        visited: set[str] = set()
+
+        def dfs(group_name: str, path: list[str]) -> None:
+            if group_name in visiting:
+                cycle_start = path.index(group_name)
+                cycle = " -> ".join(path[cycle_start:] + [group_name])
+                raise ValueError(f"group 引用存在循环: {cycle}")
+            if group_name in visited:
+                return
+
+            visiting.add(group_name)
+            path.append(group_name)
+            for nested_group in adjacency[group_name]:
+                dfs(nested_group, path)
+            path.pop()
+            visiting.remove(group_name)
+            visited.add(group_name)
+
+        for group_name in adjacency:
+            dfs(group_name, [])

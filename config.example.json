@@ -1,0 +1,183 @@
+{
+  "runtime": {
+    "plugin_dirs": [
+      "plugins"
+    ],
+    "loop_policy": "auto",
+    "default_upstream_group": "default",
+    "log_level": "INFO"
+  },
+  "listeners": [
+    {
+      "name": "udp-default",
+      "protocol": "udp",
+      "host": "127.0.0.1",
+      "port": 5300,
+      "enabled": true
+    },
+    {
+      "name": "tcp-default",
+      "protocol": "tcp",
+      "host": "127.0.0.1",
+      "port": 5300,
+      "enabled": true
+    }
+  ],
+  "upstreams": [
+    {
+      "name": "cloudflare",
+      "protocol": "do53",
+      "host": "1.1.1.1",
+      "port": 53,
+      "timeout": 1.0,
+      "lifetime": 3.0,
+      "use_tcp": false,
+      "edns": null
+    },
+    {
+      "name": "google",
+      "protocol": "do53",
+      "host": "8.8.8.8",
+      "port": 53,
+      "timeout": 1.0,
+      "lifetime": 3.0,
+      "use_tcp": false,
+      "edns": null
+    },
+    {
+      "name": "quad9",
+      "protocol": "do53",
+      "host": "9.9.9.9",
+      "port": 53,
+      "timeout": 1.0,
+      "lifetime": 3.0,
+      "use_tcp": false,
+      "edns": null
+    },
+    {
+      "name": "quad9-tcp",
+      "protocol": "do53",
+      "host": "9.9.9.9",
+      "port": 53,
+      "timeout": 1.0,
+      "lifetime": 3.0,
+      "use_tcp": true,
+      "edns": {
+        "enabled": true,
+        "payload": 1232,
+        "client_subnet": null
+      }
+    }
+  ],
+  "groups": [
+    {
+      "name": "default",
+      "strategy": "race",
+      "upstreams": [
+        "cloudflare",
+        "google",
+        "quad9"
+      ]
+    },
+    {
+      "name": "all-address-wait",
+      "strategy": "wait_all",
+      "upstreams": [
+        "cloudflare",
+        "google",
+        "quad9"
+      ]
+    },
+    {
+      "name": "fallback-chain",
+      "strategy": "sequential",
+      "upstreams": [
+        "default",
+        "quad9-tcp"
+      ]
+    }
+  ],
+  "rules": [
+    {
+      "name": "example-org-addresses",
+      "enabled": true,
+      "match": {
+        "exact_domains": [],
+        "suffix_domains": [
+          "example.org"
+        ],
+        "qtypes": [
+          "A",
+          "AAAA"
+        ]
+      },
+      "action": {
+        "upstream_group": "default",
+        "dispatcher": "wait_all"
+      }
+    },
+    {
+      "name": "corp-fallback",
+      "enabled": false,
+      "match": {
+        "exact_domains": [],
+        "suffix_domains": [
+          "corp.internal"
+        ],
+        "qtypes": []
+      },
+      "action": {
+        "upstream_group": "fallback-chain",
+        "dispatcher": "race"
+      }
+    }
+  ],
+  "plugins": [
+    {
+      "name": "sample",
+      "module": "sample_plugin",
+      "enabled": false,
+      "config": {
+        "domains": [
+          "sample.internal"
+        ],
+        "answer_name": "sample.static_a"
+      },
+      "variables": {
+        "address": "127.0.0.1",
+        "ttl": 30
+      }
+    },
+    {
+      "name": "cache",
+      "module": "cache_plugin",
+      "enabled": true,
+      "config": {
+        "max_size": 100000
+      },
+      "variables": {}
+    },
+    {
+      "name": "speedtest",
+      "module": "speedtest_plugin",
+      "enabled": false,
+      "config": {
+        "cache_ttl_seconds": 900,
+        "cache_maxsize": 4096,
+        "max_concurrency": 64,
+        "probe_timeout": 1.5,
+        "ping_count": 1,
+        "ping_privileged": false,
+        "response_ip_limit": 2
+      },
+      "variables": {}
+    }
+  ],
+  "webui": {
+    "enabled": true,
+    "host": "127.0.0.1",
+    "port": 8080,
+    "username": "admin",
+    "password": "change-me"
+  }
+}

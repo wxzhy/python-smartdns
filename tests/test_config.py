@@ -4,7 +4,13 @@ from pathlib import Path
 
 import pytest
 
-from dns_forwarder.config import AppConfig, build_config_json_schema, dump_config_text, parse_config_text
+from dns_forwarder.config import (
+    AppConfig,
+    DispatchStrategyType,
+    build_config_json_schema,
+    dump_config_text,
+    parse_config_text,
+)
 from dns_forwarder.plugin_api import discover_available_plugins
 
 
@@ -413,3 +419,274 @@ def test_discover_available_plugins_lists_installed_plugins() -> None:
     modules = {item.module for item in discover_available_plugins([plugin_dir])}
 
     assert {"cache_plugin", "sample_plugin", "speedtest_plugin"} <= modules
+
+
+def test_config_example_json_is_valid() -> None:
+    example_path = Path(__file__).resolve().parents[1] / "config.example.json"
+
+    config = parse_config_text(example_path.read_text(encoding="utf-8"))
+
+    assert isinstance(config, AppConfig)
+    assert config.runtime.default_upstream_group == "default"
+    assert any(group.strategy is DispatchStrategyType.RACE for group in config.groups)
+    assert any(group.strategy is DispatchStrategyType.WAIT_ALL for group in config.groups)
+
+
+def test_parse_config_text_accepts_nested_groups_and_new_dispatchers() -> None:
+    config = parse_config_text(
+        """
+{
+  "runtime": {
+    "plugin_dirs": ["plugins"],
+    "default_upstream_group": "default"
+  },
+  "listeners": [
+    {
+      "name": "udp",
+      "protocol": "udp",
+      "host": "127.0.0.1",
+      "port": 5300
+    }
+  ],
+  "upstreams": [
+    {
+      "name": "local-a",
+      "protocol": "do53",
+      "host": "127.0.0.1",
+      "port": 5301
+    },
+    {
+      "name": "local-b",
+      "protocol": "do53",
+      "host": "127.0.0.1",
+      "port": 5302
+    }
+  ],
+  "groups": [
+    {
+      "name": "default",
+      "strategy": "race",
+      "upstreams": ["ipv4-chain", "local-b"]
+    },
+    {
+      "name": "ipv4-chain",
+      "strategy": "wait_all",
+      "upstreams": ["local-a"]
+    }
+  ],
+  "rules": [],
+  "plugins": [],
+  "webui": {
+    "enabled": false
+  }
+}
+        """
+    )
+
+    assert config.groups[0].strategy is DispatchStrategyType.RACE
+    assert config.groups[1].strategy is DispatchStrategyType.WAIT_ALL
+    assert config.groups[0].upstreams == ["ipv4-chain", "local-b"]
+
+
+def test_parse_config_text_accepts_rule_dispatcher_override_without_group_override() -> None:
+    config = parse_config_text(
+        """
+{
+  "runtime": {
+    "plugin_dirs": ["plugins"],
+    "default_upstream_group": "default"
+  },
+  "listeners": [
+    {
+      "name": "udp",
+      "protocol": "udp",
+      "host": "127.0.0.1",
+      "port": 5300
+    }
+  ],
+  "upstreams": [
+    {
+      "name": "local",
+      "protocol": "do53",
+      "host": "127.0.0.1",
+      "port": 5301
+    }
+  ],
+  "groups": [
+    {
+      "name": "default",
+      "strategy": "race",
+      "upstreams": ["local"]
+    }
+  ],
+  "rules": [
+    {
+      "name": "wait-addresses",
+      "enabled": true,
+      "match": {
+        "exact_domains": [],
+        "suffix_domains": ["example.org"],
+        "qtypes": ["A"]
+      },
+      "action": {
+        "dispatcher": "wait_all"
+      }
+    }
+  ],
+  "plugins": [],
+  "webui": {
+    "enabled": false
+  }
+}
+        """
+    )
+
+    assert config.rules[0].action.upstream_group is None
+    assert config.rules[0].action.dispatcher is DispatchStrategyType.WAIT_ALL
+
+
+def test_parse_config_text_rejects_empty_rule_action() -> None:
+    with pytest.raises(ValueError, match="至少需要 upstream_group 或 dispatcher"):
+        parse_config_text(
+            """
+{
+  "runtime": {
+    "plugin_dirs": ["plugins"],
+    "default_upstream_group": "default"
+  },
+  "listeners": [
+    {
+      "name": "udp",
+      "protocol": "udp",
+      "host": "127.0.0.1",
+      "port": 5300
+    }
+  ],
+  "upstreams": [
+    {
+      "name": "local",
+      "protocol": "do53",
+      "host": "127.0.0.1",
+      "port": 5301
+    }
+  ],
+  "groups": [
+    {
+      "name": "default",
+      "strategy": "race",
+      "upstreams": ["local"]
+    }
+  ],
+  "rules": [
+    {
+      "name": "invalid-action",
+      "enabled": true,
+      "match": {
+        "exact_domains": ["example.org"],
+        "suffix_domains": [],
+        "qtypes": ["A"]
+      },
+      "action": {}
+    }
+  ],
+  "plugins": [],
+  "webui": {
+    "enabled": false
+  }
+}
+            """
+        )
+
+
+def test_parse_config_text_rejects_group_upstream_name_conflict() -> None:
+    with pytest.raises(ValueError, match="名称冲突"):
+        parse_config_text(
+            """
+{
+  "runtime": {
+    "plugin_dirs": ["plugins"],
+    "default_upstream_group": "default"
+  },
+  "listeners": [
+    {
+      "name": "udp",
+      "protocol": "udp",
+      "host": "127.0.0.1",
+      "port": 5300
+    }
+  ],
+  "upstreams": [
+    {
+      "name": "shared",
+      "protocol": "do53",
+      "host": "127.0.0.1",
+      "port": 5301
+    }
+  ],
+  "groups": [
+    {
+      "name": "default",
+      "strategy": "sequential",
+      "upstreams": ["shared"]
+    },
+    {
+      "name": "shared",
+      "strategy": "wait_all",
+      "upstreams": ["default"]
+    }
+  ],
+  "rules": [],
+  "plugins": [],
+  "webui": {
+    "enabled": false
+  }
+}
+            """
+        )
+
+
+def test_parse_config_text_rejects_group_cycles() -> None:
+    with pytest.raises(ValueError, match="group 引用存在循环"):
+        parse_config_text(
+            """
+{
+  "runtime": {
+    "plugin_dirs": ["plugins"],
+    "default_upstream_group": "default"
+  },
+  "listeners": [
+    {
+      "name": "udp",
+      "protocol": "udp",
+      "host": "127.0.0.1",
+      "port": 5300
+    }
+  ],
+  "upstreams": [
+    {
+      "name": "local",
+      "protocol": "do53",
+      "host": "127.0.0.1",
+      "port": 5301
+    }
+  ],
+  "groups": [
+    {
+      "name": "default",
+      "strategy": "sequential",
+      "upstreams": ["nested"]
+    },
+    {
+      "name": "nested",
+      "strategy": "wait_all",
+      "upstreams": ["default", "local"]
+    }
+  ],
+  "rules": [],
+  "plugins": [],
+  "webui": {
+    "enabled": false
+  }
+}
+            """
+        )

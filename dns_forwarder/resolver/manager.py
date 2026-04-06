@@ -38,6 +38,9 @@ class ResolverManager:
     def get_group(self, group_name: str) -> UpstreamGroupConfig:
         return self._groups[group_name]
 
+    def has_group(self, group_name: str) -> bool:
+        return group_name in self._groups
+
     async def resolve(self, upstream_name: str, context: RequestContext) -> UpstreamResult:
         custom_resolver = self._plugin_registry.resolver_registry.get(upstream_name)
         if custom_resolver is not None:

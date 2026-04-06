@@ -45,12 +45,15 @@ def build_config() -> AppConfig:
 
 class CountingResolverManager:
     def __init__(self, config: AppConfig, result: UpstreamResult) -> None:
-        self._group = config.groups[0]
+        self._groups = {group.name: group for group in config.groups}
         self._result = result
         self.calls = 0
 
     def get_group(self, group_name: str):
-        return self._group
+        return self._groups[group_name]
+
+    def has_group(self, group_name: str) -> bool:
+        return group_name in self._groups
 
     async def resolve(self, upstream_name: str, context: RequestContext) -> UpstreamResult:
         self.calls += 1

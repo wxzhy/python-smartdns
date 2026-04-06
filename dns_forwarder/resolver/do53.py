@@ -29,22 +29,20 @@ class UpstreamResolver(BaseUpstreamResolver):
         self.resolver.use_search_by_default = False
         self.resolver.search = []
         self.resolver.nameservers = [dns.nameserver.Do53Nameserver(config.host, config.port)]
-        if config.edns and config.edns.enabled:
-            options: list[dns.edns.Option] = []
-            if config.edns.client_subnet is not None:
-                options.append(
+        if config.ecs is not None:
+            self.resolver.use_edns(
+                options=[
                     dns.edns.ECSOption(
-                        str(config.edns.client_subnet.address),
-                        srclen=config.edns.client_subnet.source_prefix,
-                        scopelen=config.edns.client_subnet.scope_prefix,
+                        str(config.ecs.subnet.address),
+                        srclen=config.ecs.subnet.source_prefix,
+                        scopelen=config.ecs.subnet.scope_prefix,
                     )
-                )
-            self.resolver.use_edns(edns=0, payload=config.edns.payload, options=options or None)
+                ]
+            )
             logger.debug(
-                "上游启用 EDNS request_target=%s payload=%s ecs=%s",
+                "上游启用 ECS request_target=%s ecs=%s",
                 config.name,
-                config.edns.payload,
-                config.edns.client_subnet.address if config.edns.client_subnet is not None else "",
+                config.ecs.subnet.address,
             )
 
     async def resolve(self, context: RequestContext) -> UpstreamResult:

@@ -73,13 +73,13 @@ class ListenerConfig(BaseModel):
     enabled: bool = True
 
 
-class EDNSClientSubnetConfig(BaseModel):
+class ECSSubnetConfig(BaseModel):
     address: IPv4Address | IPv6Address
     source_prefix: int | None = Field(default=None, ge=0, le=128)
     scope_prefix: int = Field(default=0, ge=0, le=128)
 
     @model_validator(mode="after")
-    def validate_prefix_range(self) -> "EDNSClientSubnetConfig":
+    def validate_prefix_range(self) -> "ECSSubnetConfig":
         max_bits = 32 if isinstance(self.address, IPv4Address) else 128
         if self.source_prefix is not None and self.source_prefix > max_bits:
             raise ValueError(f"source_prefix 超出地址位数: {max_bits}")
@@ -88,10 +88,8 @@ class EDNSClientSubnetConfig(BaseModel):
         return self
 
 
-class EDNSConfig(BaseModel):
-    enabled: bool = False
-    payload: int = Field(default=1232, ge=512, le=65535)
-    client_subnet: EDNSClientSubnetConfig | None = None
+class ECSConfig(BaseModel):
+    subnet: ECSSubnetConfig
 
 
 class UpstreamConfig(BaseModel):
@@ -102,7 +100,7 @@ class UpstreamConfig(BaseModel):
     timeout: float = Field(default=1.0, gt=0)
     lifetime: float = Field(default=3.0, gt=0)
     use_tcp: bool = False
-    edns: EDNSConfig | None = None
+    ecs: ECSConfig | None = None
 
 
 class UpstreamGroupConfig(BaseModel):

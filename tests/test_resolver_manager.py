@@ -6,7 +6,7 @@ import dns.message
 import dns.edns
 import dns.rrset
 
-from dns_forwarder.config import EDNSClientSubnetConfig, EDNSConfig, UpstreamConfig
+from dns_forwarder.config import ECSConfig, ECSSubnetConfig, UpstreamConfig
 from dns_forwarder.pipeline import RequestContext, build_answer_from_response
 from dns_forwarder.resolver.manager import UpstreamResolver
 
@@ -16,10 +16,8 @@ def test_upstream_resolver_configures_ecs_option() -> None:
         name="local",
         host="127.0.0.1",
         port=53,
-        edns=EDNSConfig(
-            enabled=True,
-            payload=1400,
-            client_subnet=EDNSClientSubnetConfig(
+        ecs=ECSConfig(
+            subnet=ECSSubnetConfig(
                 address="203.0.113.10",
                 source_prefix=24,
                 scope_prefix=0,
@@ -32,13 +30,12 @@ def test_upstream_resolver_configures_ecs_option() -> None:
 
     use_edns.assert_called_once()
     kwargs = use_edns.call_args.kwargs
-    assert kwargs["edns"] == 0
-    assert kwargs["payload"] == 1400
     assert len(kwargs["options"]) == 1
     assert isinstance(kwargs["options"][0], dns.edns.ECSOption)
+    assert "payload" not in kwargs
 
 
-def test_upstream_resolver_skips_edns_when_not_configured() -> None:
+def test_upstream_resolver_skips_ecs_when_not_configured() -> None:
     config = UpstreamConfig(name="local", host="127.0.0.1", port=53)
 
     with patch("dns.asyncresolver.Resolver.use_edns") as use_edns:

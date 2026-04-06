@@ -2,8 +2,8 @@ from .loader import build_config_json_schema, dump_config_text, load_config, par
 from .models import (
     AppConfig,
     DispatchStrategyType,
-    EDNSClientSubnetConfig,
-    EDNSConfig,
+    ECSConfig,
+    ECSSubnetConfig,
     ListenerConfig,
     ListenerProtocol,
     PluginConfig,
@@ -20,8 +20,8 @@ from .models import (
 __all__ = [
     "AppConfig",
     "DispatchStrategyType",
-    "EDNSClientSubnetConfig",
-    "EDNSConfig",
+    "ECSConfig",
+    "ECSSubnetConfig",
     "ListenerConfig",
     "ListenerProtocol",
     "PluginConfig",

@@ -32,7 +32,7 @@
       "timeout": 1.0,
       "lifetime": 3.0,
       "use_tcp": false,
-      "edns": null
+      "ecs": null
     },
     {
       "name": "google",
@@ -42,7 +42,7 @@
       "timeout": 1.0,
       "lifetime": 3.0,
       "use_tcp": false,
-      "edns": null
+      "ecs": null
     },
     {
       "name": "quad9",
@@ -52,7 +52,7 @@
       "timeout": 1.0,
       "lifetime": 3.0,
       "use_tcp": false,
-      "edns": null
+      "ecs": null
     },
     {
       "name": "quad9-tcp",
@@ -62,10 +62,12 @@
       "timeout": 1.0,
       "lifetime": 3.0,
       "use_tcp": true,
-      "edns": {
-        "enabled": true,
-        "payload": 1232,
-        "client_subnet": null
+      "ecs": {
+        "subnet": {
+          "address": "198.51.100.0",
+          "source_prefix": 24,
+          "scope_prefix": 0
+        }
       }
     }
   ],

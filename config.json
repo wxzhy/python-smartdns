@@ -32,7 +32,7 @@
       "timeout": 1.0,
       "lifetime": 3.0,
       "use_tcp": false,
-      "edns": null
+      "ecs": null
     },
     {
       "name": "google",
@@ -42,7 +42,7 @@
       "timeout": 1.0,
       "lifetime": 3.0,
       "use_tcp": false,
-      "edns": null
+      "ecs": null
     }
   ],
   "groups": [

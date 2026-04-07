@@ -129,9 +129,13 @@ async def test_pipeline_uses_dispatcher_override_from_matched_rule() -> None:
             "listeners": [
                 {"name": "udp", "protocol": "udp", "host": "127.0.0.1", "port": 0, "enabled": True},
             ],
+            "nameservers": [
+                {"name": "ns-slow", "protocol": "do53", "address": "127.0.0.1", "port": 53},
+                {"name": "ns-fast", "protocol": "do53", "address": "127.0.0.1", "port": 54},
+            ],
             "upstreams": [
-                {"name": "slow-finish-fast-rtt", "protocol": "do53", "host": "127.0.0.1", "port": 53},
-                {"name": "fast-finish-slow-rtt", "protocol": "do53", "host": "127.0.0.1", "port": 54},
+                {"name": "slow-finish-fast-rtt", "nameservers": ["ns-slow"]},
+                {"name": "fast-finish-slow-rtt", "nameservers": ["ns-fast"]},
             ],
             "groups": [
                 {

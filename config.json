@@ -23,22 +23,27 @@
       "enabled": true
     }
   ],
-  "upstreams": [
+  "nameservers": [
     {
-      "name": "cloudflare",
+      "name": "cloudflare-primary",
       "protocol": "do53",
-      "host": "1.1.1.1",
-      "port": 53,
-      "timeout": 1.0,
-      "lifetime": 3.0,
-      "use_tcp": false,
-      "ecs": null
+      "address": "1.1.1.1",
+      "port": 53
     },
     {
-      "name": "google",
+      "name": "google-backup",
       "protocol": "do53",
-      "host": "8.8.8.8",
-      "port": 53,
+      "address": "8.8.8.8",
+      "port": 53
+    }
+  ],
+  "upstreams": [
+    {
+      "name": "public-default",
+      "nameservers": [
+        "cloudflare-primary",
+        "google-backup"
+      ],
       "timeout": 1.0,
       "lifetime": 3.0,
       "use_tcp": false,
@@ -50,8 +55,7 @@
       "name": "default",
       "strategy": "race",
       "upstreams": [
-        "cloudflare",
-        "google"
+        "public-default"
       ]
     }
   ],

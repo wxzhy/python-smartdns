@@ -1,10 +1,10 @@
 from __future__ import annotations
 
 from enum import StrEnum
-from ipaddress import IPv4Address, IPv6Address
-from typing import Any
+from ipaddress import IPv4Network, IPv6Network, ip_network
+from typing import Annotated, Any, Literal
 
-from pydantic import BaseModel, Field, field_validator, model_validator
+from pydantic import BaseModel, ConfigDict, Field, RootModel, field_validator, model_validator
 from pydantic_settings import BaseSettings, PydanticBaseSettingsSource, SettingsConfigDict
 from pydantic_settings.sources.providers.json import JsonConfigSettingsSource
 
@@ -30,20 +30,30 @@ class ListenerProtocol(StrEnum):
     TCP = "tcp"
 
 
-class UpstreamProtocol(StrEnum):
+class NameserverProtocol(StrEnum):
     DO53 = "do53"
     DOH = "doh"
     DOT = "dot"
     DOQ = "doq"
 
 
+class HTTPVersionType(StrEnum):
+    DEFAULT = "default"
+    H1 = "h1"
+    H2 = "h2"
+    H3 = "h3"
+
+
 class DispatchStrategyType(StrEnum):
-    SEQUENTIAL = "sequential"
     RACE = "race"
     WAIT_ALL = "wait_all"
 
 
-class RuntimeConfig(BaseModel):
+class StrictConfigModel(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+
+class RuntimeConfig(StrictConfigModel):
     plugin_dirs: list[str] = Field(default_factory=lambda: ["plugins"])
     loop_policy: str = "auto"
     default_upstream_group: str = "default"
@@ -65,7 +75,7 @@ class RuntimeConfig(BaseModel):
         return normalized
 
 
-class ListenerConfig(BaseModel):
+class ListenerConfig(StrictConfigModel):
     name: str
     protocol: ListenerProtocol
     host: str = "127.0.0.1"
@@ -73,43 +83,75 @@ class ListenerConfig(BaseModel):
     enabled: bool = True
 
 
-class ECSSubnetConfig(BaseModel):
-    address: IPv4Address | IPv6Address
-    source_prefix: int | None = Field(default=None, ge=0, le=128)
-    scope_prefix: int = Field(default=0, ge=0, le=128)
+class ECSConfig(RootModel[str]):
+    @field_validator("root")
+    @classmethod
+    def validate_cidr(cls, value: str) -> str:
+        network = ip_network(value, strict=False)
+        return network.with_prefixlen
 
-    @model_validator(mode="after")
-    def validate_prefix_range(self) -> "ECSSubnetConfig":
-        max_bits = 32 if isinstance(self.address, IPv4Address) else 128
-        if self.source_prefix is not None and self.source_prefix > max_bits:
-            raise ValueError(f"source_prefix 超出地址位数: {max_bits}")
-        if self.scope_prefix > max_bits:
-            raise ValueError(f"scope_prefix 超出地址位数: {max_bits}")
-        return self
+    @property
+    def subnet(self) -> IPv4Network | IPv6Network:
+        return ip_network(self.root, strict=False)
 
 
-class ECSConfig(BaseModel):
-    subnet: ECSSubnetConfig
-
-
-class UpstreamConfig(BaseModel):
+class BaseNameserverConfig(StrictConfigModel):
     name: str
-    protocol: UpstreamProtocol = UpstreamProtocol.DO53
-    host: str
+
+
+class Do53NameserverConfig(BaseNameserverConfig):
+    protocol: Literal[NameserverProtocol.DO53] = NameserverProtocol.DO53
+    address: str
     port: int = Field(default=53, ge=1, le=65535)
+
+
+class DoHNameserverConfig(BaseNameserverConfig):
+    protocol: Literal[NameserverProtocol.DOH] = NameserverProtocol.DOH
+    url: str
+    bootstrap_address: str | None = None
+    verify: bool | str = True
+    want_get: bool = False
+    http_version: HTTPVersionType = HTTPVersionType.DEFAULT
+
+
+class DoTNameserverConfig(BaseNameserverConfig):
+    protocol: Literal[NameserverProtocol.DOT] = NameserverProtocol.DOT
+    address: str
+    port: int = Field(default=853, ge=1, le=65535)
+    hostname: str | None = None
+    verify: bool | str = True
+
+
+class DoQNameserverConfig(BaseNameserverConfig):
+    protocol: Literal[NameserverProtocol.DOQ] = NameserverProtocol.DOQ
+    address: str
+    port: int = Field(default=853, ge=1, le=65535)
+    server_hostname: str | None = None
+    verify: bool | str = True
+
+
+NameserverConfig = Annotated[
+    Do53NameserverConfig | DoHNameserverConfig | DoTNameserverConfig | DoQNameserverConfig,
+    Field(discriminator="protocol"),
+]
+
+
+class UpstreamConfig(StrictConfigModel):
+    name: str
+    nameservers: list[str] = Field(min_length=1)
     timeout: float = Field(default=1.0, gt=0)
     lifetime: float = Field(default=3.0, gt=0)
     use_tcp: bool = False
     ecs: ECSConfig | None = None
 
 
-class UpstreamGroupConfig(BaseModel):
+class UpstreamGroupConfig(StrictConfigModel):
     name: str
-    strategy: DispatchStrategyType = DispatchStrategyType.SEQUENTIAL
+    strategy: DispatchStrategyType = DispatchStrategyType.RACE
     upstreams: list[str] = Field(min_length=1)
 
 
-class RuleMatchConfig(BaseModel):
+class RuleMatchConfig(StrictConfigModel):
     exact_domains: list[str] = Field(default_factory=list)
     suffix_domains: list[str] = Field(default_factory=list)
     qtypes: list[str] = Field(default_factory=list)
@@ -135,7 +177,7 @@ class RuleMatchConfig(BaseModel):
         return self
 
 
-class RuleActionConfig(BaseModel):
+class RuleActionConfig(StrictConfigModel):
     upstream_group: str | None = None
     dispatcher: DispatchStrategyType | None = None
 
@@ -146,14 +188,14 @@ class RuleActionConfig(BaseModel):
         return self
 
 
-class RuleConfig(BaseModel):
+class RuleConfig(StrictConfigModel):
     name: str
     enabled: bool = True
     match: RuleMatchConfig
     action: RuleActionConfig
 
 
-class PluginConfig(BaseModel):
+class PluginConfig(StrictConfigModel):
     name: str
     module: str
     enabled: bool = True
@@ -161,7 +203,7 @@ class PluginConfig(BaseModel):
     variables: dict[str, Any] = Field(default_factory=dict)
 
 
-class WebUIConfig(BaseModel):
+class WebUIConfig(StrictConfigModel):
     enabled: bool = True
     host: str = "127.0.0.1"
     port: int = Field(default=8080, ge=0, le=65535)
@@ -173,7 +215,7 @@ class AppConfig(BaseSettings):
     """应用主配置。"""
 
     model_config = SettingsConfigDict(
-        extra="ignore",
+        extra="forbid",
         env_prefix="DNS_FORWARDER_",
         env_nested_delimiter="__",
         json_file="config.json",
@@ -182,6 +224,7 @@ class AppConfig(BaseSettings):
 
     runtime: RuntimeConfig = Field(default_factory=RuntimeConfig)
     listeners: list[ListenerConfig] = Field(default_factory=list)
+    nameservers: list[NameserverConfig] = Field(default_factory=list)
     upstreams: list[UpstreamConfig] = Field(default_factory=list)
     groups: list[UpstreamGroupConfig] = Field(default_factory=list)
     rules: list[RuleConfig] = Field(default_factory=list)
@@ -208,17 +251,21 @@ class AppConfig(BaseSettings):
     @model_validator(mode="after")
     def validate_references(self) -> "AppConfig":
         _unique_names(self.listeners, "name")
+        _unique_names(self.nameservers, "name")
         _unique_names(self.upstreams, "name")
         _unique_names(self.groups, "name")
         _unique_names(self.rules, "name")
         _unique_names(self.plugins, "name")
 
+        nameserver_names = {item.name for item in self.nameservers}
         upstream_names = {item.name for item in self.upstreams}
         group_names = {item.name for item in self.groups}
         duplicated_target_names = sorted(upstream_names & group_names)
 
         if not self.listeners:
             raise ValueError("至少需要一个 listener")
+        if not self.nameservers:
+            raise ValueError("至少需要一个 nameserver")
         if not self.upstreams:
             raise ValueError("至少需要一个 upstream")
         if not self.groups:
@@ -230,8 +277,10 @@ class AppConfig(BaseSettings):
             raise ValueError(f"group 与 upstream 名称冲突: {duplicated_names}")
 
         for upstream in self.upstreams:
-            if upstream.protocol is not UpstreamProtocol.DO53:
-                raise ValueError(f"当前版本仅支持 do53 upstream: {upstream.name}")
+            missing = set(upstream.nameservers) - nameserver_names
+            if missing:
+                missing_names = ", ".join(sorted(missing))
+                raise ValueError(f"upstream {upstream.name} 引用了不存在的 nameserver: {missing_names}")
 
         available_target_names = upstream_names | group_names
         for group in self.groups:

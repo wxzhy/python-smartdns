@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import time
+from collections.abc import Sequence
 
 import dns.asyncresolver
 import dns.edns
@@ -8,53 +9,58 @@ import dns.nameserver
 import dns.rdatatype
 import dns.resolver
 
-from dns_forwarder.config import UpstreamConfig, UpstreamProtocol
+from dns_forwarder.config import UpstreamConfig
 from dns_forwarder.logging import get_logger
 from dns_forwarder.pipeline.context import RequestContext, UpstreamResult
 
 from .base import BaseUpstreamResolver
 
 
-logger = get_logger("resolver.do53")
+logger = get_logger("resolver.upstream")
 
 
 class UpstreamResolver(BaseUpstreamResolver):
-    protocol = UpstreamProtocol.DO53
-
-    def __init__(self, config: UpstreamConfig) -> None:
+    def __init__(
+        self,
+        config: UpstreamConfig,
+        nameservers: Sequence[dns.nameserver.Nameserver],
+    ) -> None:
         super().__init__(config)
         self.resolver = dns.asyncresolver.Resolver(configure=False)
         self.resolver.timeout = config.timeout
         self.resolver.lifetime = config.lifetime
         self.resolver.use_search_by_default = False
         self.resolver.search = []
-        self.resolver.nameservers = [dns.nameserver.Do53Nameserver(config.host, config.port)]
+        self.resolver.nameservers = list(nameservers)
+        self.resolver.rotate = len(self.resolver.nameservers) > 1
         if config.ecs is not None:
+            subnet = config.ecs.subnet
             self.resolver.use_edns(
                 options=[
                     dns.edns.ECSOption(
-                        str(config.ecs.subnet.address),
-                        srclen=config.ecs.subnet.source_prefix,
-                        scopelen=config.ecs.subnet.scope_prefix,
+                        str(subnet.network_address),
+                        srclen=subnet.prefixlen,
                     )
                 ]
             )
             logger.debug(
                 "上游启用 ECS request_target=%s ecs=%s",
                 config.name,
-                config.ecs.subnet.address,
+                subnet.with_prefixlen,
             )
 
     async def resolve(self, context: RequestContext) -> UpstreamResult:
         question = context.request.question[0]
         started = time.perf_counter()
         logger.debug(
-            "发起上游查询 request_id=%s upstream=%s qname=%s qtype=%s tcp=%s",
+            "发起上游查询 request_id=%s upstream=%s qname=%s qtype=%s tcp=%s nameserver_count=%s rotate=%s",
             context.request_id,
             self.config.name,
             question.name.to_text().rstrip("."),
             dns.rdatatype.to_text(question.rdtype),
             self.config.use_tcp,
+            len(self.resolver.nameservers),
+            self.resolver.rotate,
         )
 
         try:

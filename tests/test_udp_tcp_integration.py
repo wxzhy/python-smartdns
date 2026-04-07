@@ -55,12 +55,18 @@ def write_integration_config(path: Path, upstream_port: int) -> None:
             {"name": "udp", "protocol": "udp", "host": "127.0.0.1", "port": 0, "enabled": True},
             {"name": "tcp", "protocol": "tcp", "host": "127.0.0.1", "port": 0, "enabled": True},
         ],
+        "nameservers": [
+            {
+                "name": "local-ns",
+                "protocol": "do53",
+                "address": "127.0.0.1",
+                "port": upstream_port,
+            }
+        ],
         "upstreams": [
             {
                 "name": "local",
-                "protocol": "do53",
-                "host": "127.0.0.1",
-                "port": upstream_port,
+                "nameservers": ["local-ns"],
                 "timeout": 0.2,
                 "lifetime": 0.5,
                 "use_tcp": False,

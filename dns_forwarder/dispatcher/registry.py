@@ -9,7 +9,6 @@ from dns_forwarder.pipeline.context import RequestContext, UpstreamResult
 
 from .base import DispatchStrategy
 from .race import RaceDispatchStrategy
-from .sequential import SequentialDispatchStrategy
 from .wait_all import WaitAllDispatchStrategy
 
 
@@ -20,7 +19,6 @@ class DispatcherRegistry:
     def __init__(self, strategies: Iterable[DispatchStrategy] | None = None) -> None:
         resolved_strategies = (
             (
-                SequentialDispatchStrategy(),
                 RaceDispatchStrategy(),
                 WaitAllDispatchStrategy(),
             )

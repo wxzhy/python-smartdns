@@ -98,23 +98,7 @@ def _build_context(qtype: str = "A") -> RequestContext:
     )
 
 
-async def test_sequential_dispatcher_falls_back_only_on_error() -> None:
-    registry = DispatcherRegistry()
-    group = UpstreamGroupConfig(name="default", strategy=DispatchStrategyType.SEQUENTIAL, upstreams=["a", "b"])
-    manager = StubResolverManager(
-        {
-            "a": _failure("a"),
-            "b": _success("b"),
-        }
-    )
-
-    result = await registry.dispatch_group(_build_context(), group, manager)
-
-    assert result.upstream_name == "b"
-    assert result.answer is not None
-
-
-async def test_race_dispatcher_ignores_failure_until_success_arrives() -> None:
+async def test_race_dispatcher_returns_first_success_even_after_failures() -> None:
     registry = DispatcherRegistry()
     group = UpstreamGroupConfig(name="default", strategy=DispatchStrategyType.RACE, upstreams=["boom", "ok"])
     manager = StubResolverManager(
@@ -130,31 +114,39 @@ async def test_race_dispatcher_ignores_failure_until_success_arrives() -> None:
     assert result.answer is not None
 
 
-async def test_sequential_dispatcher_stops_on_nested_nxdomain() -> None:
+async def test_race_dispatcher_returns_nxdomain_when_no_success_exists() -> None:
     registry = DispatcherRegistry()
-    nested = UpstreamGroupConfig(
-        name="nested",
-        strategy=DispatchStrategyType.SEQUENTIAL,
-        upstreams=["nx", "ok"],
-    )
-    parent = UpstreamGroupConfig(
-        name="default",
-        strategy=DispatchStrategyType.SEQUENTIAL,
-        upstreams=["nested", "fallback"],
-    )
+    group = UpstreamGroupConfig(name="default", strategy=DispatchStrategyType.RACE, upstreams=["error", "nx", "boom"])
     manager = StubResolverManager(
         {
-            "nx": _nxdomain("nx"),
-            "ok": _success("ok"),
-            "fallback": _success("fallback"),
+            "error": _failure("error", delay=0.01),
+            "nx": _nxdomain("nx", delay=0.02),
+            "boom": _raising("boom", delay=0.03),
+        }
+    )
+
+    result = await registry.dispatch_group(_build_context(), group, manager)
+
+    assert isinstance(result.error, dns.resolver.NXDOMAIN)
+
+
+async def test_race_dispatcher_supports_nested_groups() -> None:
+    registry = DispatcherRegistry()
+    nested = UpstreamGroupConfig(name="nested", strategy=DispatchStrategyType.RACE, upstreams=["bad", "ok"])
+    parent = UpstreamGroupConfig(name="default", strategy=DispatchStrategyType.RACE, upstreams=["nested", "fallback"])
+    manager = StubResolverManager(
+        {
+            "bad": _failure("bad"),
+            "ok": _success("ok", delay=0.01),
+            "fallback": _success("fallback", delay=0.05),
         },
         groups=[nested],
     )
 
     result = await registry.dispatch_group(_build_context(), parent, manager)
 
-    assert isinstance(result.error, dns.resolver.NXDOMAIN)
-    assert manager.calls == ["nx"]
+    assert result.upstream_name == "ok"
+    assert set(manager.calls) == {"bad", "ok", "fallback"}
 
 
 async def test_wait_all_dispatcher_returns_fastest_success_by_duration() -> None:
@@ -218,10 +210,36 @@ async def test_wait_all_dispatcher_returns_nxdomain_when_no_success() -> None:
     assert isinstance(result.error, dns.resolver.NXDOMAIN)
 
 
-async def test_sequential_dispatcher_emits_fallback_debug_log(capture_dns_logs, caplog) -> None:
+async def test_wait_all_dispatcher_supports_nested_groups() -> None:
+    registry = DispatcherRegistry()
+    nested = UpstreamGroupConfig(
+        name="nested",
+        strategy=DispatchStrategyType.WAIT_ALL,
+        upstreams=["fast", "slow"],
+    )
+    parent = UpstreamGroupConfig(
+        name="default",
+        strategy=DispatchStrategyType.WAIT_ALL,
+        upstreams=["nested", "fallback"],
+    )
+    manager = StubResolverManager(
+        {
+            "fast": _success("fast", delay=0.01, duration_ms=20.0),
+            "slow": _success("slow", delay=0.03, duration_ms=5.0),
+            "fallback": _success("fallback", delay=0.02, duration_ms=12.0),
+        },
+        groups=[nested],
+    )
+
+    result = await registry.dispatch_group(_build_context(), parent, manager)
+
+    assert result.upstream_name == "slow"
+
+
+async def test_race_dispatcher_emits_failure_log_while_continuing(capture_dns_logs, caplog) -> None:
     capture_dns_logs("DEBUG")
     registry = DispatcherRegistry()
-    group = UpstreamGroupConfig(name="default", strategy=DispatchStrategyType.SEQUENTIAL, upstreams=["a", "b"])
+    group = UpstreamGroupConfig(name="default", strategy=DispatchStrategyType.RACE, upstreams=["a", "b"])
     manager = StubResolverManager(
         {
             "a": _failure("a"),
@@ -232,4 +250,4 @@ async def test_sequential_dispatcher_emits_fallback_debug_log(capture_dns_logs, 
     result = await registry.dispatch_group(_build_context(), group, manager)
 
     assert result.upstream_name == "b"
-    assert "顺序调度回退" in caplog.text
+    assert "并发调度忽略失败结果" in caplog.text

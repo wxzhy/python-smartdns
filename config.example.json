@@ -23,52 +23,68 @@
       "enabled": true
     }
   ],
+  "nameservers": [
+    {
+      "name": "cf-udp",
+      "protocol": "do53",
+      "address": "1.1.1.1",
+      "port": 53
+    },
+    {
+      "name": "google-udp",
+      "protocol": "do53",
+      "address": "8.8.8.8",
+      "port": 53
+    },
+    {
+      "name": "quad9-dot",
+      "protocol": "dot",
+      "address": "9.9.9.9",
+      "port": 853,
+      "hostname": "dns.quad9.net",
+      "verify": true
+    },
+    {
+      "name": "cloudflare-doh",
+      "protocol": "doh",
+      "url": "https://cloudflare-dns.com/dns-query",
+      "bootstrap_address": "1.1.1.1",
+      "verify": true,
+      "want_get": false,
+      "http_version": "h2"
+    },
+    {
+      "name": "adguard-doq",
+      "protocol": "doq",
+      "address": "94.140.14.14",
+      "port": 853,
+      "server_hostname": "unfiltered.adguard-dns.com",
+      "verify": true
+    }
+  ],
   "upstreams": [
     {
-      "name": "cloudflare",
-      "protocol": "do53",
-      "host": "1.1.1.1",
-      "port": 53,
+      "name": "public-pool",
+      "nameservers": [
+        "cf-udp",
+        "google-udp",
+        "quad9-dot"
+      ],
       "timeout": 1.0,
       "lifetime": 3.0,
       "use_tcp": false,
       "ecs": null
     },
     {
-      "name": "google",
-      "protocol": "do53",
-      "host": "8.8.8.8",
-      "port": 53,
+      "name": "encrypted-pool",
+      "nameservers": [
+        "cloudflare-doh",
+        "adguard-doq"
+      ],
       "timeout": 1.0,
       "lifetime": 3.0,
       "use_tcp": false,
-      "ecs": null
-    },
-    {
-      "name": "quad9",
-      "protocol": "do53",
-      "host": "9.9.9.9",
-      "port": 53,
-      "timeout": 1.0,
-      "lifetime": 3.0,
-      "use_tcp": false,
-      "ecs": null
-    },
-    {
-      "name": "quad9-tcp",
-      "protocol": "do53",
-      "host": "9.9.9.9",
-      "port": 53,
-      "timeout": 1.0,
-      "lifetime": 3.0,
-      "use_tcp": true,
-      "ecs": {
-        "subnet": {
-          "address": "198.51.100.0",
-          "source_prefix": 24,
-          "scope_prefix": 0
-        }
-      }
+      "ecs": "198.51.100.0/24"
     }
   ],
   "groups": [
@@ -76,26 +92,16 @@
       "name": "default",
       "strategy": "race",
       "upstreams": [
-        "cloudflare",
-        "google",
-        "quad9"
+        "public-pool",
+        "encrypted-pool"
       ]
     },
     {
       "name": "all-address-wait",
       "strategy": "wait_all",
       "upstreams": [
-        "cloudflare",
-        "google",
-        "quad9"
-      ]
-    },
-    {
-      "name": "fallback-chain",
-      "strategy": "sequential",
-      "upstreams": [
-        "default",
-        "quad9-tcp"
+        "public-pool",
+        "encrypted-pool"
       ]
     }
   ],
@@ -119,7 +125,7 @@
       }
     },
     {
-      "name": "corp-fallback",
+      "name": "corp-encrypted",
       "enabled": false,
       "match": {
         "exact_domains": [],
@@ -129,7 +135,7 @@
         "qtypes": []
       },
       "action": {
-        "upstream_group": "fallback-chain",
+        "upstream_group": "default",
         "dispatcher": "race"
       }
     }

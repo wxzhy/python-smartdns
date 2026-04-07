@@ -35,12 +35,18 @@ def write_config(path: Path, *, upstream_port: int = 5301, webui_enabled: bool =
                 "enabled": True,
             }
         ],
+        "nameservers": [
+            {
+                "name": "local-ns",
+                "protocol": "do53",
+                "address": "127.0.0.1",
+                "port": upstream_port,
+            }
+        ],
         "upstreams": [
             {
                 "name": "local",
-                "protocol": "do53",
-                "host": "127.0.0.1",
-                "port": upstream_port,
+                "nameservers": ["local-ns"],
                 "timeout": 0.2,
                 "lifetime": 0.5,
                 "use_tcp": False,
@@ -49,7 +55,7 @@ def write_config(path: Path, *, upstream_port: int = 5301, webui_enabled: bool =
         "groups": [
             {
                 "name": "default",
-                "strategy": "sequential",
+                "strategy": "race",
                 "upstreams": ["local"],
             }
         ],
@@ -109,7 +115,9 @@ async def test_webui_save_and_reload_success(tmp_path: Path, capture_dns_logs, c
         editor = await client.get("/config", headers=_basic_auth_headers())
         assert editor.status_code == 200
 
-        current_text = config_path.read_text(encoding="utf-8").replace('"address": "127.0.0.1"', '"address": "127.0.0.2"', 1)
+        current_data = json.loads(config_path.read_text(encoding="utf-8"))
+        current_data["plugins"][0]["variables"]["address"] = "127.0.0.2"
+        current_text = json.dumps(current_data, ensure_ascii=False, indent=2) + "\n"
         saved = await client.post("/config", data={"config_text": current_text}, headers=_basic_auth_headers())
         assert saved.status_code == 200
         assert "配置已保存" in saved.text

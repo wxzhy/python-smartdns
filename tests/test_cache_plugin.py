@@ -25,16 +25,17 @@ def build_config() -> AppConfig:
             "listeners": [
                 {"name": "udp", "protocol": "udp", "host": "127.0.0.1", "port": 0, "enabled": True},
             ],
+            "nameservers": [
+                {"name": "local-ns", "protocol": "do53", "address": "127.0.0.1", "port": 53},
+            ],
             "upstreams": [
                 {
                     "name": "upstream-a",
-                    "protocol": "do53",
-                    "host": "127.0.0.1",
-                    "port": 53,
+                    "nameservers": ["local-ns"],
                 },
             ],
             "groups": [
-                {"name": "default", "strategy": "sequential", "upstreams": ["upstream-a"]},
+                {"name": "default", "strategy": "race", "upstreams": ["upstream-a"]},
             ],
             "rules": [],
             "plugins": [],

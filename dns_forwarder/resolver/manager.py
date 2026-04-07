@@ -1,22 +1,18 @@
 from __future__ import annotations
 
-from collections.abc import Mapping
+import dns.nameserver
 
-from dns_forwarder.config import AppConfig, UpstreamConfig, UpstreamGroupConfig, UpstreamProtocol
+from dns_forwarder.config import AppConfig, UpstreamConfig, UpstreamGroupConfig
 from dns_forwarder.logging import get_logger
 from dns_forwarder.pipeline.context import RequestContext, UpstreamResult
 from dns_forwarder.plugin_api import PluginRegistry
 
 from .base import BaseUpstreamResolver
 from .do53 import UpstreamResolver
+from .nameservers import build_nameserver_map
 
 
 logger = get_logger("resolver.manager")
-
-
-DEFAULT_RESOLVER_TYPES: dict[UpstreamProtocol, type[BaseUpstreamResolver]] = {
-    UpstreamResolver.protocol: UpstreamResolver,
-}
 
 
 class ResolverManager:
@@ -24,13 +20,10 @@ class ResolverManager:
         self,
         config: AppConfig,
         plugin_registry: PluginRegistry,
-        resolver_types: Mapping[UpstreamProtocol, type[BaseUpstreamResolver]] | None = None,
     ) -> None:
         self._groups = {group.name: group for group in config.groups}
         self._plugin_registry = plugin_registry
-        self._resolver_types = (
-            dict(DEFAULT_RESOLVER_TYPES) if resolver_types is None else dict(resolver_types)
-        )
+        self._nameservers = build_nameserver_map(config.nameservers)
         self._resolvers = {
             upstream.name: self._build_resolver(upstream) for upstream in config.upstreams
         }
@@ -49,16 +42,18 @@ class ResolverManager:
         return await self._resolvers[upstream_name].resolve(context)
 
     def _build_resolver(self, upstream: UpstreamConfig) -> BaseUpstreamResolver:
-        resolver_type = self._resolver_types.get(upstream.protocol)
-        if resolver_type is None:
-            raise ValueError(f"不支持的 upstream protocol: {upstream.protocol}")
+        nameservers = [self._nameservers[name] for name in upstream.nameservers]
         logger.debug(
-            "装配上游 resolver upstream=%s protocol=%s implementation=%s",
+            "装配上游 resolver upstream=%s nameservers=%s rotate=%s",
             upstream.name,
-            upstream.protocol.value,
-            resolver_type.__name__,
+            ",".join(str(nameserver) for nameserver in nameservers),
+            len(nameservers) > 1,
         )
-        return resolver_type(upstream)
+        return UpstreamResolver(upstream, nameservers)
+
+    @property
+    def nameservers(self) -> dict[str, dns.nameserver.Nameserver]:
+        return dict(self._nameservers)
 
 
 __all__ = [

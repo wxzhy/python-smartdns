@@ -205,6 +205,7 @@ class PluginConfig(StrictConfigModel):
 
 class WebUIConfig(StrictConfigModel):
     enabled: bool = True
+    doh_enabled: bool = False
     host: str = "127.0.0.1"
     port: int = Field(default=8080, ge=0, le=65535)
     username: str = Field(default="admin", min_length=1)
@@ -262,8 +263,8 @@ class AppConfig(BaseSettings):
         group_names = {item.name for item in self.groups}
         duplicated_target_names = sorted(upstream_names & group_names)
 
-        if not self.listeners:
-            raise ValueError("至少需要一个 listener")
+        if not self.listeners and not self.webui.enabled and not self.webui.doh_enabled:
+            raise ValueError("至少需要一个 listener，或启用 webui / DoH")
         if not self.nameservers:
             raise ValueError("至少需要一个 nameserver")
         if not self.upstreams:

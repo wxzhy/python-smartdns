@@ -165,12 +165,18 @@ class RuntimeManager:
             )
         self._listeners = listeners
 
-        if config.webui.enabled:
+        if config.webui.enabled or config.webui.doh_enabled:
             app = create_webui_app(self)
             server = ManagedUvicornServer(app, config.webui.host, config.webui.port)
             await server.start()
             self._webui_server = server
-            logger.info("webui 已启动 address=%s:%s", config.webui.host, config.webui.port)
+            logger.info(
+                "http 服务已启动 address=%s:%s webui=%s doh=%s",
+                config.webui.host,
+                config.webui.port,
+                config.webui.enabled,
+                config.webui.doh_enabled,
+            )
 
     def _services_started(self) -> bool:
         return bool(self._listeners) or self._webui_server is not None
@@ -183,6 +189,7 @@ class RuntimeManager:
         )
         webui = (
             config.webui.enabled,
+            config.webui.doh_enabled,
             config.webui.host,
             config.webui.port,
         )

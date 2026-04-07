@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import sys
 import json
 import base64
@@ -17,7 +18,14 @@ def _basic_auth_headers(username: str = "admin", password: str = "change-me") ->
     return {"Authorization": f"Basic {token}"}
 
 
-def write_config(path: Path, *, upstream_port: int = 5301, webui_enabled: bool = False, webui_port: int = 8080) -> None:
+def write_config(
+    path: Path,
+    *,
+    upstream_port: int = 5301,
+    webui_enabled: bool = False,
+    doh_enabled: bool = False,
+    webui_port: int = 8080,
+) -> None:
     plugin_dir = str((Path(__file__).resolve().parents[1] / "plugins").resolve())
     data = {
         "runtime": {
@@ -77,6 +85,7 @@ def write_config(path: Path, *, upstream_port: int = 5301, webui_enabled: bool =
         ],
         "webui": {
             "enabled": webui_enabled,
+            "doh_enabled": doh_enabled,
             "host": "127.0.0.1",
             "port": webui_port,
             "username": "admin",
@@ -105,7 +114,7 @@ async def test_sample_plugin_short_circuits_request(tmp_path: Path) -> None:
 async def test_webui_save_and_reload_success(tmp_path: Path, capture_dns_logs, caplog) -> None:
     capture_dns_logs("INFO")
     config_path = tmp_path / "config.json"
-    write_config(config_path)
+    write_config(config_path, webui_enabled=True)
     manager = RuntimeManager(config_path)
     await manager.load()
     app = create_webui_app(manager)
@@ -140,7 +149,7 @@ async def test_webui_save_and_reload_success(tmp_path: Path, capture_dns_logs, c
 async def test_webui_reload_failure_keeps_old_runtime(tmp_path: Path, capture_dns_logs, caplog) -> None:
     capture_dns_logs("INFO")
     config_path = tmp_path / "config.json"
-    write_config(config_path)
+    write_config(config_path, webui_enabled=True)
     manager = RuntimeManager(config_path)
     await manager.start()
     app = create_webui_app(manager)
@@ -167,7 +176,7 @@ async def test_webui_reload_failure_keeps_old_runtime(tmp_path: Path, capture_dn
 
 async def test_webui_requires_basic_auth(tmp_path: Path) -> None:
     config_path = tmp_path / "config.json"
-    write_config(config_path)
+    write_config(config_path, webui_enabled=True)
     manager = RuntimeManager(config_path)
     await manager.load()
     app = create_webui_app(manager)
@@ -185,7 +194,9 @@ async def test_webui_requires_basic_auth(tmp_path: Path) -> None:
 
 
 def test_webui_server_uses_current_event_loop() -> None:
-    server = ManagedUvicornServer(create_webui_app(RuntimeManager(Path("config.json"))), "127.0.0.1", 8080)
+    manager = RuntimeManager(Path("config.json"))
+    asyncio.run(manager.load())
+    server = ManagedUvicornServer(create_webui_app(manager), "127.0.0.1", 8080)
     assert server._config.loop == "none"
 
 

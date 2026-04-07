@@ -120,6 +120,22 @@ def test_parse_config_text_accepts_all_supported_nameserver_protocols() -> None:
     assert config.upstreams[0].nameservers == ["udp-ns", "doh-ns", "dot-ns", "doq-ns"]
 
 
+def test_parse_config_text_allows_doh_without_udp_tcp_listeners() -> None:
+    config_dict = build_config_dict()
+    config_dict["listeners"] = []
+    config_dict["webui"] = {
+        "enabled": False,
+        "doh_enabled": True,
+        "host": "127.0.0.1",
+        "port": 8080,
+    }
+
+    config = parse_config_dict(config_dict)
+
+    assert config.listeners == []
+    assert config.webui.doh_enabled is True
+
+
 def test_parse_config_text_rejects_missing_group_target_reference() -> None:
     config_dict = build_config_dict()
     config_dict["groups"][0]["upstreams"] = ["missing"]
@@ -281,6 +297,7 @@ def test_config_example_json_is_valid() -> None:
     assert isinstance(config, AppConfig)
     assert config.runtime.default_upstream_group == "default"
     assert len(config.nameservers) >= 4
+    assert config.webui.doh_enabled is True
     assert any(group.strategy is DispatchStrategyType.RACE for group in config.groups)
     assert any(group.strategy is DispatchStrategyType.WAIT_ALL for group in config.groups)
 

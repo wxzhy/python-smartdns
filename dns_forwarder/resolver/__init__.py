@@ -1,6 +1,6 @@
 from .base import BaseUpstreamResolver
-from .do53 import UpstreamResolver
 from .manager import ResolverManager
+from .upstream import UpstreamResolver
 
 __all__ = [
     "BaseUpstreamResolver",

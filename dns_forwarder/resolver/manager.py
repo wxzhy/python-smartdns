@@ -8,8 +8,8 @@ from dns_forwarder.pipeline.context import RequestContext, UpstreamResult
 from dns_forwarder.plugin_api import PluginRegistry
 
 from .base import BaseUpstreamResolver
-from .do53 import UpstreamResolver
 from .nameservers import build_nameserver_map
+from .upstream import UpstreamResolver
 
 
 logger = get_logger("resolver.manager")

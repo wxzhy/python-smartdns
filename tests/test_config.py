@@ -21,6 +21,10 @@ def build_config_dict() -> dict[str, object]:
             "plugin_dirs": ["plugins"],
             "default_upstream_group": "default",
         },
+        "tree_root": {
+            "domain_dir": None,
+            "ip_dir": None,
+        },
         "listeners": [
             {
                 "name": "udp",
@@ -253,7 +257,7 @@ def test_parse_config_text_materializes_missing_plugins_as_disabled_defaults() -
     config = parse_config_dict(config_dict)
     plugins_by_module = {plugin.module: plugin for plugin in config.plugins}
 
-    assert {"sample_plugin", "cache_plugin", "speedtest_plugin"} <= set(plugins_by_module)
+    assert {"sample_plugin", "cache_plugin", "speedtest_plugin", "tag_plugin"} <= set(plugins_by_module)
     assert plugins_by_module["sample_plugin"].enabled is True
     assert plugins_by_module["cache_plugin"].enabled is False
     assert plugins_by_module["cache_plugin"].config == {"max_size": 100000}
@@ -261,6 +265,9 @@ def test_parse_config_text_materializes_missing_plugins_as_disabled_defaults() -
     assert plugins_by_module["speedtest_plugin"].enabled is False
     assert plugins_by_module["speedtest_plugin"].config["response_ip_limit"] == 2
     assert plugins_by_module["speedtest_plugin"].variables == {}
+    assert plugins_by_module["tag_plugin"].enabled is False
+    assert plugins_by_module["tag_plugin"].config == {}
+    assert plugins_by_module["tag_plugin"].variables == {}
 
 
 def test_build_config_json_schema_includes_available_plugin_schemas() -> None:
@@ -272,6 +279,7 @@ def test_build_config_json_schema_includes_available_plugin_schemas() -> None:
     options = plugin_schema["oneOf"]
     sample_option = next(item for item in options if item["properties"]["module"]["const"] == "sample_plugin")
     cache_option = next(item for item in options if item["properties"]["module"]["const"] == "cache_plugin")
+    tag_option = next(item for item in options if item["properties"]["module"]["const"] == "tag_plugin")
 
     assert sample_option["title"] == "Sample Plugin"
     assert "domains" in sample_option["properties"]["config"]["properties"]
@@ -279,6 +287,8 @@ def test_build_config_json_schema_includes_available_plugin_schemas() -> None:
     assert cache_option["properties"]["enabled"]["default"] is False
     assert cache_option["default"]["enabled"] is False
     assert cache_option["default"]["config"] == {"max_size": 100000}
+    assert tag_option["properties"]["config"]["type"] == "object"
+    assert tag_option["default"]["config"] == {}
 
 
 def test_discover_available_plugins_lists_installed_plugins() -> None:
@@ -286,7 +296,7 @@ def test_discover_available_plugins_lists_installed_plugins() -> None:
 
     modules = {item.module for item in discover_available_plugins([plugin_dir])}
 
-    assert {"cache_plugin", "sample_plugin", "speedtest_plugin"} <= modules
+    assert {"cache_plugin", "sample_plugin", "speedtest_plugin", "tag_plugin"} <= modules
 
 
 def test_config_example_json_is_valid() -> None:
@@ -363,6 +373,42 @@ def test_parse_config_text_accepts_rule_dispatcher_override_without_group_overri
 
     assert config.rules[0].action.upstream_group is None
     assert config.rules[0].action.dispatcher is DispatchStrategyType.WAIT_ALL
+
+
+def test_parse_config_text_accepts_rule_tag_matcher() -> None:
+    config_dict = build_config_dict()
+    config_dict["rules"] = [
+        {
+            "name": "tagged",
+            "enabled": True,
+            "match": {
+                "exact_domains": [],
+                "suffix_domains": [],
+                "qtypes": ["A"],
+                "tags": ["proxy", "proxy", "domestic"],
+            },
+            "action": {
+                "dispatcher": "wait_all",
+            },
+        }
+    ]
+
+    config = parse_config_dict(config_dict)
+
+    assert config.rules[0].match.tags == ["proxy", "domestic"]
+
+
+def test_parse_config_text_accepts_tree_root_config() -> None:
+    config_dict = build_config_dict()
+    config_dict["tree_root"] = {
+        "domain_dir": " examples/tags/domains ",
+        "ip_dir": "examples/tags/ips",
+    }
+
+    config = parse_config_dict(config_dict)
+
+    assert config.tree_root.domain_dir == "examples/tags/domains"
+    assert config.tree_root.ip_dir == "examples/tags/ips"
 
 
 def test_parse_config_text_rejects_empty_rule_action() -> None:

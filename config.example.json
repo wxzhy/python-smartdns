@@ -7,6 +7,10 @@
     "default_upstream_group": "default",
     "log_level": "INFO"
   },
+  "tree_root": {
+    "domain_dir": "examples/tags/domains",
+    "ip_dir": "examples/tags/ips"
+  },
   "listeners": [
     {
       "name": "udp-default",
@@ -132,7 +136,27 @@
         "suffix_domains": [
           "corp.internal"
         ],
-        "qtypes": []
+        "qtypes": [],
+        "tags": []
+      },
+      "action": {
+        "upstream_group": "default",
+        "dispatcher": "race"
+      }
+    },
+    {
+      "name": "tagged-addresses",
+      "enabled": false,
+      "match": {
+        "exact_domains": [],
+        "suffix_domains": [],
+        "qtypes": [
+          "A",
+          "AAAA"
+        ],
+        "tags": [
+          "proxy"
+        ]
       },
       "action": {
         "upstream_group": "default",
@@ -178,6 +202,13 @@
         "ping_privileged": false,
         "response_ip_limit": 2
       },
+      "variables": {}
+    },
+    {
+      "name": "tags",
+      "module": "tag_plugin",
+      "enabled": false,
+      "config": {},
       "variables": {}
     }
   ],

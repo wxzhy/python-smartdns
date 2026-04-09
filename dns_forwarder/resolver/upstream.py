@@ -83,6 +83,7 @@ class UpstreamResolver(BaseUpstreamResolver):
                 upstream_name=self.config.name,
                 duration_ms=duration_ms,
                 answer=answer,
+                tags=context.tags.copy(),
             )
         except dns.resolver.NXDOMAIN as exc:
             duration_ms = (time.perf_counter() - started) * 1000
@@ -96,6 +97,7 @@ class UpstreamResolver(BaseUpstreamResolver):
                 upstream_name=self.config.name,
                 duration_ms=duration_ms,
                 error=exc,
+                tags=context.tags.copy(),
             )
         except Exception as exc:
             duration_ms = (time.perf_counter() - started) * 1000
@@ -110,4 +112,5 @@ class UpstreamResolver(BaseUpstreamResolver):
                 upstream_name=self.config.name,
                 duration_ms=duration_ms,
                 error=exc,
+                tags=context.tags.copy(),
             )

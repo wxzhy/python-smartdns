@@ -75,6 +75,19 @@ class RuntimeConfig(StrictConfigModel):
         return normalized
 
 
+class TreeRootConfig(StrictConfigModel):
+    domain_dir: str | None = None
+    ip_dir: str | None = None
+
+    @field_validator("domain_dir", "ip_dir", mode="before")
+    @classmethod
+    def normalize_dir(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        path = str(value).strip()
+        return path or None
+
+
 class ListenerConfig(StrictConfigModel):
     name: str
     protocol: ListenerProtocol
@@ -155,6 +168,7 @@ class RuleMatchConfig(StrictConfigModel):
     exact_domains: list[str] = Field(default_factory=list)
     suffix_domains: list[str] = Field(default_factory=list)
     qtypes: list[str] = Field(default_factory=list)
+    tags: list[str] = Field(default_factory=list)
 
     @field_validator("exact_domains", "suffix_domains", mode="before")
     @classmethod
@@ -170,9 +184,24 @@ class RuleMatchConfig(StrictConfigModel):
             return []
         return [item.strip().upper() for item in value if item.strip()]
 
+    @field_validator("tags", mode="before")
+    @classmethod
+    def normalize_tags(cls, value: list[str] | None) -> list[str]:
+        if value is None:
+            return []
+        seen: set[str] = set()
+        normalized: list[str] = []
+        for item in value:
+            tag = item.strip()
+            if not tag or tag in seen:
+                continue
+            seen.add(tag)
+            normalized.append(tag)
+        return normalized
+
     @model_validator(mode="after")
     def validate_any_matcher(self) -> "RuleMatchConfig":
-        if not self.exact_domains and not self.suffix_domains and not self.qtypes:
+        if not self.exact_domains and not self.suffix_domains and not self.qtypes and not self.tags:
             raise ValueError("规则至少需要一个匹配条件")
         return self
 
@@ -224,6 +253,7 @@ class AppConfig(BaseSettings):
     )
 
     runtime: RuntimeConfig = Field(default_factory=RuntimeConfig)
+    tree_root: TreeRootConfig = Field(default_factory=TreeRootConfig)
     listeners: list[ListenerConfig] = Field(default_factory=list)
     nameservers: list[NameserverConfig] = Field(default_factory=list)
     upstreams: list[UpstreamConfig] = Field(default_factory=list)

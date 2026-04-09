@@ -9,11 +9,10 @@ from typing import TYPE_CHECKING, Any, Callable
 
 from pydantic import BaseModel
 
-from dns_forwarder.config.models import PluginConfig
-
 if TYPE_CHECKING:
     import dns.message
 
+    from dns_forwarder.config.models import PluginConfig
     from dns_forwarder.pipeline.context import RequestContext, UpstreamResult
 
 
@@ -103,8 +102,16 @@ class PluginManager:
         self.registry = registry
 
     @classmethod
-    async def build(cls, plugin_configs: list[PluginConfig], plugin_dirs: list[str]) -> "PluginManager":
+    async def build(
+        cls,
+        plugin_configs: list[PluginConfig],
+        plugin_dirs: list[str],
+        shared_contexts: dict[str, Any] | None = None,
+    ) -> "PluginManager":
         registry = PluginRegistry()
+        if shared_contexts is not None:
+            for name, value in shared_contexts.items():
+                registry.register_context(name, value)
         loaded: list[LoadedPlugin] = []
 
         for plugin_config in plugin_configs:

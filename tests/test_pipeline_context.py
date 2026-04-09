@@ -108,6 +108,27 @@ def test_request_context_uses_txid_and_clientaddr() -> None:
 
     assert context.request_id == request.id
     assert context.clientaddr == ("127.0.0.1", 5300)
+    assert context.tags == set()
+
+
+def test_upstream_result_tags_are_independent_from_request_tags() -> None:
+    request = dns.message.make_query("example.test", "A")
+    context = RequestContext(
+        request=request,
+        clientaddr=("127.0.0.1", 5300),
+        listener_name="udp",
+        tags={"request-tag"},
+    )
+    result = UpstreamResult(
+        upstream_name="upstream-a",
+        duration_ms=1.0,
+        tags=context.tags.copy(),
+    )
+
+    result.tags.add("result-tag")
+
+    assert context.tags == {"request-tag"}
+    assert result.tags == {"request-tag", "result-tag"}
 
 
 def test_sync_answer_response_replaces_main_rrset_and_keeps_cname() -> None:
@@ -323,3 +344,27 @@ async def test_pipeline_supports_nested_dispatch_groups() -> None:
     assert final_response.answer[0][0].address == "203.0.113.88"
     assert plugin_manager.last_context is not None
     assert plugin_manager.last_context.upstream_results[0].upstream_name == "upstream-a"
+
+
+async def test_pipeline_preserves_request_tags_on_upstream_result() -> None:
+    config = build_config()
+    request = dns.message.make_query("example.test", "A")
+    response = dns.message.make_response(request)
+    response.answer.append(dns.rrset.from_text("example.test.", 60, "IN", "A", "203.0.113.88"))
+    answer = build_answer_from_response(request, response)
+
+    async def plugin_on_request(context: RequestContext) -> None:
+        context.tags.update({"domain-tag"})
+
+    plugin_manager = RecordingPluginManager(on_request=plugin_on_request)
+    resolver_manager = StaticResolverManager(
+        config,
+        UpstreamResult(upstream_name="upstream-a", duration_ms=5.0, answer=answer),
+    )
+    engine = PipelineEngine(config, resolver_manager, DispatcherRegistry(), plugin_manager)
+
+    final_response = await engine.handle_message(request, ("127.0.0.1", 20000), "udp")
+
+    assert final_response is not None
+    assert plugin_manager.last_context is not None
+    assert plugin_manager.last_context.upstream_results[0].tags == {"domain-tag"}

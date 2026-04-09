@@ -15,6 +15,7 @@ class UpstreamResult:
     duration_ms: float
     answer: dns.resolver.Answer | None = None
     error: Exception | None = None
+    tags: set[str] = field(default_factory=set)
 
     @property
     def success(self) -> bool:
@@ -35,6 +36,7 @@ class RequestContext:
     final_response: dns.message.Message | None = None
     drop_request: bool = False
     metadata: dict[str, Any] = field(default_factory=dict)
+    tags: set[str] = field(default_factory=set)
     extensions: dict[str, Any] = field(default_factory=dict)
     answer_registry_refs: dict[str, Any] = field(default_factory=dict)
     upstream_results: list[UpstreamResult] = field(default_factory=list)
@@ -104,6 +106,16 @@ def sync_answer_response(answer: dns.resolver.Answer) -> dns.resolver.Answer:
     answer.rrset = rebuilt.rrset
     answer.expiration = rebuilt.expiration
     return answer
+
+
+def inherit_request_tags(result: UpstreamResult, request_tags: set[str]) -> UpstreamResult:
+    if not request_tags:
+        return result
+    if result.tags is request_tags:
+        result.tags = set(request_tags)
+        return result
+    result.tags.update(request_tags)
+    return result
 
 
 def make_error_response(request: dns.message.Message, rcode: dns.rcode.Rcode) -> dns.message.Message:

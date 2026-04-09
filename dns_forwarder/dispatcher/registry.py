@@ -5,7 +5,7 @@ from collections.abc import Iterable
 
 from dns_forwarder.config import DispatchStrategyType, UpstreamGroupConfig
 from dns_forwarder.logging import get_logger
-from dns_forwarder.pipeline.context import RequestContext, UpstreamResult
+from dns_forwarder.pipeline.context import RequestContext, UpstreamResult, inherit_request_tags
 
 from .base import DispatchStrategy
 from .race import RaceDispatchStrategy
@@ -66,8 +66,10 @@ class DispatcherRegistry:
     ) -> UpstreamResult:
         try:
             if resolver_manager.has_group(target_name):
-                return await self.dispatch_group_name(context, target_name, resolver_manager)
-            return await resolver_manager.resolve(target_name, context)
+                result = await self.dispatch_group_name(context, target_name, resolver_manager)
+            else:
+                result = await resolver_manager.resolve(target_name, context)
+            return inherit_request_tags(result, context.tags)
         except asyncio.CancelledError:
             raise
         except Exception as exc:
@@ -81,4 +83,5 @@ class DispatcherRegistry:
                 upstream_name=target_name,
                 duration_ms=0.0,
                 error=exc,
+                tags=context.tags.copy(),
             )

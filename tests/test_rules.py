@@ -71,6 +71,15 @@ def _success(name: str, address: str, *, delay: float, duration_ms: float) -> ob
     return inner
 
 
+def _build_context(qname: str, qtype: str = "A", *, tags: set[str] | None = None) -> RequestContext:
+    return RequestContext(
+        request=dns.message.make_query(qname, qtype),
+        clientaddr=("127.0.0.1", 5300),
+        listener_name="udp",
+        tags=set() if tags is None else set(tags),
+    )
+
+
 def test_rule_engine_returns_default_group_when_no_rule_matches() -> None:
     rule = RuleConfig.model_validate(
         {
@@ -87,7 +96,7 @@ def test_rule_engine_returns_default_group_when_no_rule_matches() -> None:
     )
     engine = RuleEngine([rule], "default")
 
-    selection = engine.select(dns.message.make_query("www.example.org", "A"))
+    selection = engine.select(_build_context("www.example.org", "A"))
 
     assert selection.rule_name is None
     assert selection.upstream_group == "default"
@@ -110,11 +119,57 @@ def test_rule_engine_allows_dispatcher_override_without_group_override() -> None
     )
     engine = RuleEngine([rule], "default")
 
-    selection = engine.select(dns.message.make_query("www.example.org", "A"))
+    selection = engine.select(_build_context("www.example.org", "A"))
 
     assert selection.rule_name == "wait-addresses"
     assert selection.upstream_group == "default"
     assert selection.dispatcher is DispatchStrategyType.WAIT_ALL
+
+
+def test_rule_engine_matches_tags_with_any_of_semantics() -> None:
+    rule = RuleConfig.model_validate(
+        {
+            "name": "tagged-traffic",
+            "match": {
+                "exact_domains": [],
+                "suffix_domains": [],
+                "qtypes": ["A"],
+                "tags": ["proxy", "domestic"],
+            },
+            "action": {
+                "dispatcher": "wait_all",
+            },
+        }
+    )
+    engine = RuleEngine([rule], "default")
+
+    selection = engine.select(_build_context("www.example.org", "A", tags={"domestic"}))
+
+    assert selection.rule_name == "tagged-traffic"
+    assert selection.dispatcher is DispatchStrategyType.WAIT_ALL
+
+
+def test_rule_engine_ignores_ip_only_tags_not_present_on_request_context() -> None:
+    rule = RuleConfig.model_validate(
+        {
+            "name": "ip-tag-only",
+            "match": {
+                "exact_domains": [],
+                "suffix_domains": [],
+                "qtypes": ["A"],
+                "tags": ["from-ipset"],
+            },
+            "action": {
+                "dispatcher": "wait_all",
+            },
+        }
+    )
+    engine = RuleEngine([rule], "default")
+
+    selection = engine.select(_build_context("www.example.org", "A"))
+
+    assert selection.rule_name is None
+    assert selection.dispatcher is None
 
 
 async def test_pipeline_uses_dispatcher_override_from_matched_rule() -> None:

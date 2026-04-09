@@ -15,6 +15,9 @@ from dns_forwarder.resolver import ResolverManager
 from dns_forwarder.server import TcpDnsServer, UdpDnsServer
 from dns_forwarder.webui import ManagedUvicornServer, WEBUI_RELOAD_ENDPOINT, create_webui_app
 
+from .domainset import DOMAINSET_CONTEXT_KEY, DomainSet
+from .ipset import IPSET_CONTEXT_KEY, IPSet
+
 logger = get_logger("core.runtime")
 
 
@@ -132,7 +135,14 @@ class RuntimeManager:
             len(config.plugins),
             config.runtime.log_level,
         )
-        plugin_manager = await PluginManager.build(config.plugins, config.runtime.plugin_dirs)
+        plugin_manager = await PluginManager.build(
+            config.plugins,
+            config.runtime.plugin_dirs,
+            shared_contexts={
+                DOMAINSET_CONTEXT_KEY: DomainSet(config.tree_root.domain_dir),
+                IPSET_CONTEXT_KEY: IPSet(config.tree_root.ip_dir),
+            },
+        )
         resolver_manager = ResolverManager(config, plugin_manager.registry)
         dispatcher_registry = DispatcherRegistry()
         pipeline = PipelineEngine(config, resolver_manager, dispatcher_registry, plugin_manager)

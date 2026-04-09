@@ -86,7 +86,7 @@ class PipelineEngine:
                 return None
 
             if context.final_answer is None and context.final_response is None:
-                selection = self._rule_engine.select(request)
+                selection = self._rule_engine.select(context)
                 context.selected_rule = selection.rule_name
                 context.selected_group = selection.upstream_group
                 self._logger.debug(

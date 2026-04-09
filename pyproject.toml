@@ -9,8 +9,10 @@ dependencies = [
     "dnspython[doh,doq,idna]>=2.8.0",
     "fastapi[all]>=0.135.2",
     "icmplib>=3.0.4",
+    "marisa-trie>=1.4.0",
     "pydantic>=2.11.0",
     "pydantic-settings>=2.10.0",
+    "py-radix>=0.10.0",
     "uvicorn>=0.35.0",
     "winuvloop>=0.2.0; sys_platform == 'win32'",
 ]

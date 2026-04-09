@@ -7,6 +7,10 @@
     "default_upstream_group": "default",
     "log_level": "DEBUG"
   },
+  "tree_root": {
+    "domain_dir": null,
+    "ip_dir": null
+  },
   "listeners": [
     {
       "name": "udp-default",
@@ -70,7 +74,8 @@
         "suffix_domains": [],
         "qtypes": [
           "A"
-        ]
+        ],
+        "tags": []
       },
       "action": {
         "upstream_group": "default"
@@ -116,11 +121,18 @@
         "response_ip_limit": 2
       },
       "variables": {}
+    },
+    {
+      "name": "tag_plugin",
+      "module": "tag_plugin",
+      "enabled": false,
+      "config": {},
+      "variables": {}
     }
   ],
   "webui": {
     "enabled": true,
-    "doh_enabled": false,
+    "doh_enabled": true,
     "host": "127.0.0.1",
     "port": 8080,
     "username": "admin",

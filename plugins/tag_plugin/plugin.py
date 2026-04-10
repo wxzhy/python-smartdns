@@ -41,12 +41,31 @@ class TagPlugin(Plugin):
         context.tags.update(get_domainset(context).lookup(qname))
 
     async def on_upstream_response(self, context: RequestContext, result: UpstreamResult) -> None:
+        domainset = get_domainset(context)
+        ipset = get_ipset(context)
         result.tags.update(context.tags)
-        for ip in self._extract_unique_ips(result.answer):
-            result.tags.update(get_ipset(context).lookup(ip))
+        for domain in self._extract_cname_chain_domains(result.answer):
+            result.tags.update(domainset.lookup(domain))
+        for ip in self._extract_answer_ips(result.answer):
+            result.tags.update(ipset.lookup(ip))
 
     @staticmethod
-    def _extract_unique_ips(answer: dns.resolver.Answer | None) -> list[str]:
+    def _extract_cname_chain_domains(answer: dns.resolver.Answer | None) -> list[str]:
+        if answer is None:
+            return []
+
+        chain = getattr(answer, "chaining_result", None)
+        if chain is None:
+            return []
+
+        domains = [rrset.name.to_text().rstrip(".") for rrset in getattr(chain, "cnames", [])]
+        canonical_name = getattr(answer, "canonical_name", None)
+        if canonical_name is not None:
+            domains.append(canonical_name.to_text().rstrip("."))
+        return domains
+
+    @staticmethod
+    def _extract_answer_ips(answer: dns.resolver.Answer | None) -> list[str]:
         if answer is None or answer.rrset is None:
             return []
         if answer.rdtype not in {dns.rdatatype.A, dns.rdatatype.AAAA}:
@@ -54,13 +73,11 @@ class TagPlugin(Plugin):
         if answer.rdclass != dns.rdataclass.IN:
             return []
 
-        seen: set[str] = set()
         addresses: list[str] = []
         for record in answer.rrset:
             address = getattr(record, "address", None)
-            if address is None or address in seen:
+            if address is None:
                 continue
-            seen.add(address)
             addresses.append(address)
         return addresses
 

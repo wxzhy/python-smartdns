@@ -1,4 +1,6 @@
 from .context import (
+    NestedResolveError,
+    NestedResolveRecursionError,
     RequestContext,
     UpstreamResult,
     build_answer_from_response,
@@ -9,6 +11,8 @@ from .context import (
 )
 
 __all__ = [
+    "NestedResolveError",
+    "NestedResolveRecursionError",
     "RequestContext",
     "UpstreamResult",
     "build_answer_from_response",

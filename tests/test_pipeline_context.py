@@ -8,17 +8,21 @@ import dns.rdataclass
 import dns.rcode
 import dns.rdatatype
 import dns.rrset
+import dns.resolver
 import pytest
 
 from dns_forwarder.config import AppConfig
 from dns_forwarder.dispatcher import DispatcherRegistry
 from dns_forwarder.pipeline import (
+    NestedResolveRecursionError,
     RequestContext,
     UpstreamResult,
     build_answer_from_response,
     sync_answer_response,
 )
 from dns_forwarder.pipeline.engine import PipelineEngine
+from dns_forwarder.plugin_api import PluginRegistry
+from dns_forwarder.resolver import ResolverManager
 
 
 def build_config() -> AppConfig:
@@ -87,13 +91,20 @@ class RecordingPluginManager:
 
 
 class StaticResolverManager:
-    def __init__(self, config: AppConfig, result: UpstreamResult | None = None) -> None:
+    def __init__(
+        self,
+        config: AppConfig,
+        result: UpstreamResult | None = None,
+        handlers: dict[str, Callable[[RequestContext], Awaitable[UpstreamResult]] | UpstreamResult] | None = None,
+    ) -> None:
         self._groups = {group.name: group for group in config.groups}
+        self._handlers = handlers
         self._result = result or UpstreamResult(
             upstream_name="upstream-a",
             duration_ms=0.0,
             error=RuntimeError("resolver should not be called"),
         )
+        self.calls: list[str] = []
 
     def get_group(self, group_name: str):
         return self._groups[group_name]
@@ -102,7 +113,32 @@ class StaticResolverManager:
         return group_name in self._groups
 
     async def resolve(self, upstream_name: str, context: RequestContext) -> UpstreamResult:
+        self.calls.append(upstream_name)
+        if self._handlers is not None:
+            handler = self._handlers[upstream_name]
+            if callable(handler):
+                return await handler(context)
+            return handler
         return self._result
+
+
+def make_a_answer(
+    request: dns.message.Message,
+    address: str,
+    *,
+    ttl: int = 60,
+) -> dns.resolver.Answer:
+    response = dns.message.make_response(request)
+    response.answer.append(
+        dns.rrset.from_text(
+            request.question[0].name.to_text(),
+            ttl,
+            "IN",
+            "A",
+            address,
+        )
+    )
+    return build_answer_from_response(request, response)
 
 
 def test_request_context_uses_txid_and_clientaddr() -> None:
@@ -298,6 +334,277 @@ async def test_pipeline_syncs_rrset_change_from_on_response() -> None:
     assert plugin_manager.last_context is not None
     assert plugin_manager.last_context.final_answer is answer
     assert plugin_manager.last_context.final_answer.response.answer[0][0].address == "192.0.2.55"
+
+
+async def test_pipeline_nested_resolve_returns_answer_without_reentering_plugin_hooks() -> None:
+    config = build_config()
+    request = dns.message.make_query("example.test", "A")
+    hook_calls = {"request": 0, "upstream_response": 0, "response": 0}
+
+    async def resolve_upstream(context: RequestContext) -> UpstreamResult:
+        return UpstreamResult(
+            upstream_name="upstream-a",
+            duration_ms=1.0,
+            answer=make_a_answer(context.request, "203.0.113.45"),
+        )
+
+    async def plugin_on_request(context: RequestContext) -> None:
+        hook_calls["request"] += 1
+        answer = await context.resolve("example.test", "A")
+        assert context.upstream_results == []
+        assert context.final_answer is None
+        assert context.final_response is None
+        context.final_answer = answer
+
+    async def plugin_on_upstream_response(context: RequestContext, result: UpstreamResult) -> None:
+        hook_calls["upstream_response"] += 1
+
+    async def plugin_on_response(context: RequestContext) -> None:
+        hook_calls["response"] += 1
+
+    plugin_manager = RecordingPluginManager(
+        on_request=plugin_on_request,
+        on_upstream_response=plugin_on_upstream_response,
+        on_response=plugin_on_response,
+    )
+    resolver_manager = StaticResolverManager(config, handlers={"upstream-a": resolve_upstream})
+    engine = PipelineEngine(config, resolver_manager, DispatcherRegistry(), plugin_manager)
+
+    final_response = await engine.handle_message(request, ("127.0.0.1", 20000), "udp")
+
+    assert final_response is not None
+    assert final_response.answer[0][0].address == "203.0.113.45"
+    assert hook_calls == {"request": 1, "upstream_response": 0, "response": 1}
+    assert plugin_manager.last_context is not None
+    assert plugin_manager.last_context.upstream_results == []
+    assert resolver_manager.calls == ["upstream-a"]
+
+
+async def test_pipeline_nested_resolve_uses_empty_tags_and_keeps_parent_state_isolated() -> None:
+    config = AppConfig.model_validate(
+        {
+            "runtime": {
+                "plugin_dirs": ["plugins"],
+                "default_upstream_group": "default",
+                "loop_policy": "asyncio",
+                "log_level": "DEBUG",
+            },
+            "listeners": [
+                {"name": "udp", "protocol": "udp", "host": "127.0.0.1", "port": 0, "enabled": True},
+            ],
+            "nameservers": [
+                {"name": "local-ns", "protocol": "do53", "address": "127.0.0.1", "port": 53},
+            ],
+            "upstreams": [
+                {"name": "default-upstream", "nameservers": ["local-ns"]},
+                {"name": "tagged-upstream", "nameservers": ["local-ns"]},
+            ],
+            "groups": [
+                {"name": "default", "strategy": "race", "upstreams": ["default-upstream"]},
+                {"name": "tagged", "strategy": "race", "upstreams": ["tagged-upstream"]},
+            ],
+            "rules": [
+                {
+                    "name": "match-tagged",
+                    "enabled": True,
+                    "match": {"tags": ["domain-tag"], "qtypes": ["A"]},
+                    "action": {"upstream_group": "tagged"},
+                }
+            ],
+            "plugins": [],
+            "webui": {"enabled": False},
+        }
+    )
+    request = dns.message.make_query("example.test", "A")
+
+    async def resolve_default(context: RequestContext) -> UpstreamResult:
+        return UpstreamResult(
+            upstream_name="default-upstream",
+            duration_ms=1.0,
+            answer=make_a_answer(context.request, "203.0.113.10"),
+        )
+
+    async def resolve_tagged(context: RequestContext) -> UpstreamResult:
+        return UpstreamResult(
+            upstream_name="tagged-upstream",
+            duration_ms=1.0,
+            answer=make_a_answer(context.request, "198.51.100.10"),
+        )
+
+    async def plugin_on_request(context: RequestContext) -> None:
+        context.tags.add("domain-tag")
+        context.metadata["marker"] = "outer"
+        answer = await context.resolve("example.test", "A")
+        assert context.metadata == {"marker": "outer"}
+        assert context.upstream_results == []
+        assert context.final_answer is None
+        assert context.final_response is None
+        context.final_answer = answer
+
+    plugin_manager = RecordingPluginManager(on_request=plugin_on_request)
+    resolver_manager = StaticResolverManager(
+        config,
+        handlers={
+            "default-upstream": resolve_default,
+            "tagged-upstream": resolve_tagged,
+        },
+    )
+    engine = PipelineEngine(config, resolver_manager, DispatcherRegistry(), plugin_manager)
+
+    final_response = await engine.handle_message(request, ("127.0.0.1", 20000), "udp")
+
+    assert final_response is not None
+    assert final_response.answer[0][0].address == "203.0.113.10"
+    assert plugin_manager.last_context is not None
+    assert plugin_manager.last_context.tags == {"domain-tag"}
+    assert plugin_manager.last_context.upstream_results == []
+    assert resolver_manager.calls == ["default-upstream"]
+
+
+async def test_pipeline_nested_resolve_raises_upstream_errors_to_plugin() -> None:
+    config = build_config()
+    request = dns.message.make_query("example.test", "A")
+
+    async def resolve_upstream(context: RequestContext) -> UpstreamResult:
+        qname = context.request.question[0].name.to_text().rstrip(".").lower()
+        if qname == "missing.test":
+            return UpstreamResult(
+                upstream_name="upstream-a",
+                duration_ms=1.0,
+                error=dns.resolver.NXDOMAIN(),
+            )
+        if qname == "boom.test":
+            return UpstreamResult(
+                upstream_name="upstream-a",
+                duration_ms=1.0,
+                error=RuntimeError("boom"),
+            )
+        return UpstreamResult(
+            upstream_name="upstream-a",
+            duration_ms=1.0,
+            answer=make_a_answer(context.request, "203.0.113.20"),
+        )
+
+    async def plugin_on_request(context: RequestContext) -> None:
+        with pytest.raises(dns.resolver.NXDOMAIN):
+            await context.resolve("missing.test", "A")
+        with pytest.raises(RuntimeError, match="boom"):
+            await context.resolve("boom.test", "A")
+        context.final_answer = await context.resolve("example.test", "A")
+
+    plugin_manager = RecordingPluginManager(on_request=plugin_on_request)
+    resolver_manager = StaticResolverManager(config, handlers={"upstream-a": resolve_upstream})
+    engine = PipelineEngine(config, resolver_manager, DispatcherRegistry(), plugin_manager)
+
+    final_response = await engine.handle_message(request, ("127.0.0.1", 20000), "udp")
+
+    assert final_response is not None
+    assert final_response.answer[0][0].address == "203.0.113.20"
+
+
+async def test_pipeline_nested_resolve_supports_custom_resolver_registry() -> None:
+    config = AppConfig.model_validate(
+        {
+            "runtime": {
+                "plugin_dirs": ["plugins"],
+                "default_upstream_group": "default",
+                "loop_policy": "asyncio",
+                "log_level": "DEBUG",
+            },
+            "listeners": [
+                {"name": "udp", "protocol": "udp", "host": "127.0.0.1", "port": 0, "enabled": True},
+            ],
+            "nameservers": [
+                {"name": "local-ns", "protocol": "do53", "address": "127.0.0.1", "port": 53},
+            ],
+            "upstreams": [
+                {"name": "custom-upstream", "nameservers": ["local-ns"]},
+            ],
+            "groups": [
+                {"name": "default", "strategy": "race", "upstreams": ["custom-upstream"]},
+            ],
+            "rules": [],
+            "plugins": [],
+            "webui": {"enabled": False},
+        }
+    )
+    request = dns.message.make_query("custom.test", "A")
+
+    class CustomResolver:
+        async def resolve(self, context: RequestContext) -> UpstreamResult:
+            return UpstreamResult(
+                upstream_name="custom-upstream",
+                duration_ms=1.0,
+                answer=make_a_answer(context.request, "192.0.2.10"),
+            )
+
+    async def plugin_on_request(context: RequestContext) -> None:
+        context.final_answer = await context.resolve("custom.test", "A")
+
+    registry = PluginRegistry()
+    registry.register_resolver("custom-upstream", CustomResolver())
+    plugin_manager = RecordingPluginManager(on_request=plugin_on_request)
+    resolver_manager = ResolverManager(config, registry)
+    engine = PipelineEngine(config, resolver_manager, DispatcherRegistry(), plugin_manager)
+
+    final_response = await engine.handle_message(request, ("127.0.0.1", 20000), "udp")
+
+    assert final_response is not None
+    assert final_response.answer[0][0].address == "192.0.2.10"
+
+
+async def test_pipeline_nested_resolve_blocks_custom_resolver_recursion() -> None:
+    config = AppConfig.model_validate(
+        {
+            "runtime": {
+                "plugin_dirs": ["plugins"],
+                "default_upstream_group": "default",
+                "loop_policy": "asyncio",
+                "log_level": "DEBUG",
+            },
+            "listeners": [
+                {"name": "udp", "protocol": "udp", "host": "127.0.0.1", "port": 0, "enabled": True},
+            ],
+            "nameservers": [
+                {"name": "local-ns", "protocol": "do53", "address": "127.0.0.1", "port": 53},
+            ],
+            "upstreams": [
+                {"name": "custom-upstream", "nameservers": ["local-ns"]},
+            ],
+            "groups": [
+                {"name": "default", "strategy": "race", "upstreams": ["custom-upstream"]},
+            ],
+            "rules": [],
+            "plugins": [],
+            "webui": {"enabled": False},
+        }
+    )
+    request = dns.message.make_query("loop.test", "A")
+
+    class RecursiveResolver:
+        async def resolve(self, context: RequestContext) -> UpstreamResult:
+            answer = await context.resolve("loop.test", "A")
+            return UpstreamResult(
+                upstream_name="custom-upstream",
+                duration_ms=1.0,
+                answer=answer,
+            )
+
+    async def plugin_on_request(context: RequestContext) -> None:
+        with pytest.raises(NestedResolveRecursionError, match="检测到内部解析递归"):
+            await context.resolve("loop.test", "A")
+        context.final_answer = make_a_answer(context.request, "127.0.0.1", ttl=30)
+
+    registry = PluginRegistry()
+    registry.register_resolver("custom-upstream", RecursiveResolver())
+    plugin_manager = RecordingPluginManager(on_request=plugin_on_request)
+    resolver_manager = ResolverManager(config, registry)
+    engine = PipelineEngine(config, resolver_manager, DispatcherRegistry(), plugin_manager)
+
+    final_response = await engine.handle_message(request, ("127.0.0.1", 20000), "udp")
+
+    assert final_response is not None
+    assert final_response.answer[0][0].address == "127.0.0.1"
 
 
 async def test_pipeline_supports_nested_dispatch_groups() -> None:

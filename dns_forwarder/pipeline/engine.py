@@ -13,7 +13,9 @@ from dns_forwarder.config import AppConfig
 from dns_forwarder.dispatcher import DispatcherRegistry
 from dns_forwarder.logging import format_tags, get_logger
 from dns_forwarder.pipeline.context import (
+    NestedResolveRecursionError,
     RequestContext,
+    UpstreamResult,
     build_answer_from_response,
     clone_response_for_request,
     make_error_response,
@@ -25,6 +27,8 @@ from dns_forwarder.rules import RuleEngine
 
 
 class PipelineEngine:
+    MAX_NESTED_RESOLVE_DEPTH = 8
+
     def __init__(
         self,
         config: AppConfig,
@@ -77,12 +81,10 @@ class PipelineEngine:
             qtype,
         )
 
-        context = RequestContext(
+        context = self._build_context(
             request=request,
             clientaddr=clientaddr,
             listener_name=listener_name,
-            extensions=self._plugin_manager.build_context_extensions(),
-            answer_registry_refs=self._plugin_manager.build_answer_registry(),
         )
 
         try:
@@ -98,35 +100,7 @@ class PipelineEngine:
                 return None
 
             if context.final_answer is None and context.final_response is None:
-                selection = self._rule_engine.select(context)
-                context.selected_rule = selection.rule_name
-                context.selected_group = selection.upstream_group
-                self._logger.debug(
-                    "选择上游组 request_id=%s rule=%s group=%s dispatcher=%s tags=%s",
-                    context.request_id,
-                    context.selected_rule or "",
-                    context.selected_group,
-                    selection.dispatcher.value if selection.dispatcher is not None else "",
-                    format_tags(context.tags),
-                )
-                group = self._resolver_manager.get_group(context.selected_group)
-                context.selected_dispatcher = (
-                    selection.dispatcher.value if selection.dispatcher is not None else group.strategy.value
-                )
-                if selection.dispatcher is None:
-                    result = await self._dispatcher_registry.dispatch_group(
-                        context,
-                        group,
-                        self._resolver_manager,
-                    )
-                else:
-                    result = await self._dispatcher_registry.dispatch_with_strategy(
-                        context,
-                        group,
-                        selection.dispatcher,
-                        self._resolver_manager,
-                    )
-                context.upstream_results.append(result)
+                result = await self._dispatch_context(context)
                 self._logger.debug(
                     "dispatcher 返回 request_id=%s upstream=%s success=%s error=%s tags=%s",
                     context.request_id,
@@ -181,6 +155,121 @@ class PipelineEngine:
                 context.clientaddr,
             )
             return make_error_response(request, dns.rcode.SERVFAIL)
+
+    def _build_context(
+        self,
+        request: dns.message.Message,
+        clientaddr: Any,
+        listener_name: str,
+        *,
+        extensions: dict[str, Any] | None = None,
+        answer_registry_refs: dict[str, Any] | None = None,
+        nested_resolve_chain: tuple[tuple[str, str], ...] = (),
+    ) -> RequestContext:
+        return RequestContext(
+            request=request,
+            clientaddr=clientaddr,
+            listener_name=listener_name,
+            extensions=(
+                self._plugin_manager.build_context_extensions()
+                if extensions is None
+                else dict(extensions)
+            ),
+            answer_registry_refs=(
+                self._plugin_manager.build_answer_registry()
+                if answer_registry_refs is None
+                else dict(answer_registry_refs)
+            ),
+            _resolve_handler=self._resolve_nested,
+            _nested_resolve_chain=nested_resolve_chain,
+            _nested_resolve_max_depth=self.MAX_NESTED_RESOLVE_DEPTH,
+        )
+
+    async def _dispatch_context(self, context: RequestContext) -> UpstreamResult:
+        selection = self._rule_engine.select(context)
+        context.selected_rule = selection.rule_name
+        context.selected_group = selection.upstream_group
+        self._logger.debug(
+            "选择上游组 request_id=%s rule=%s group=%s dispatcher=%s tags=%s",
+            context.request_id,
+            context.selected_rule or "",
+            context.selected_group,
+            selection.dispatcher.value if selection.dispatcher is not None else "",
+            format_tags(context.tags),
+        )
+        group = self._resolver_manager.get_group(context.selected_group)
+        context.selected_dispatcher = (
+            selection.dispatcher.value if selection.dispatcher is not None else group.strategy.value
+        )
+        if selection.dispatcher is None:
+            result = await self._dispatcher_registry.dispatch_group(
+                context,
+                group,
+                self._resolver_manager,
+            )
+        else:
+            result = await self._dispatcher_registry.dispatch_with_strategy(
+                context,
+                group,
+                selection.dispatcher,
+                self._resolver_manager,
+            )
+        context.upstream_results.append(result)
+        return result
+
+    async def _resolve_nested(
+        self,
+        context: RequestContext,
+        qname: str,
+        qtype: str,
+    ) -> dns.resolver.Answer:
+        signature = (qname, qtype)
+        if signature in context._nested_resolve_chain:
+            raise NestedResolveRecursionError(
+                f"检测到内部解析递归 qname={qname} qtype={qtype}"
+            )
+        if len(context._nested_resolve_chain) >= context._nested_resolve_max_depth:
+            raise NestedResolveRecursionError(
+                f"内部解析超过最大递归深度({context._nested_resolve_max_depth})"
+            )
+
+        nested_request = dns.message.make_query(qname, qtype, rdclass=dns.rdataclass.IN)
+        nested_context = self._build_context(
+            request=nested_request,
+            clientaddr=context.clientaddr,
+            listener_name=context.listener_name,
+            extensions=context.extensions,
+            answer_registry_refs=context.answer_registry_refs,
+            nested_resolve_chain=context._nested_resolve_chain + (signature,),
+        )
+        self._logger.debug(
+            "发起内部解析 outer_request_id=%s request_id=%s qname=%s qtype=%s depth=%s",
+            context.request_id,
+            nested_context.request_id,
+            qname,
+            qtype,
+            len(nested_context._nested_resolve_chain),
+        )
+        result = await self._dispatch_context(nested_context)
+        if result.answer is not None:
+            self._logger.debug(
+                "内部解析成功 outer_request_id=%s request_id=%s upstream=%s duration_ms=%.2f",
+                context.request_id,
+                nested_context.request_id,
+                result.upstream_name,
+                result.duration_ms,
+            )
+            return result.answer
+        if result.error is not None:
+            self._logger.debug(
+                "内部解析失败 outer_request_id=%s request_id=%s upstream=%s error=%s",
+                context.request_id,
+                nested_context.request_id,
+                result.upstream_name,
+                type(result.error).__name__,
+            )
+            raise result.error
+        raise RuntimeError(f"内部解析未返回有效答案 qname={qname} qtype={qtype}")
 
     def _finalize_context(self, context: RequestContext) -> None:
         if context.final_answer is None and context.final_response is not None:

@@ -1,12 +1,27 @@
 from __future__ import annotations
 
 import time
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
 from typing import Any
 
 import dns.message
 import dns.rcode
 import dns.resolver
+
+
+class NestedResolveError(RuntimeError):
+    """Raised when plugin nested resolve cannot be completed safely."""
+
+
+class NestedResolveRecursionError(NestedResolveError):
+    """Raised when plugin nested resolve enters a recursive call chain."""
+
+
+NestedResolveHandler = Callable[
+    ["RequestContext", str, str],
+    Awaitable[dns.resolver.Answer],
+]
 
 
 @dataclass(slots=True)
@@ -40,9 +55,24 @@ class RequestContext:
     extensions: dict[str, Any] = field(default_factory=dict)
     answer_registry_refs: dict[str, Any] = field(default_factory=dict)
     upstream_results: list[UpstreamResult] = field(default_factory=list)
+    _resolve_handler: NestedResolveHandler | None = field(default=None, repr=False)
+    _nested_resolve_chain: tuple[tuple[str, str], ...] = field(default_factory=tuple, repr=False)
+    _nested_resolve_max_depth: int = field(default=8, repr=False)
 
     def __post_init__(self) -> None:
         self.request_id = self.request.id
+
+    async def resolve(self, qname: str, qtype: str) -> dns.resolver.Answer:
+        if self._resolve_handler is None:
+            raise NestedResolveError("context.resolve 未初始化")
+
+        normalized_qname = str(qname).strip().rstrip(".").lower()
+        if not normalized_qname:
+            raise ValueError("qname 不能为空")
+        normalized_qtype = str(qtype).strip().upper()
+        if not normalized_qtype:
+            raise ValueError("qtype 不能为空")
+        return await self._resolve_handler(self, normalized_qname, normalized_qtype)
 
 
 def clone_response_for_request(response: dns.message.Message, request: dns.message.Message) -> dns.message.Message:

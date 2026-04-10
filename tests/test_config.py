@@ -259,6 +259,7 @@ def test_parse_config_text_materializes_missing_plugins_as_disabled_defaults() -
 
     assert {
         "sample_plugin",
+        "block_plugin",
         "cache_plugin",
         "speedtest_plugin",
         "tag_plugin",
@@ -268,9 +269,18 @@ def test_parse_config_text_materializes_missing_plugins_as_disabled_defaults() -
     assert plugins_by_module["cache_plugin"].enabled is False
     assert plugins_by_module["cache_plugin"].config == {"max_size": 100000}
     assert plugins_by_module["cache_plugin"].variables == {}
+    assert plugins_by_module["block_plugin"].enabled is False
+    assert plugins_by_module["block_plugin"].config == {
+        "match_tags": [],
+        "response_ttl_seconds": 86400,
+        "ipv4_address": "127.0.0.1",
+        "ipv6_address": "::1",
+    }
+    assert plugins_by_module["block_plugin"].variables == {}
     assert plugins_by_module["speedtest_plugin"].enabled is False
     assert plugins_by_module["speedtest_plugin"].config["response_ip_limit"] == 2
     assert plugins_by_module["speedtest_plugin"].variables == {}
+    assert plugins_by_module["speedtest_plugin"].config["fallback_rules"] == []
     assert plugins_by_module["tag_plugin"].enabled is False
     assert plugins_by_module["tag_plugin"].config == {}
     assert plugins_by_module["tag_plugin"].variables == {}
@@ -287,6 +297,7 @@ def test_build_config_json_schema_includes_available_plugin_schemas() -> None:
     plugin_schema = schema["$defs"]["PluginConfig"]
     options = plugin_schema["oneOf"]
     sample_option = next(item for item in options if item["properties"]["module"]["const"] == "sample_plugin")
+    block_option = next(item for item in options if item["properties"]["module"]["const"] == "block_plugin")
     cache_option = next(item for item in options if item["properties"]["module"]["const"] == "cache_plugin")
     tag_option = next(item for item in options if item["properties"]["module"]["const"] == "tag_plugin")
     ip_replace_option = next(item for item in options if item["properties"]["module"]["const"] == "ip_replace_plugin")
@@ -294,9 +305,13 @@ def test_build_config_json_schema_includes_available_plugin_schemas() -> None:
     assert sample_option["title"] == "Sample Plugin"
     assert "domains" in sample_option["properties"]["config"]["properties"]
     assert "ttl" in sample_option["properties"]["variables"]["properties"]
+    assert "match_tags" in block_option["properties"]["config"]["properties"]
+    assert block_option["default"]["config"]["ipv4_address"] == "127.0.0.1"
+    speedtest_option = next(item for item in options if item["properties"]["module"]["const"] == "speedtest_plugin")
     assert cache_option["properties"]["enabled"]["default"] is False
     assert cache_option["default"]["enabled"] is False
     assert cache_option["default"]["config"] == {"max_size": 100000}
+    assert "fallback_rules" in speedtest_option["properties"]["config"]["properties"]
     assert tag_option["properties"]["config"]["type"] == "object"
     assert tag_option["default"]["config"] == {}
     assert "rules" in ip_replace_option["properties"]["config"]["properties"]
@@ -309,7 +324,14 @@ def test_discover_available_plugins_lists_installed_plugins() -> None:
 
     modules = {item.module for item in discover_available_plugins([plugin_dir])}
 
-    assert {"cache_plugin", "ip_replace_plugin", "sample_plugin", "speedtest_plugin", "tag_plugin"} <= modules
+    assert {
+        "block_plugin",
+        "cache_plugin",
+        "ip_replace_plugin",
+        "sample_plugin",
+        "speedtest_plugin",
+        "tag_plugin",
+    } <= modules
 
 
 def test_config_example_json_is_valid() -> None:

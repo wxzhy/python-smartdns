@@ -200,7 +200,41 @@
         "probe_timeout": 1.5,
         "ping_count": 1,
         "ping_privileged": false,
-        "response_ip_limit": 2
+        "response_ip_limit": 2,
+        "response_ttl_seconds": 60,
+        "skip_tags": [
+          "direct",
+          "local"
+        ],
+        "fallback_rules": [
+          {
+            "match_tags": [
+              "proxy"
+            ],
+            "ipv4_addresses": [
+              "10.10.0.2",
+              "10.10.0.3"
+            ],
+            "ipv6_addresses": [
+              "fd10:10::2",
+              "fd10:10::3"
+            ]
+          }
+        ]
+      },
+      "variables": {}
+    },
+    {
+      "name": "block",
+      "module": "block_plugin",
+      "enabled": false,
+      "config": {
+        "match_tags": [
+          "blackhole"
+        ],
+        "response_ttl_seconds": 86400,
+        "ipv4_address": "127.0.0.1",
+        "ipv6_address": "::1"
       },
       "variables": {}
     },

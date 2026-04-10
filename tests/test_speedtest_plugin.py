@@ -1,10 +1,12 @@
 from __future__ import annotations
 
 import asyncio
+import sys
 import time
 
 import dns.message
 import dns.rrset
+import pytest
 
 from dns_forwarder.pipeline import RequestContext, UpstreamResult, build_answer_from_response
 from dns_forwarder.plugin_api import PluginManager, PluginRegistry
@@ -13,6 +15,7 @@ from plugins.speedtest_plugin import (
     SPEEDTEST_CONTEXT_KEY,
     SPEEDTEST_SERVICE_KEY,
     SpeedTestContext,
+    SpeedTestFallbackRuleConfig,
     SpeedTestPlugin,
     SpeedTestPluginConfig,
     SpeedTestService,
@@ -145,6 +148,45 @@ async def test_speedtest_plugin_collects_unique_ip_rtts() -> None:
     assert len(stub_service.calls) == 2
 
 
+async def test_speedtest_plugin_skips_measurement_for_global_skip_tags() -> None:
+    plugin = SpeedTestPlugin()
+    plugin.bind(SpeedTestPluginConfig(skip_tags=["direct"]), plugin.variables_model())
+    registry = PluginRegistry()
+    await plugin.setup(registry)
+    manager = PluginManager([], registry)
+
+    stub_service = StubSpeedTestService()
+    plugin._service = stub_service
+
+    request = dns.message.make_query("example.test", "A")
+    response = dns.message.make_response(request)
+    response.answer.append(
+        dns.rrset.from_text(
+            "example.test.",
+            60,
+            "IN",
+            "A",
+            "203.0.113.10",
+        )
+    )
+    answer = build_answer_from_response(request, response)
+    context = RequestContext(
+        request=request,
+        clientaddr=("127.0.0.1", 5300),
+        listener_name="udp",
+        tags={"direct"},
+        extensions=manager.build_context_extensions(),
+        final_answer=answer,
+    )
+    result = UpstreamResult(upstream_name="default", duration_ms=1.0, answer=answer, tags={"direct"})
+
+    await plugin.on_upstream_response(context, result)
+    await plugin.on_response(context)
+
+    assert stub_service.calls == []
+    assert {item.address for item in answer.rrset} == {"203.0.113.10"}
+
+
 async def test_speedtest_plugin_on_response_measures_only_new_ips_from_multi_ip_rrset() -> None:
     plugin = SpeedTestPlugin()
     plugin.bind(SpeedTestPluginConfig(response_ip_limit=2), plugin.variables_model())
@@ -244,6 +286,52 @@ async def test_speedtest_plugin_on_response_replaces_answer_rrset_with_fastest_i
     assert len(answer.response.answer[0]) == 3
 
 
+async def test_speedtest_plugin_on_response_updates_ttl_and_expiration_when_replacing(monkeypatch) -> None:
+    plugin = SpeedTestPlugin()
+    plugin.bind(
+        SpeedTestPluginConfig(response_ip_limit=1, response_ttl_seconds=120),
+        plugin.variables_model(),
+    )
+    registry = PluginRegistry()
+    await plugin.setup(registry)
+    manager = PluginManager([], registry)
+
+    request = dns.message.make_query("example.test", "A")
+    response = dns.message.make_response(request)
+    response.answer.append(
+        dns.rrset.from_text(
+            "example.test.",
+            60,
+            "IN",
+            "A",
+            "203.0.113.10",
+            "203.0.113.11",
+        )
+    )
+    answer = build_answer_from_response(request, response)
+    context = RequestContext(
+        request=request,
+        clientaddr=("127.0.0.1", 5300),
+        listener_name="udp",
+        extensions=manager.build_context_extensions(),
+        final_answer=answer,
+    )
+    speedtest_context = get_speedtest_context(context)
+    await speedtest_context.add_results(
+        [
+            IpRttResult(ip="203.0.113.10", best_ms=30.0),
+            IpRttResult(ip="203.0.113.11", best_ms=10.0),
+        ]
+    )
+    monkeypatch.setattr(sys.modules["plugins.speedtest_plugin.plugin"].time, "time", lambda: 1000.0)
+
+    await plugin.on_response(context)
+
+    assert [item.address for item in answer.rrset] == ["203.0.113.11"]
+    assert answer.rrset.ttl == 120
+    assert answer.expiration == pytest.approx(1120.0)
+
+
 async def test_speedtest_plugin_on_response_keeps_answer_when_all_ips_timeout() -> None:
     plugin = SpeedTestPlugin()
     plugin.bind(SpeedTestPluginConfig(response_ip_limit=2), plugin.variables_model())
@@ -283,6 +371,60 @@ async def test_speedtest_plugin_on_response_keeps_answer_when_all_ips_timeout() 
 
     assert {item.address for item in answer.rrset} == {"203.0.113.10", "203.0.113.11"}
     assert len(answer.rrset) == 2
+
+
+async def test_speedtest_plugin_on_response_uses_fallback_ips_when_all_ips_timeout() -> None:
+    plugin = SpeedTestPlugin()
+    plugin.bind(
+        SpeedTestPluginConfig(
+            response_ip_limit=2,
+            response_ttl_seconds=180,
+            fallback_rules=[
+                SpeedTestFallbackRuleConfig(
+                    match_tags=["proxy"],
+                    ipv4_addresses=["10.10.0.2", "10.10.0.3"],
+                )
+            ],
+        ),
+        plugin.variables_model(),
+    )
+    registry = PluginRegistry()
+    await plugin.setup(registry)
+    manager = PluginManager([], registry)
+
+    request = dns.message.make_query("example.test", "A")
+    response = dns.message.make_response(request)
+    response.answer.append(
+        dns.rrset.from_text(
+            "example.test.",
+            60,
+            "IN",
+            "A",
+            "203.0.113.10",
+            "203.0.113.11",
+        )
+    )
+    answer = build_answer_from_response(request, response)
+    context = RequestContext(
+        request=request,
+        clientaddr=("127.0.0.1", 5300),
+        listener_name="udp",
+        tags={"proxy"},
+        extensions=manager.build_context_extensions(),
+        final_answer=answer,
+    )
+    speedtest_context = get_speedtest_context(context)
+    await speedtest_context.add_results(
+        [
+            IpRttResult(ip="203.0.113.10", best_ms=None),
+            IpRttResult(ip="203.0.113.11", best_ms=None),
+        ]
+    )
+
+    await plugin.on_response(context)
+
+    assert [item.address for item in answer.rrset] == ["10.10.0.2", "10.10.0.3"]
+    assert answer.rrset.ttl == 180
 
 
 def test_plugin_manager_build_context_extensions_creates_request_scoped_context() -> None:

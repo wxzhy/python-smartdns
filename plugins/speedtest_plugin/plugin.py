@@ -1,11 +1,13 @@
 from __future__ import annotations
 
 import asyncio
+import ipaddress
+import time
 
 import dns.rdatatype
 import dns.rrset
 import dns.resolver
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator, model_validator
 
 from dns_forwarder.pipeline import RequestContext, UpstreamResult
 from dns_forwarder.plugin_api import EmptyModel, Plugin, PluginRegistry
@@ -18,6 +20,33 @@ from .models import (
 from .service import SpeedTestService
 
 
+class SpeedTestFallbackRuleConfig(BaseModel):
+    match_tags: list[str] = Field(default_factory=list, min_length=1)
+    ipv4_addresses: list[str] = Field(default_factory=list)
+    ipv6_addresses: list[str] = Field(default_factory=list)
+
+    @field_validator("match_tags", mode="before")
+    @classmethod
+    def normalize_tags(cls, value: list[str] | None) -> list[str]:
+        return _normalize_tags(value)
+
+    @field_validator("ipv4_addresses", mode="before")
+    @classmethod
+    def normalize_ipv4_addresses(cls, value: list[str] | None) -> list[str]:
+        return _normalize_addresses(value, version=4)
+
+    @field_validator("ipv6_addresses", mode="before")
+    @classmethod
+    def normalize_ipv6_addresses(cls, value: list[str] | None) -> list[str]:
+        return _normalize_addresses(value, version=6)
+
+    @model_validator(mode="after")
+    def validate_addresses(self) -> "SpeedTestFallbackRuleConfig":
+        if not self.ipv4_addresses and not self.ipv6_addresses:
+            raise ValueError("fallback 规则至少需要一个 IPv4 或 IPv6 地址")
+        return self
+
+
 class SpeedTestPluginConfig(BaseModel):
     cache_ttl_seconds: int = Field(default=900, ge=1)
     cache_maxsize: int = Field(default=4096, ge=1)
@@ -26,6 +55,14 @@ class SpeedTestPluginConfig(BaseModel):
     ping_count: int = Field(default=1, ge=1, le=10)
     ping_privileged: bool = False
     response_ip_limit: int = Field(default=2, ge=1)
+    response_ttl_seconds: int = Field(default=60, ge=1)
+    skip_tags: list[str] = Field(default_factory=list)
+    fallback_rules: list[SpeedTestFallbackRuleConfig] = Field(default_factory=list)
+
+    @field_validator("skip_tags", mode="before")
+    @classmethod
+    def normalize_global_tags(cls, value: list[str] | None) -> list[str]:
+        return _normalize_tags(value)
 
 
 def get_speedtest_context(context: RequestContext) -> SpeedTestContext:
@@ -61,7 +98,7 @@ class SpeedTestPlugin(Plugin):
         registry.register_context_factory(SPEEDTEST_CONTEXT_KEY, SpeedTestContext)
 
     async def on_upstream_response(self, context: RequestContext, result: UpstreamResult) -> None:
-        if self._service is None or result.answer is None:
+        if self._service is None or result.answer is None or self._has_any_tag(context.tags, self.runtime_config.skip_tags):
             return
 
         speedtest_context = get_speedtest_context(context)
@@ -85,43 +122,40 @@ class SpeedTestPlugin(Plugin):
         return ips
 
     async def on_response(self, context: RequestContext) -> None:
+        if self._has_any_tag(context.tags, self.runtime_config.skip_tags):
+            return
+
         answer = context.final_answer
-        if answer is None or answer.rrset is None:
-            return
-        if answer.rdtype not in {dns.rdatatype.A, dns.rdatatype.AAAA}:
-            return
+        if answer is not None and answer.rrset is not None and answer.rdtype in {dns.rdatatype.A, dns.rdatatype.AAAA}:
+            speedtest_context = get_speedtest_context(context)
+            current_ips = self._extract_unique_ips(answer)
+            if current_ips:
+                await self._measure_new_ips(speedtest_context, current_ips)
 
-        speedtest_context = get_speedtest_context(context)
-        current_ips = self._extract_unique_ips(answer)
-        if not current_ips:
-            return
-        await self._measure_new_ips(speedtest_context, current_ips)
-
-        measured_results = {
-            item.ip: item for item in speedtest_context.ip_rtt_results if item.best_ms is not None and item.ip in current_ips
-        }
-        if not measured_results:
-            return
-
-        original_order = {ip: index for index, ip in enumerate(current_ips)}
-        sorted_ips = [
-            item.ip
-            for item in sorted(
-                measured_results.values(),
-                key=lambda item: (item.best_ms if item.best_ms is not None else float("inf"), original_order[item.ip]),
-            )
-        ]
-        sorted_ips = sorted_ips[: self.runtime_config.response_ip_limit]
-        if sorted_ips == current_ips:
-            return
-
-        answer.rrset = dns.rrset.from_text_list(
-            answer.rrset.name,
-            answer.rrset.ttl,
-            answer.rdclass,
-            answer.rdtype,
-            sorted_ips,
-        )
+            measured_results = {
+                item.ip: item
+                for item in speedtest_context.ip_rtt_results
+                if item.best_ms is not None and item.ip in current_ips
+            }
+            if measured_results:
+                original_order = {ip: index for index, ip in enumerate(current_ips)}
+                sorted_ips = [
+                    item.ip
+                    for item in sorted(
+                        measured_results.values(),
+                        key=lambda item: (
+                            item.best_ms if item.best_ms is not None else float("inf"),
+                            original_order[item.ip],
+                        ),
+                    )
+                ]
+                sorted_ips = sorted_ips[: self.runtime_config.response_ip_limit]
+                if sorted_ips != current_ips:
+                    self._replace_answer_ips(answer, sorted_ips)
+            else:
+                fallback_ips = self._select_fallback_ips(context.tags, answer.rdtype)
+                if fallback_ips:
+                    self._replace_answer_ips(answer, fallback_ips)
 
     async def _measure_new_ips(self, speedtest_context: SpeedTestContext, ips: list[str]) -> None:
         if self._service is None or not ips:
@@ -141,6 +175,62 @@ class SpeedTestPlugin(Plugin):
                 continue
             successful_results.append(item)
         await speedtest_context.add_results(successful_results)
+
+    def _replace_answer_ips(self, answer: dns.resolver.Answer, ips: list[str]) -> None:
+        ttl = self.runtime_config.response_ttl_seconds
+        answer.rrset = dns.rrset.from_text_list(
+            answer.rrset.name,
+            ttl,
+            answer.rdclass,
+            answer.rdtype,
+            ips,
+        )
+        answer.expiration = time.time() + ttl
+
+    def _select_fallback_ips(self, tags: set[str], rdtype: dns.rdatatype.RdataType) -> list[str]:
+        for rule in self.runtime_config.fallback_rules:
+            if not self._has_any_tag(tags, rule.match_tags):
+                continue
+            ips = rule.ipv4_addresses if rdtype == dns.rdatatype.A else rule.ipv6_addresses
+            if ips:
+                return ips
+        return []
+
+    @staticmethod
+    def _has_any_tag(current_tags: set[str], configured_tags: list[str]) -> bool:
+        return bool(current_tags.intersection(configured_tags))
+
+
+def _normalize_tags(value: list[str] | None) -> list[str]:
+    if value is None:
+        return []
+    seen: set[str] = set()
+    normalized: list[str] = []
+    for item in value:
+        tag = str(item).strip()
+        if not tag or tag in seen:
+            continue
+        seen.add(tag)
+        normalized.append(tag)
+    return normalized
+
+
+def _normalize_addresses(value: list[str] | None, *, version: int) -> list[str]:
+    if value is None:
+        return []
+    seen: set[str] = set()
+    normalized: list[str] = []
+    for item in value:
+        address = ipaddress.ip_address(str(item).strip())
+        if address.version != version:
+            family = "IPv4" if version == 4 else "IPv6"
+            raise ValueError(f"fallback 地址必须是 {family}")
+        text = address.compressed
+        if text in seen:
+            continue
+        seen.add(text)
+        normalized.append(text)
+    return normalized
 
 
 plugin = SpeedTestPlugin()

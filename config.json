@@ -118,7 +118,22 @@
         "probe_timeout": 1.5,
         "ping_count": 1,
         "ping_privileged": false,
-        "response_ip_limit": 2
+        "response_ip_limit": 2,
+        "response_ttl_seconds": 60,
+        "skip_tags": [],
+        "fallback_rules": []
+      },
+      "variables": {}
+    },
+    {
+      "name": "block_plugin",
+      "module": "block_plugin",
+      "enabled": false,
+      "config": {
+        "match_tags": [],
+        "response_ttl_seconds": 86400,
+        "ipv4_address": "127.0.0.1",
+        "ipv6_address": "::1"
       },
       "variables": {}
     },

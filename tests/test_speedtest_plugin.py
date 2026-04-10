@@ -92,6 +92,18 @@ async def test_speedtest_service_deduplicates_inflight_requests() -> None:
     assert service.calls == 1
 
 
+async def test_speedtest_service_cache_clear_invalidates_cached_ip_result() -> None:
+    service = CountingSpeedTestService()
+
+    first = await service.measure("203.0.113.10")
+    service.cache_clear()
+    second = await service.measure("203.0.113.10")
+
+    assert first.ip == "203.0.113.10"
+    assert second.ip == "203.0.113.10"
+    assert service.calls == 2
+
+
 async def test_speedtest_service_returns_first_success_without_waiting_for_all_probes() -> None:
     service = ProbeRaceService()
     started = time.perf_counter()

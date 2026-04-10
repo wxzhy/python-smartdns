@@ -148,6 +148,29 @@ async def test_cache_plugin_hits_cache_during_request_phase() -> None:
     assert context.final_answer[0].address == "203.0.113.10"
 
 
+async def test_cache_plugin_does_not_rewrite_cached_answer_on_cache_hit(monkeypatch) -> None:
+    manager, plugin = await build_plugin_manager()
+    assert plugin._service is not None
+
+    request = dns.message.make_query("example.test", "A")
+    plugin._service.put_answer(make_answer(request, "203.0.113.11"))
+    context = RequestContext(
+        request=request,
+        clientaddr=("127.0.0.1", 5300),
+        listener_name="udp",
+        extensions=manager.build_context_extensions(),
+    )
+    writes: list[dns.resolver.Answer] = []
+
+    await manager.on_request(context)
+    monkeypatch.setattr(plugin._service, "put_answer", writes.append)
+
+    await manager.on_response(context)
+
+    assert get_cache_context(context).hit is True
+    assert writes == []
+
+
 async def test_cache_plugin_writes_noerror_answer_and_serves_second_request_from_cache() -> None:
     manager, plugin = await build_plugin_manager()
     request = dns.message.make_query("example.test", "A")

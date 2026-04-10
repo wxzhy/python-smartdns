@@ -6,6 +6,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from types import ModuleType
 from typing import TYPE_CHECKING, Any, Callable
+from uuid import uuid4
 
 from pydantic import BaseModel
 
@@ -140,8 +141,11 @@ class PluginManager:
     def _load_module(module_name: str, plugin_dirs: list[str]) -> ModuleType:
         module_path = PluginManager._find_module_path(module_name, plugin_dirs)
         normalized_name = module_name.replace("\\", ".").replace("/", ".").strip(".")
-        unique_name = f"dns_forwarder.plugins.{normalized_name}_{abs(hash(module_path))}"
-        spec = importlib.util.spec_from_file_location(unique_name, module_path)
+        unique_name = f"dns_forwarder.plugins.{normalized_name}_{uuid4().hex}"
+        spec_kwargs: dict[str, Any] = {}
+        if module_path.name == "__init__.py":
+            spec_kwargs["submodule_search_locations"] = [str(module_path.parent)]
+        spec = importlib.util.spec_from_file_location(unique_name, module_path, **spec_kwargs)
         if spec is None or spec.loader is None:
             raise ImportError(f"无法加载插件模块: {module_name}")
 
@@ -150,9 +154,15 @@ class PluginManager:
         try:
             spec.loader.exec_module(module)
         except Exception:
-            sys.modules.pop(unique_name, None)
+            PluginManager._unload_module_tree(unique_name)
             raise
         return module
+
+    @staticmethod
+    def _unload_module_tree(module_name: str) -> None:
+        for loaded_name in tuple(sys.modules):
+            if loaded_name == module_name or loaded_name.startswith(f"{module_name}."):
+                sys.modules.pop(loaded_name, None)
 
     @staticmethod
     def _find_module_path(module_name: str, plugin_dirs: list[str]) -> Path:

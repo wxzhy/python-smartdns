@@ -59,6 +59,10 @@ class CachePlugin(Plugin):
         if self._service is None:
             return
 
+        cache_context = get_cache_context(context)
+        if cache_context.hit:
+            return
+
         if context.final_answer is not None:
             if context.final_response is not None and context.final_response.rcode() != dns.rcode.NOERROR:
                 return

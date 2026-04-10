@@ -44,7 +44,7 @@ class PipelineEngine:
         clientaddr: Any,
         listener_name: str,
     ) -> dns.message.Message | None:
-        if request.opcode() != dns.opcode.QUERY or not request.question:
+        if request.opcode() != dns.opcode.QUERY or len(request.question) != 1:
             self._logger.warning(
                 "收到非法 DNS 请求 request_id=%s listener=%s client=%r opcode=%s question_count=%s",
                 request.id,

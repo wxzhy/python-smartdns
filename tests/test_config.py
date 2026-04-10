@@ -12,7 +12,7 @@ from dns_forwarder.config import (
     dump_config_text,
     parse_config_text,
 )
-from dns_forwarder.plugin_api import discover_available_plugins
+from dns_forwarder.plugin_api import PluginManager, discover_available_plugins
 
 
 def build_config_dict() -> dict[str, object]:
@@ -261,6 +261,7 @@ def test_parse_config_text_materializes_missing_plugins_as_disabled_defaults() -
         "sample_plugin",
         "block_plugin",
         "cache_plugin",
+        "https_plugin",
         "speedtest_plugin",
         "tag_plugin",
         "ip_replace_plugin",
@@ -269,6 +270,9 @@ def test_parse_config_text_materializes_missing_plugins_as_disabled_defaults() -
     assert plugins_by_module["cache_plugin"].enabled is False
     assert plugins_by_module["cache_plugin"].config == {"max_size": 100000}
     assert plugins_by_module["cache_plugin"].variables == {}
+    assert plugins_by_module["https_plugin"].enabled is False
+    assert plugins_by_module["https_plugin"].config == {}
+    assert plugins_by_module["https_plugin"].variables == {}
     assert plugins_by_module["block_plugin"].enabled is False
     assert plugins_by_module["block_plugin"].config == {
         "match_tags": [],
@@ -299,6 +303,7 @@ def test_build_config_json_schema_includes_available_plugin_schemas() -> None:
     sample_option = next(item for item in options if item["properties"]["module"]["const"] == "sample_plugin")
     block_option = next(item for item in options if item["properties"]["module"]["const"] == "block_plugin")
     cache_option = next(item for item in options if item["properties"]["module"]["const"] == "cache_plugin")
+    https_option = next(item for item in options if item["properties"]["module"]["const"] == "https_plugin")
     tag_option = next(item for item in options if item["properties"]["module"]["const"] == "tag_plugin")
     ip_replace_option = next(item for item in options if item["properties"]["module"]["const"] == "ip_replace_plugin")
 
@@ -311,6 +316,8 @@ def test_build_config_json_schema_includes_available_plugin_schemas() -> None:
     assert cache_option["properties"]["enabled"]["default"] is False
     assert cache_option["default"]["enabled"] is False
     assert cache_option["default"]["config"] == {"max_size": 100000}
+    assert https_option["title"] == "HTTPS Plugin"
+    assert https_option["default"]["config"] == {}
     assert "fallback_rules" in speedtest_option["properties"]["config"]["properties"]
     assert tag_option["properties"]["config"]["type"] == "object"
     assert tag_option["default"]["config"] == {}
@@ -327,11 +334,23 @@ def test_discover_available_plugins_lists_installed_plugins() -> None:
     assert {
         "block_plugin",
         "cache_plugin",
+        "https_plugin",
         "ip_replace_plugin",
         "sample_plugin",
         "speedtest_plugin",
         "tag_plugin",
     } <= modules
+
+
+def test_plugin_manager_loads_package_plugins_with_isolated_module_namespace() -> None:
+    plugin_dir = str((Path(__file__).resolve().parents[1] / "plugins").resolve())
+
+    module1 = PluginManager._load_module("cache_plugin", [plugin_dir])
+    module2 = PluginManager._load_module("cache_plugin", [plugin_dir])
+
+    assert module1.__name__ != module2.__name__
+    assert module1.plugin is not module2.plugin
+    assert type(module1.plugin) is not type(module2.plugin)
 
 
 def test_config_example_json_is_valid() -> None:

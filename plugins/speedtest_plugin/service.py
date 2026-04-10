@@ -32,8 +32,9 @@ class SpeedTestService:
         self._ping_count = ping_count
         self._ping_privileged = ping_privileged
         self._semaphore = asyncio.Semaphore(max_concurrency)
-        self._measure_cached = alru_cache(maxsize=cache_maxsize, ttl=cache_ttl_seconds)(
-            self._measure_ip_uncached
+        self._measure_cached = self._build_measure_cache(
+            cache_maxsize=cache_maxsize,
+            cache_ttl_seconds=cache_ttl_seconds,
         )
 
     async def measure(self, ip: str) -> IpRttResult:
@@ -41,6 +42,13 @@ class SpeedTestService:
 
     def cache_clear(self) -> None:
         self._measure_cached.cache_clear()
+
+    def _build_measure_cache(self, *, cache_maxsize: int, cache_ttl_seconds: int):
+        @alru_cache(maxsize=cache_maxsize, ttl=cache_ttl_seconds)
+        async def measure_cached(ip: str) -> IpRttResult:
+            return await self._measure_ip_uncached(ip)
+
+        return measure_cached
 
     async def _measure_ip_uncached(self, ip: str) -> IpRttResult:
         probes = {

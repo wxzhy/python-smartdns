@@ -421,6 +421,20 @@ async def test_pipeline_rejects_request_without_question() -> None:
     assert response.rcode() == dns.rcode.FORMERR
 
 
+async def test_pipeline_rejects_request_with_multiple_questions() -> None:
+    config = build_config()
+    request = dns.message.make_query("example.test", "A")
+    request.question.append(dns.message.make_query("example.org", "AAAA").question[0])
+    plugin_manager = RecordingPluginManager()
+    resolver_manager = StaticResolverManager(config)
+    engine = PipelineEngine(config, resolver_manager, DispatcherRegistry(), plugin_manager)
+
+    response = await engine.handle_message(request, ("127.0.0.1", 20000), "udp")
+
+    assert response is not None
+    assert response.rcode() == dns.rcode.FORMERR
+
+
 async def test_pipeline_rejects_non_query_opcode() -> None:
     config = build_config()
     request = dns.message.make_query("example.test", "A")

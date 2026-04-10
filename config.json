@@ -50,7 +50,7 @@
       ],
       "timeout": 1.0,
       "lifetime": 3.0,
-      "use_tcp": false,
+      "use_tcp": true,
       "ecs": null
     }
   ],
@@ -110,7 +110,7 @@
     {
       "name": "speedtest_plugin",
       "module": "speedtest_plugin",
-      "enabled": false,
+      "enabled": true,
       "config": {
         "cache_ttl_seconds": 900,
         "cache_maxsize": 4096,
@@ -125,7 +125,7 @@
     {
       "name": "tag_plugin",
       "module": "tag_plugin",
-      "enabled": false,
+      "enabled": true,
       "config": {},
       "variables": {}
     }

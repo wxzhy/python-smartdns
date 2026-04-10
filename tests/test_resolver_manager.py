@@ -145,7 +145,12 @@ async def test_upstream_resolver_emits_debug_logs(capture_dns_logs, caplog) -> N
     response.answer.append(dns.rrset.from_text("example.test.", 30, "IN", "A", "198.51.100.10"))
     answer = build_answer_from_response(request, response)
     resolver = UpstreamResolver(config, [dns.nameserver.Do53Nameserver("127.0.0.1", 53)])
-    context = RequestContext(request=request, clientaddr=("127.0.0.1", 5300), listener_name="udp")
+    context = RequestContext(
+        request=request,
+        clientaddr=("127.0.0.1", 5300),
+        listener_name="udp",
+        tags={"domain-tag"},
+    )
 
     with patch.object(resolver.resolver, "resolve", AsyncMock(return_value=answer)) as resolve_mock:
         result = await resolver.resolve(context)
@@ -155,3 +160,4 @@ async def test_upstream_resolver_emits_debug_logs(capture_dns_logs, caplog) -> N
     assert resolve_mock.await_args.kwargs["tcp"] is True
     assert "发起上游查询" in caplog.text
     assert "上游查询成功" in caplog.text
+    assert "tags=[domain-tag]" in caplog.text

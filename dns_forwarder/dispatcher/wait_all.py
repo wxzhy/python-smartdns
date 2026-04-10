@@ -6,7 +6,7 @@ from typing import TYPE_CHECKING
 import dns.resolver
 
 from dns_forwarder.config import DispatchStrategyType, UpstreamGroupConfig
-from dns_forwarder.logging import get_logger
+from dns_forwarder.logging import format_tags, get_logger
 from dns_forwarder.pipeline.context import RequestContext, UpstreamResult
 
 from .base import DispatchStrategy
@@ -43,12 +43,13 @@ class WaitAllDispatchStrategy(DispatchStrategy):
         if successes:
             fastest = min(successes, key=lambda item: item.duration_ms)
             logger.debug(
-                "等待全部调度完成 request_id=%s group=%s fastest_upstream=%s duration_ms=%.2f success_count=%s",
+                "等待全部调度完成 request_id=%s group=%s fastest_upstream=%s duration_ms=%.2f success_count=%s tags=%s",
                 context.request_id,
                 group.name,
                 fastest.upstream_name,
                 fastest.duration_ms,
                 len(successes),
+                format_tags(fastest.tags),
             )
             return fastest
 

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+from collections.abc import Collection
 
 LOGGER_NAME = "dns_forwarder"
 _LOG_FORMAT = "%(asctime)s %(levelname)s [%(name)s] %(message)s"
@@ -36,3 +37,9 @@ def get_logger(name: str | None = None) -> logging.Logger:
     if name.startswith(f"{LOGGER_NAME}."):
         return logging.getLogger(name)
     return logging.getLogger(f"{LOGGER_NAME}.{name}")
+
+
+def format_tags(tags: Collection[str] | None) -> str:
+    if not tags:
+        return "[]"
+    return "[" + ",".join(sorted(tags)) + "]"

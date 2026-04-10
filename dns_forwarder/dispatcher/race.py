@@ -6,7 +6,7 @@ from typing import TYPE_CHECKING
 import dns.resolver
 
 from dns_forwarder.config import DispatchStrategyType, UpstreamGroupConfig
-from dns_forwarder.logging import get_logger
+from dns_forwarder.logging import format_tags, get_logger
 from dns_forwarder.pipeline.context import RequestContext, UpstreamResult
 
 from .base import DispatchStrategy
@@ -40,19 +40,21 @@ class RaceDispatchStrategy(DispatchStrategy):
                 result = await task
                 if result.answer is not None:
                     logger.debug(
-                        "并发调度命中 request_id=%s group=%s upstream=%s duration_ms=%.2f",
+                        "并发调度命中 request_id=%s group=%s upstream=%s duration_ms=%.2f tags=%s",
                         context.request_id,
                         group.name,
                         result.upstream_name,
                         result.duration_ms,
+                        format_tags(result.tags),
                     )
                     return result
                 logger.debug(
-                    "并发调度忽略失败结果 request_id=%s group=%s upstream=%s error=%s",
+                    "并发调度忽略失败结果 request_id=%s group=%s upstream=%s error=%s tags=%s",
                     context.request_id,
                     group.name,
                     result.upstream_name,
                     self.error_name(result),
+                    format_tags(result.tags),
                 )
                 failures.append(result)
         finally:

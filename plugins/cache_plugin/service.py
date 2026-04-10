@@ -1,21 +1,10 @@
 from __future__ import annotations
 
 import time
-from dataclasses import dataclass
 
 import dns.message
 import dns.rdatatype
 import dns.resolver
-
-
-@dataclass(slots=True)
-class CachedAnswerEntry:
-    answer: dns.resolver.Answer
-    cached_at: float
-
-    @property
-    def expiration(self) -> float:
-        return self.answer.expiration
 
 
 class DnsCacheService:
@@ -43,16 +32,10 @@ class DnsCacheService:
         cached = self._cache.get(self.make_key_from_request(request))
         if cached is None:
             return None
-        return self._clone_answer(cached.answer, age_seconds=max(0.0, time.time() - cached.cached_at))
+        return self._clone_answer(cached, remaining_ttl=max(0, int(cached.expiration - time.time())))
 
     def put_answer(self, answer: dns.resolver.Answer) -> None:
-        self._cache.put(
-            self.make_key_from_answer(answer),
-            CachedAnswerEntry(
-                answer=self._clone_answer(answer),
-                cached_at=time.time(),
-            ),
-        )
+        self._cache.put(self.make_key_from_answer(answer), self._clone_answer(answer))
 
     def flush(self, key: dns.resolver.CacheKey | None = None) -> None:
         self._cache.flush(key)
@@ -64,14 +47,14 @@ class DnsCacheService:
         return self._cache.misses()
 
     @staticmethod
-    def _clone_answer(answer: dns.resolver.Answer, age_seconds: float = 0.0) -> dns.resolver.Answer:
+    def _clone_answer(answer: dns.resolver.Answer, remaining_ttl: int | None = None) -> dns.resolver.Answer:
         cloned_response = dns.message.from_wire(answer.response.to_wire())
-        if age_seconds > 0:
+        if remaining_ttl is not None:
             for section in (cloned_response.answer, cloned_response.authority, cloned_response.additional):
                 for rrset in section:
                     if rrset.rdtype in {dns.rdatatype.OPT, dns.rdatatype.TSIG}:
                         continue
-                    rrset.ttl = max(0, int(rrset.ttl - age_seconds))
+                    rrset.ttl = remaining_ttl
         cloned_answer = dns.resolver.Answer(
             answer.qname,
             answer.rdtype,

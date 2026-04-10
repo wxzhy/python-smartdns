@@ -10,7 +10,7 @@ import dns.rdatatype
 import dns.resolver
 
 from dns_forwarder.config import UpstreamConfig
-from dns_forwarder.logging import get_logger
+from dns_forwarder.logging import format_tags, get_logger
 from dns_forwarder.pipeline.context import RequestContext, UpstreamResult
 
 from .base import BaseUpstreamResolver
@@ -53,7 +53,7 @@ class UpstreamResolver(BaseUpstreamResolver):
         question = context.request.question[0]
         started = time.perf_counter()
         logger.debug(
-            "发起上游查询 request_id=%s upstream=%s qname=%s qtype=%s tcp=%s nameserver_count=%s rotate=%s",
+            "发起上游查询 request_id=%s upstream=%s qname=%s qtype=%s tcp=%s nameserver_count=%s rotate=%s tags=%s",
             context.request_id,
             self.config.name,
             question.name.to_text().rstrip("."),
@@ -61,6 +61,7 @@ class UpstreamResolver(BaseUpstreamResolver):
             self.config.use_tcp,
             len(self.resolver.nameservers),
             self.resolver.rotate,
+            format_tags(context.tags),
         )
 
         try:
@@ -73,11 +74,12 @@ class UpstreamResolver(BaseUpstreamResolver):
             )
             duration_ms = (time.perf_counter() - started) * 1000
             logger.debug(
-                "上游查询成功 request_id=%s upstream=%s duration_ms=%.2f rrset_size=%s",
+                "上游查询成功 request_id=%s upstream=%s duration_ms=%.2f rrset_size=%s tags=%s",
                 context.request_id,
                 self.config.name,
                 duration_ms,
                 len(answer),
+                format_tags(context.tags),
             )
             return UpstreamResult(
                 upstream_name=self.config.name,
@@ -88,10 +90,11 @@ class UpstreamResolver(BaseUpstreamResolver):
         except dns.resolver.NXDOMAIN as exc:
             duration_ms = (time.perf_counter() - started) * 1000
             logger.info(
-                "上游返回 NXDOMAIN request_id=%s upstream=%s duration_ms=%.2f",
+                "上游返回 NXDOMAIN request_id=%s upstream=%s duration_ms=%.2f tags=%s",
                 context.request_id,
                 self.config.name,
                 duration_ms,
+                format_tags(context.tags),
             )
             return UpstreamResult(
                 upstream_name=self.config.name,
@@ -102,11 +105,12 @@ class UpstreamResolver(BaseUpstreamResolver):
         except Exception as exc:
             duration_ms = (time.perf_counter() - started) * 1000
             logger.warning(
-                "上游查询失败 request_id=%s upstream=%s duration_ms=%.2f error=%s",
+                "上游查询失败 request_id=%s upstream=%s duration_ms=%.2f error=%s tags=%s",
                 context.request_id,
                 self.config.name,
                 duration_ms,
                 type(exc).__name__,
+                format_tags(context.tags),
             )
             return UpstreamResult(
                 upstream_name=self.config.name,

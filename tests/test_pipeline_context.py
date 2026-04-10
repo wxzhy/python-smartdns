@@ -368,3 +368,37 @@ async def test_pipeline_preserves_request_tags_on_upstream_result() -> None:
     assert final_response is not None
     assert plugin_manager.last_context is not None
     assert plugin_manager.last_context.upstream_results[0].tags == {"domain-tag"}
+
+
+async def test_pipeline_debug_logs_include_request_and_result_tags(capture_dns_logs, caplog) -> None:
+    capture_dns_logs("DEBUG")
+    config = build_config()
+    request = dns.message.make_query("example.test", "A")
+    response = dns.message.make_response(request)
+    response.answer.append(dns.rrset.from_text("example.test.", 60, "IN", "A", "203.0.113.88"))
+    answer = build_answer_from_response(request, response)
+
+    async def plugin_on_request(context: RequestContext) -> None:
+        context.tags.update({"domain-tag"})
+
+    async def plugin_on_upstream_response(context: RequestContext, result: UpstreamResult) -> None:
+        result.tags.update({"ip-tag"})
+
+    plugin_manager = RecordingPluginManager(
+        on_request=plugin_on_request,
+        on_upstream_response=plugin_on_upstream_response,
+    )
+    resolver_manager = StaticResolverManager(
+        config,
+        UpstreamResult(upstream_name="upstream-a", duration_ms=5.0, answer=answer),
+    )
+    engine = PipelineEngine(config, resolver_manager, DispatcherRegistry(), plugin_manager)
+
+    final_response = await engine.handle_message(request, ("127.0.0.1", 20000), "udp")
+
+    assert final_response is not None
+    assert "选择上游组" in caplog.text
+    assert "dispatcher 返回" in caplog.text
+    assert "请求处理完成" in caplog.text
+    assert "request_tags=[domain-tag]" in caplog.text
+    assert "result_tags=[domain-tag,ip-tag]" in caplog.text

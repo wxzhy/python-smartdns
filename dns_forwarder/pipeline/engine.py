@@ -10,7 +10,7 @@ import dns.resolver
 
 from dns_forwarder.config import AppConfig
 from dns_forwarder.dispatcher import DispatcherRegistry
-from dns_forwarder.logging import get_logger
+from dns_forwarder.logging import format_tags, get_logger
 from dns_forwarder.pipeline.context import (
     RequestContext,
     build_answer_from_response,
@@ -78,10 +78,11 @@ class PipelineEngine:
             await self._plugin_manager.on_request(context)
             if context.drop_request:
                 self._logger.debug(
-                    "请求被插件丢弃 request_id=%s listener=%s client=%r",
+                    "请求被插件丢弃 request_id=%s listener=%s client=%r tags=%s",
                     context.request_id,
                     context.listener_name,
                     context.clientaddr,
+                    format_tags(context.tags),
                 )
                 return None
 
@@ -90,11 +91,12 @@ class PipelineEngine:
                 context.selected_rule = selection.rule_name
                 context.selected_group = selection.upstream_group
                 self._logger.debug(
-                    "选择上游组 request_id=%s rule=%s group=%s dispatcher=%s",
+                    "选择上游组 request_id=%s rule=%s group=%s dispatcher=%s tags=%s",
                     context.request_id,
                     context.selected_rule or "",
                     context.selected_group,
                     selection.dispatcher.value if selection.dispatcher is not None else "",
+                    format_tags(context.tags),
                 )
                 group = self._resolver_manager.get_group(context.selected_group)
                 context.selected_dispatcher = (
@@ -115,11 +117,12 @@ class PipelineEngine:
                     )
                 context.upstream_results.append(result)
                 self._logger.debug(
-                    "dispatcher 返回 request_id=%s upstream=%s success=%s error=%s",
+                    "dispatcher 返回 request_id=%s upstream=%s success=%s error=%s tags=%s",
                     context.request_id,
                     result.upstream_name,
                     result.success,
                     type(result.error).__name__ if result.error is not None else "",
+                    format_tags(result.tags),
                 )
                 await self._plugin_manager.on_upstream_response(context, result)
                 if context.final_answer is None and context.final_response is None:
@@ -131,21 +134,27 @@ class PipelineEngine:
             await self._plugin_manager.on_response(context)
             if context.drop_request:
                 self._logger.debug(
-                    "响应阶段被插件丢弃 request_id=%s listener=%s client=%r",
+                    "响应阶段被插件丢弃 request_id=%s listener=%s client=%r tags=%s",
                     context.request_id,
                     context.listener_name,
                     context.clientaddr,
+                    format_tags(context.tags),
                 )
                 return None
 
             self._finalize_context(context)
+            final_result_tags = (
+                format_tags(context.upstream_results[-1].tags) if context.upstream_results else "[]"
+            )
             self._logger.debug(
-                "请求处理完成 request_id=%s listener=%s rcode=%s has_answer=%s rrset_size=%s",
+                "请求处理完成 request_id=%s listener=%s rcode=%s has_answer=%s rrset_size=%s request_tags=%s result_tags=%s",
                 context.request_id,
                 context.listener_name,
                 context.final_response.rcode() if context.final_response is not None else "none",
                 context.final_answer is not None,
                 len(context.final_answer) if context.final_answer is not None else 0,
+                format_tags(context.tags),
+                final_result_tags,
             )
 
             if context.final_response is None:

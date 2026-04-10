@@ -257,7 +257,13 @@ def test_parse_config_text_materializes_missing_plugins_as_disabled_defaults() -
     config = parse_config_dict(config_dict)
     plugins_by_module = {plugin.module: plugin for plugin in config.plugins}
 
-    assert {"sample_plugin", "cache_plugin", "speedtest_plugin", "tag_plugin"} <= set(plugins_by_module)
+    assert {
+        "sample_plugin",
+        "cache_plugin",
+        "speedtest_plugin",
+        "tag_plugin",
+        "ip_replace_plugin",
+    } <= set(plugins_by_module)
     assert plugins_by_module["sample_plugin"].enabled is True
     assert plugins_by_module["cache_plugin"].enabled is False
     assert plugins_by_module["cache_plugin"].config == {"max_size": 100000}
@@ -268,6 +274,9 @@ def test_parse_config_text_materializes_missing_plugins_as_disabled_defaults() -
     assert plugins_by_module["tag_plugin"].enabled is False
     assert plugins_by_module["tag_plugin"].config == {}
     assert plugins_by_module["tag_plugin"].variables == {}
+    assert plugins_by_module["ip_replace_plugin"].enabled is False
+    assert plugins_by_module["ip_replace_plugin"].config == {"skip_tags": [], "rules": []}
+    assert plugins_by_module["ip_replace_plugin"].variables == {}
 
 
 def test_build_config_json_schema_includes_available_plugin_schemas() -> None:
@@ -280,6 +289,7 @@ def test_build_config_json_schema_includes_available_plugin_schemas() -> None:
     sample_option = next(item for item in options if item["properties"]["module"]["const"] == "sample_plugin")
     cache_option = next(item for item in options if item["properties"]["module"]["const"] == "cache_plugin")
     tag_option = next(item for item in options if item["properties"]["module"]["const"] == "tag_plugin")
+    ip_replace_option = next(item for item in options if item["properties"]["module"]["const"] == "ip_replace_plugin")
 
     assert sample_option["title"] == "Sample Plugin"
     assert "domains" in sample_option["properties"]["config"]["properties"]
@@ -289,6 +299,9 @@ def test_build_config_json_schema_includes_available_plugin_schemas() -> None:
     assert cache_option["default"]["config"] == {"max_size": 100000}
     assert tag_option["properties"]["config"]["type"] == "object"
     assert tag_option["default"]["config"] == {}
+    assert "rules" in ip_replace_option["properties"]["config"]["properties"]
+    assert "skip_tags" in ip_replace_option["properties"]["config"]["properties"]
+    assert ip_replace_option["default"]["config"] == {"skip_tags": [], "rules": []}
 
 
 def test_discover_available_plugins_lists_installed_plugins() -> None:
@@ -296,7 +309,7 @@ def test_discover_available_plugins_lists_installed_plugins() -> None:
 
     modules = {item.module for item in discover_available_plugins([plugin_dir])}
 
-    assert {"cache_plugin", "sample_plugin", "speedtest_plugin", "tag_plugin"} <= modules
+    assert {"cache_plugin", "ip_replace_plugin", "sample_plugin", "speedtest_plugin", "tag_plugin"} <= modules
 
 
 def test_config_example_json_is_valid() -> None:

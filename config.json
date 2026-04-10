@@ -128,6 +128,16 @@
       "enabled": true,
       "config": {},
       "variables": {}
+    },
+    {
+      "name": "ip_replace_plugin",
+      "module": "ip_replace_plugin",
+      "enabled": false,
+      "config": {
+        "skip_tags": [],
+        "rules": []
+      },
+      "variables": {}
     }
   ],
   "webui": {

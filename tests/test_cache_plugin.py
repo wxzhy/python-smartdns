@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import asyncio
+
 import dns.message
 import dns.rcode
 import dns.resolver
@@ -58,6 +60,19 @@ class CountingResolverManager:
 
     async def resolve(self, upstream_name: str, context: RequestContext) -> UpstreamResult:
         self.calls += 1
+        return self._result
+
+
+class BlockingResolverManager(CountingResolverManager):
+    def __init__(self, config: AppConfig, result: UpstreamResult) -> None:
+        super().__init__(config, result)
+        self.started = asyncio.Event()
+        self.release = asyncio.Event()
+
+    async def resolve(self, upstream_name: str, context: RequestContext) -> UpstreamResult:
+        self.calls += 1
+        self.started.set()
+        await self.release.wait()
         return self._result
 
 
@@ -245,6 +260,36 @@ async def test_dns_cache_service_reduces_ttl_on_cache_hit(monkeypatch) -> None:
     assert cached.response.answer[0].ttl == 47
 
 
+async def test_dns_cache_service_shares_pending_response_by_cache_key() -> None:
+    service = DnsCacheService(max_size=16)
+    first_request = dns.message.make_query("example.test", "A")
+    second_request = dns.message.make_query("example.test", "A")
+    key = service.make_key_from_request(first_request)
+    response = dns.message.make_response(first_request)
+    response.answer.append(
+        dns.rrset.from_text(
+            first_request.question[0].name.to_text(),
+            60,
+            "IN",
+            "A",
+            "203.0.113.35",
+        )
+    )
+
+    owner = await service.acquire_pending(key)
+    follower = await service.acquire_pending(key)
+    assert owner is None
+    assert follower is not None
+
+    await service.complete_pending(key, response)
+    shared_response = await service.wait_for_pending_response(follower, second_request)
+
+    assert shared_response is not None
+    assert shared_response.id == second_request.id
+    assert shared_response.answer[0][0].address == "203.0.113.35"
+    assert await service.acquire_pending(key) is None
+
+
 async def test_cache_plugin_runs_last_in_response_hooks_and_caches_mutated_answer() -> None:
     manager, _ = await build_plugin_manager_with_mutator()
     request = dns.message.make_query("example.test", "A")
@@ -263,3 +308,32 @@ async def test_cache_plugin_runs_last_in_response_hooks_and_caches_mutated_answe
     assert first_response.answer[0][0].address == "198.51.100.99"
     assert second_response.answer[0][0].address == "198.51.100.99"
     assert resolver_manager.calls == 1
+
+
+async def test_cache_plugin_coalesces_concurrent_requests_by_cache_key() -> None:
+    manager, plugin = await build_plugin_manager()
+    request_one = dns.message.make_query("example.test", "A")
+    request_two = dns.message.make_query("example.test", "A")
+    answer = make_answer(request_one, "203.0.113.50")
+    resolver_manager = BlockingResolverManager(
+        build_config(),
+        UpstreamResult(upstream_name="upstream-a", duration_ms=5.0, answer=answer),
+    )
+    engine = PipelineEngine(build_config(), resolver_manager, DispatcherRegistry(), manager)
+
+    first_task = asyncio.create_task(engine.handle_message(request_one, ("127.0.0.1", 10000), "udp"))
+    await resolver_manager.started.wait()
+    second_task = asyncio.create_task(engine.handle_message(request_two, ("127.0.0.1", 10001), "udp"))
+    await asyncio.sleep(0)
+    resolver_manager.release.set()
+    first_response, second_response = await asyncio.gather(first_task, second_task)
+
+    assert first_response is not None
+    assert second_response is not None
+    assert first_response.answer[0][0].address == "203.0.113.50"
+    assert second_response.answer[0][0].address == "203.0.113.50"
+    assert first_response.id == request_one.id
+    assert second_response.id == request_two.id
+    assert resolver_manager.calls == 1
+    assert plugin._service is not None
+    assert plugin._service.get_for_request(request_two) is not None

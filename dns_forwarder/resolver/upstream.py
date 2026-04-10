@@ -6,6 +6,7 @@ from collections.abc import Sequence
 import dns.asyncresolver
 import dns.edns
 import dns.nameserver
+import dns.rdataclass
 import dns.rdatatype
 import dns.resolver
 
@@ -72,6 +73,7 @@ class UpstreamResolver(BaseUpstreamResolver):
                 tcp=self.config.use_tcp,
                 raise_on_no_answer=False,
             )
+            self._validate_answer(answer, question)
             duration_ms = (time.perf_counter() - started) * 1000
             logger.debug(
                 "上游查询成功 request_id=%s upstream=%s duration_ms=%.2f rrset_size=%s tags=%s",
@@ -117,4 +119,20 @@ class UpstreamResolver(BaseUpstreamResolver):
                 duration_ms=duration_ms,
                 error=exc,
                 tags=context.tags.copy(),
+            )
+
+    @staticmethod
+    def _validate_answer(answer: dns.resolver.Answer, question) -> None:
+        if answer.rdclass != dns.rdataclass.IN:
+            raise ValueError(
+                f"上游响应 class 非 IN: qname={answer.qname.to_text()} rdclass={dns.rdataclass.to_text(answer.rdclass)}"
+            )
+        if answer.qname != question.name:
+            raise ValueError(
+                f"上游响应 qname 不匹配: expected={question.name.to_text()} actual={answer.qname.to_text()}"
+            )
+        if answer.rdtype != question.rdtype:
+            raise ValueError(
+                "上游响应 rdtype 不匹配: "
+                f"expected={dns.rdatatype.to_text(question.rdtype)} actual={dns.rdatatype.to_text(answer.rdtype)}"
             )

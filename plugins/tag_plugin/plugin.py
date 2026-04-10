@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import dns.rdataclass
 import dns.rdatatype
 import dns.resolver
 
@@ -69,8 +68,6 @@ class TagPlugin(Plugin):
         if answer is None or answer.rrset is None:
             return []
         if answer.rdtype not in {dns.rdatatype.A, dns.rdatatype.AAAA}:
-            return []
-        if answer.rdclass != dns.rdataclass.IN:
             return []
 
         addresses: list[str] = []

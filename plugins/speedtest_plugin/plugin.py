@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import asyncio
 
-import dns.rdataclass
 import dns.rdatatype
 import dns.rrset
 import dns.resolver
@@ -72,7 +71,7 @@ class SpeedTestPlugin(Plugin):
     def _extract_unique_ips(answer: dns.resolver.Answer) -> list[str]:
         if answer.rdtype not in {dns.rdatatype.A, dns.rdatatype.AAAA}:
             return []
-        if answer.rdclass != dns.rdataclass.IN or answer.rrset is None:
+        if answer.rrset is None:
             return []
 
         ips: list[str] = []
@@ -90,8 +89,6 @@ class SpeedTestPlugin(Plugin):
         if answer is None or answer.rrset is None:
             return
         if answer.rdtype not in {dns.rdatatype.A, dns.rdatatype.AAAA}:
-            return
-        if answer.rdclass != dns.rdataclass.IN:
             return
 
         speedtest_context = get_speedtest_context(context)

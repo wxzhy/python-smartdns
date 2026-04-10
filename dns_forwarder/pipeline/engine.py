@@ -4,6 +4,7 @@ from typing import Any
 
 import dns.message
 import dns.opcode
+import dns.rdataclass
 import dns.rdatatype
 import dns.rcode
 import dns.resolver
@@ -43,7 +44,7 @@ class PipelineEngine:
         clientaddr: Any,
         listener_name: str,
     ) -> dns.message.Message | None:
-        if request.opcode() != dns.opcode.QUERY or len(request.question) != 1:
+        if request.opcode() != dns.opcode.QUERY or not request.question:
             self._logger.warning(
                 "收到非法 DNS 请求 request_id=%s listener=%s client=%r opcode=%s question_count=%s",
                 request.id,
@@ -55,6 +56,16 @@ class PipelineEngine:
             return make_error_response(request, dns.rcode.FORMERR)
 
         question = request.question[0]
+        if question.rdclass != dns.rdataclass.IN:
+            self._logger.warning(
+                "收到不支持的 DNS 请求 class request_id=%s listener=%s client=%r qclass=%s qname=%s",
+                request.id,
+                listener_name,
+                clientaddr,
+                dns.rdataclass.to_text(question.rdclass),
+                question.name.to_text().rstrip("."),
+            )
+            return make_error_response(request, dns.rcode.FORMERR)
         qname = question.name.to_text().rstrip(".").lower()
         qtype = dns.rdatatype.to_text(question.rdtype).upper()
         self._logger.debug(

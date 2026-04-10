@@ -4,7 +4,6 @@ from dataclasses import dataclass
 from ipaddress import IPv4Address, IPv4Network, IPv6Address, IPv6Network, ip_address, ip_network
 
 import dns.rcode
-import dns.rdataclass
 import dns.rdatatype
 import dns.rrset
 import dns.resolver
@@ -60,8 +59,6 @@ class IpReplaceService:
         if answer is None or answer.rrset is None:
             return False
         if answer.response.rcode() != dns.rcode.NOERROR:
-            return False
-        if answer.rdclass != dns.rdataclass.IN:
             return False
         return answer.rdtype in {dns.rdatatype.A, dns.rdatatype.AAAA}
 

@@ -6,7 +6,10 @@ import dns.message
 import dns.edns
 import dns.nameserver
 import dns.query
+import dns.rdataclass
+import dns.rdatatype
 import dns.rrset
+import pytest
 
 from dns_forwarder.config import (
     Do53NameserverConfig,
@@ -161,3 +164,38 @@ async def test_upstream_resolver_emits_debug_logs(capture_dns_logs, caplog) -> N
     assert "发起上游查询" in caplog.text
     assert "上游查询成功" in caplog.text
     assert "tags=[domain-tag]" in caplog.text
+
+
+@pytest.mark.parametrize(
+    ("field_name", "field_value", "message"),
+    [
+        ("qname", dns.name.from_text("other.test."), "qname 不匹配"),
+        ("rdtype", dns.rdatatype.AAAA, "rdtype 不匹配"),
+        ("rdclass", dns.rdataclass.CH, "class 非 IN"),
+    ],
+)
+async def test_upstream_resolver_rejects_invalid_answer_shape(
+    field_name,
+    field_value,
+    message: str,
+) -> None:
+    config = UpstreamConfig(name="local", nameservers=["primary"], use_tcp=True)
+    request = dns.message.make_query("example.test", "A")
+    response = dns.message.make_response(request)
+    response.answer.append(dns.rrset.from_text("example.test.", 30, "IN", "A", "198.51.100.10"))
+    answer = build_answer_from_response(request, response)
+    setattr(answer, field_name, field_value)
+    resolver = UpstreamResolver(config, [dns.nameserver.Do53Nameserver("127.0.0.1", 53)])
+    context = RequestContext(
+        request=request,
+        clientaddr=("127.0.0.1", 5300),
+        listener_name="udp",
+        tags={"domain-tag"},
+    )
+
+    with patch.object(resolver.resolver, "resolve", AsyncMock(return_value=answer)):
+        result = await resolver.resolve(context)
+
+    assert result.answer is None
+    assert isinstance(result.error, ValueError)
+    assert message in str(result.error)

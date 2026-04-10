@@ -3,6 +3,9 @@ from __future__ import annotations
 from typing import Awaitable, Callable
 
 import dns.message
+import dns.opcode
+import dns.rdataclass
+import dns.rcode
 import dns.rdatatype
 import dns.rrset
 import pytest
@@ -402,3 +405,44 @@ async def test_pipeline_debug_logs_include_request_and_result_tags(capture_dns_l
     assert "请求处理完成" in caplog.text
     assert "request_tags=[domain-tag]" in caplog.text
     assert "result_tags=[domain-tag,ip-tag]" in caplog.text
+
+
+async def test_pipeline_rejects_request_without_question() -> None:
+    config = build_config()
+    request = dns.message.make_query("example.test", "A")
+    request.question.clear()
+    plugin_manager = RecordingPluginManager()
+    resolver_manager = StaticResolverManager(config)
+    engine = PipelineEngine(config, resolver_manager, DispatcherRegistry(), plugin_manager)
+
+    response = await engine.handle_message(request, ("127.0.0.1", 20000), "udp")
+
+    assert response is not None
+    assert response.rcode() == dns.rcode.FORMERR
+
+
+async def test_pipeline_rejects_non_query_opcode() -> None:
+    config = build_config()
+    request = dns.message.make_query("example.test", "A")
+    request.set_opcode(dns.opcode.STATUS)
+    plugin_manager = RecordingPluginManager()
+    resolver_manager = StaticResolverManager(config)
+    engine = PipelineEngine(config, resolver_manager, DispatcherRegistry(), plugin_manager)
+
+    response = await engine.handle_message(request, ("127.0.0.1", 20000), "udp")
+
+    assert response is not None
+    assert response.rcode() == dns.rcode.FORMERR
+
+
+async def test_pipeline_rejects_non_in_request_class() -> None:
+    config = build_config()
+    request = dns.message.make_query("example.test", "A", rdclass=dns.rdataclass.CH)
+    plugin_manager = RecordingPluginManager()
+    resolver_manager = StaticResolverManager(config)
+    engine = PipelineEngine(config, resolver_manager, DispatcherRegistry(), plugin_manager)
+
+    response = await engine.handle_message(request, ("127.0.0.1", 20000), "udp")
+
+    assert response is not None
+    assert response.rcode() == dns.rcode.FORMERR

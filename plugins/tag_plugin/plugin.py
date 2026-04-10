@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import dns.rdatatype
+import dns.rdtypes.svcbbase
 import dns.resolver
 
 from dns_forwarder.core import DOMAINSET_CONTEXT_KEY, IPSET_CONTEXT_KEY, DomainSet, IPSet
@@ -67,15 +68,37 @@ class TagPlugin(Plugin):
     def _extract_answer_ips(answer: dns.resolver.Answer | None) -> list[str]:
         if answer is None or answer.rrset is None:
             return []
-        if answer.rdtype not in {dns.rdatatype.A, dns.rdatatype.AAAA}:
-            return []
+        if answer.rdtype in {dns.rdatatype.A, dns.rdatatype.AAAA}:
+            return TagPlugin._extract_address_record_ips(answer)
+        if answer.rdtype == dns.rdatatype.HTTPS:
+            return TagPlugin._extract_https_hint_ips(answer)
+        return []
 
+    @staticmethod
+    def _extract_address_record_ips(answer: dns.resolver.Answer) -> list[str]:
         addresses: list[str] = []
         for record in answer.rrset:
             address = getattr(record, "address", None)
             if address is None:
                 continue
             addresses.append(address)
+        return addresses
+
+    @staticmethod
+    def _extract_https_hint_ips(answer: dns.resolver.Answer) -> list[str]:
+        addresses: list[str] = []
+        for record in answer.rrset:
+            params = getattr(record, "params", None)
+            if params is None:
+                continue
+            for hint_key in (
+                dns.rdtypes.svcbbase.ParamKey.IPV4HINT,
+                dns.rdtypes.svcbbase.ParamKey.IPV6HINT,
+            ):
+                hint_param = params.get(hint_key)
+                if hint_param is None:
+                    continue
+                addresses.extend(hint_param.addresses)
         return addresses
 
 

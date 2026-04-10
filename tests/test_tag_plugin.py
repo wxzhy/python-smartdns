@@ -236,6 +236,171 @@ async def test_tag_plugin_adds_cname_chain_domain_tags_to_upstream_result(tmp_pa
     assert result.tags == {"request-tag", "mid-tag", "final-tag", "cn"}
 
 
+async def test_tag_plugin_adds_https_hint_ip_tags_to_upstream_result(tmp_path: Path) -> None:
+    domain_dir = tmp_path / "domains"
+    ip_dir = tmp_path / "ips"
+    domain_dir.mkdir()
+    ip_dir.mkdir()
+    _write_lines(domain_dir / "request-tag.txt", ["example.org"])
+    _write_lines(ip_dir / "v4-tag.txt", ["203.0.113.0/24"])
+    _write_lines(ip_dir / "v6-tag.txt", ["2001:db8::/32"])
+
+    plugin = TagPlugin()
+    plugin.bind(plugin.config_model(), plugin.variables_model())
+    registry = PluginRegistry()
+    registry.register_context(DOMAINSET_CONTEXT_KEY, DomainSet(str(domain_dir)))
+    registry.register_context(IPSET_CONTEXT_KEY, IPSet(str(ip_dir)))
+    await plugin.setup(registry)
+    manager = PluginManager([], registry)
+
+    context = RequestContext(
+        request=dns.message.make_query("www.example.org", "HTTPS"),
+        clientaddr=("127.0.0.1", 5300),
+        listener_name="udp",
+        tags={"request-tag"},
+        extensions=manager.build_context_extensions(),
+    )
+    response = dns.message.make_response(context.request)
+    response.answer.append(
+        dns.rrset.from_text(
+            "www.example.org.",
+            60,
+            "IN",
+            "HTTPS",
+            '1 . ipv4hint="203.0.113.10" ipv6hint="2001:db8::10"',
+        )
+    )
+    answer = build_answer_from_response(context.request, response)
+    result = UpstreamResult(upstream_name="default", duration_ms=1.0, answer=answer, tags=context.tags.copy())
+
+    await plugin.on_upstream_response(context, result)
+
+    assert result.tags == {"request-tag", "v4-tag", "v6-tag"}
+
+
+async def test_tag_plugin_adds_https_cname_and_hint_tags_to_upstream_result(tmp_path: Path) -> None:
+    domain_dir = tmp_path / "domains"
+    ip_dir = tmp_path / "ips"
+    domain_dir.mkdir()
+    ip_dir.mkdir()
+    _write_lines(domain_dir / "request-tag.txt", ["example.org"])
+    _write_lines(domain_dir / "mid-tag.txt", ["edge.example.net"])
+    _write_lines(domain_dir / "final-tag.txt", ["svc.example.net"])
+    _write_lines(ip_dir / "v4-tag.txt", ["203.0.113.0/24"])
+    _write_lines(ip_dir / "v6-tag.txt", ["2001:db8::/32"])
+
+    plugin = TagPlugin()
+    plugin.bind(plugin.config_model(), plugin.variables_model())
+    registry = PluginRegistry()
+    registry.register_context(DOMAINSET_CONTEXT_KEY, DomainSet(str(domain_dir)))
+    registry.register_context(IPSET_CONTEXT_KEY, IPSet(str(ip_dir)))
+    await plugin.setup(registry)
+    manager = PluginManager([], registry)
+
+    context = RequestContext(
+        request=dns.message.make_query("www.example.org", "HTTPS"),
+        clientaddr=("127.0.0.1", 5300),
+        listener_name="udp",
+        tags={"request-tag"},
+        extensions=manager.build_context_extensions(),
+    )
+    response = dns.message.make_response(context.request)
+    response.answer.append(
+        dns.rrset.from_text(
+            "www.example.org.",
+            60,
+            "IN",
+            "CNAME",
+            "edge.example.net.",
+        )
+    )
+    response.answer.append(
+        dns.rrset.from_text(
+            "edge.example.net.",
+            60,
+            "IN",
+            "CNAME",
+            "svc.example.net.",
+        )
+    )
+    response.answer.append(
+        dns.rrset.from_text(
+            "svc.example.net.",
+            60,
+            "IN",
+            "HTTPS",
+            '1 . ipv4hint="203.0.113.10" ipv6hint="2001:db8::10"',
+        )
+    )
+    answer = build_answer_from_response(context.request, response)
+    result = UpstreamResult(upstream_name="default", duration_ms=1.0, answer=answer, tags=context.tags.copy())
+
+    await plugin.on_upstream_response(context, result)
+
+    assert result.tags == {"request-tag", "mid-tag", "final-tag", "v4-tag", "v6-tag"}
+
+
+async def test_tag_plugin_skips_https_answers_without_hints(tmp_path: Path) -> None:
+    domain_dir = tmp_path / "domains"
+    ip_dir = tmp_path / "ips"
+    domain_dir.mkdir()
+    ip_dir.mkdir()
+    _write_lines(ip_dir / "v4-tag.txt", ["203.0.113.0/24"])
+
+    plugin = TagPlugin()
+    plugin.bind(plugin.config_model(), plugin.variables_model())
+    registry = PluginRegistry()
+    registry.register_context(DOMAINSET_CONTEXT_KEY, DomainSet(str(domain_dir)))
+    registry.register_context(IPSET_CONTEXT_KEY, IPSet(str(ip_dir)))
+    await plugin.setup(registry)
+    manager = PluginManager([], registry)
+
+    context = RequestContext(
+        request=dns.message.make_query("example.org", "HTTPS"),
+        clientaddr=("127.0.0.1", 5300),
+        listener_name="udp",
+        extensions=manager.build_context_extensions(),
+    )
+    response = dns.message.make_response(context.request)
+    response.answer.append(
+        dns.rrset.from_text(
+            "example.org.",
+            60,
+            "IN",
+            "HTTPS",
+            '1 . alpn="h2"',
+        )
+    )
+    answer = build_answer_from_response(context.request, response)
+    result = UpstreamResult(upstream_name="default", duration_ms=1.0, answer=answer, tags={"proxy"})
+
+    await plugin.on_upstream_response(context, result)
+
+    assert result.tags == {"proxy"}
+
+
+def test_tag_plugin_extract_https_hint_ips_does_not_deduplicate_addresses() -> None:
+    request = dns.message.make_query("example.org", "HTTPS")
+    response = dns.message.make_response(request)
+    response.answer.append(
+        dns.rrset.from_text(
+            "example.org.",
+            60,
+            "IN",
+            "HTTPS",
+            '1 . ipv4hint="203.0.113.10,203.0.113.10" ipv6hint="2001:db8::10,2001:db8::10"',
+        )
+    )
+    answer = build_answer_from_response(request, response)
+
+    assert TagPlugin._extract_answer_ips(answer) == [
+        "203.0.113.10",
+        "203.0.113.10",
+        "2001:db8::10",
+        "2001:db8::10",
+    ]
+
+
 def test_tag_plugin_extract_answer_ips_does_not_deduplicate_addresses() -> None:
     answer = SimpleNamespace(
         rrset=[

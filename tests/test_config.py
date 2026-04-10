@@ -261,6 +261,7 @@ def test_parse_config_text_materializes_missing_plugins_as_disabled_defaults() -
         "sample_plugin",
         "block_plugin",
         "cache_plugin",
+        "cloudflare_ech_plugin",
         "https_plugin",
         "speedtest_plugin",
         "tag_plugin",
@@ -270,6 +271,9 @@ def test_parse_config_text_materializes_missing_plugins_as_disabled_defaults() -
     assert plugins_by_module["cache_plugin"].enabled is False
     assert plugins_by_module["cache_plugin"].config == {"max_size": 100000}
     assert plugins_by_module["cache_plugin"].variables == {}
+    assert plugins_by_module["cloudflare_ech_plugin"].enabled is False
+    assert plugins_by_module["cloudflare_ech_plugin"].config == {"match_tags": [], "exclude_tags": []}
+    assert plugins_by_module["cloudflare_ech_plugin"].variables == {}
     assert plugins_by_module["https_plugin"].enabled is False
     assert plugins_by_module["https_plugin"].config == {}
     assert plugins_by_module["https_plugin"].variables == {}
@@ -303,6 +307,9 @@ def test_build_config_json_schema_includes_available_plugin_schemas() -> None:
     sample_option = next(item for item in options if item["properties"]["module"]["const"] == "sample_plugin")
     block_option = next(item for item in options if item["properties"]["module"]["const"] == "block_plugin")
     cache_option = next(item for item in options if item["properties"]["module"]["const"] == "cache_plugin")
+    cloudflare_ech_option = next(
+        item for item in options if item["properties"]["module"]["const"] == "cloudflare_ech_plugin"
+    )
     https_option = next(item for item in options if item["properties"]["module"]["const"] == "https_plugin")
     tag_option = next(item for item in options if item["properties"]["module"]["const"] == "tag_plugin")
     ip_replace_option = next(item for item in options if item["properties"]["module"]["const"] == "ip_replace_plugin")
@@ -316,6 +323,10 @@ def test_build_config_json_schema_includes_available_plugin_schemas() -> None:
     assert cache_option["properties"]["enabled"]["default"] is False
     assert cache_option["default"]["enabled"] is False
     assert cache_option["default"]["config"] == {"max_size": 100000}
+    assert cloudflare_ech_option["title"] == "Cloudflare ECH Plugin"
+    assert "match_tags" in cloudflare_ech_option["properties"]["config"]["properties"]
+    assert "exclude_tags" in cloudflare_ech_option["properties"]["config"]["properties"]
+    assert cloudflare_ech_option["default"]["config"] == {"match_tags": [], "exclude_tags": []}
     assert https_option["title"] == "HTTPS Plugin"
     assert https_option["default"]["config"] == {}
     assert "fallback_rules" in speedtest_option["properties"]["config"]["properties"]
@@ -334,6 +345,7 @@ def test_discover_available_plugins_lists_installed_plugins() -> None:
     assert {
         "block_plugin",
         "cache_plugin",
+        "cloudflare_ech_plugin",
         "https_plugin",
         "ip_replace_plugin",
         "sample_plugin",

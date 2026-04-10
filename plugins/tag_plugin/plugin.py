@@ -9,6 +9,9 @@ from dns_forwarder.pipeline import RequestContext, UpstreamResult
 from dns_forwarder.plugin_api import EmptyModel, Plugin, PluginRegistry
 
 
+HAS_HINT_TAG = "has_hint"
+
+
 def get_domainset(context: RequestContext) -> DomainSet:
     domainset = context.extensions[DOMAINSET_CONTEXT_KEY]
     if not isinstance(domainset, DomainSet):
@@ -46,6 +49,15 @@ class TagPlugin(Plugin):
         result.tags.update(context.tags)
         for domain in self._extract_cname_chain_domains(result.answer):
             result.tags.update(domainset.lookup(domain))
+        if result.answer is None or result.answer.rrset is None:
+            return
+        if result.answer.rdtype == dns.rdatatype.HTTPS:
+            hint_ips, has_hints = self._extract_https_hints(result.answer)
+            if has_hints:
+                result.tags.add(HAS_HINT_TAG)
+            for ip in hint_ips:
+                result.tags.update(ipset.lookup(ip))
+            return
         for ip in self._extract_answer_ips(result.answer):
             result.tags.update(ipset.lookup(ip))
 
@@ -71,7 +83,7 @@ class TagPlugin(Plugin):
         if answer.rdtype in {dns.rdatatype.A, dns.rdatatype.AAAA}:
             return TagPlugin._extract_address_record_ips(answer)
         if answer.rdtype == dns.rdatatype.HTTPS:
-            return TagPlugin._extract_https_hint_ips(answer)
+            return TagPlugin._extract_https_hints(answer)[0]
         return []
 
     @staticmethod
@@ -85,8 +97,9 @@ class TagPlugin(Plugin):
         return addresses
 
     @staticmethod
-    def _extract_https_hint_ips(answer: dns.resolver.Answer) -> list[str]:
+    def _extract_https_hints(answer: dns.resolver.Answer) -> tuple[list[str], bool]:
         addresses: list[str] = []
+        has_hints = False
         for record in answer.rrset:
             params = getattr(record, "params", None)
             if params is None:
@@ -98,8 +111,9 @@ class TagPlugin(Plugin):
                 hint_param = params.get(hint_key)
                 if hint_param is None:
                     continue
+                has_hints = True
                 addresses.extend(hint_param.addresses)
-        return addresses
+        return addresses, has_hints
 
 
 plugin = TagPlugin()

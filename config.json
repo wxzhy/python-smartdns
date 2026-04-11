@@ -8,8 +8,8 @@
     "log_level": "DEBUG"
   },
   "tree_root": {
-    "domain_dir": null,
-    "ip_dir": null
+    "domain_dir": "tags/geosite",
+    "ip_dir": "tags/geoip"
   },
   "listeners": [
     {
@@ -128,9 +128,23 @@
     {
       "name": "block_plugin",
       "module": "block_plugin",
-      "enabled": false,
+      "enabled": true,
       "config": {
-        "rules": []
+        "rules": [
+          {
+            "match_tags": [
+              "ads"
+            ],
+            "exclude_tags": [],
+            "ipv4_addresses": [
+              "127.0.0.1"
+            ],
+            "ipv6_addresses": [
+              "::1"
+            ],
+            "response_ttl_seconds": 86400
+          }
+        ]
       },
       "variables": {}
     },
@@ -144,10 +158,30 @@
     {
       "name": "ip_replace_plugin",
       "module": "ip_replace_plugin",
-      "enabled": false,
+      "enabled": true,
       "config": {
-        "skip_tags": [],
-        "rules": []
+        "skip_tags": [
+          "cn",
+          "ads",
+          "private"
+        ],
+        "rules": [
+          {
+            "name": "proxy-map",
+            "match_tags": [
+              "cloudflare"
+            ],
+            "exclude_tags": [],
+            "ipv4_targets": [
+              "162.159.44.0/32",
+              "162.159.45.0/32"
+            ],
+            "ipv6_targets": [
+              "2606:4700:52::/128",
+              "2606:4700:57::/128"
+            ]
+          }
+        ]
       },
       "variables": {}
     }

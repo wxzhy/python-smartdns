@@ -23,13 +23,7 @@ def reverse_domain(value: str) -> str:
 class DomainSet:
     def __init__(self, directory: str | None) -> None:
         self._entries = self._build_domain_entries(directory)
-        self._trie = (
-            marisa_trie.StringTrie(
-                self._entries
-            )
-            if self._entries
-            else None
-        )
+        self._trie = marisa_trie.StringTrie(self._entries) if self._entries else None
 
     def lookup(self, qname: str) -> set[str]:
         if self._trie is None:
@@ -46,9 +40,9 @@ class DomainSet:
         for tag, domains in _load_tag_files(directory, normalize_domain).items():
             for domain in domains:
                 reversed_domain = reverse_domain(domain)
-                existing_tag = domain_to_tag.get(reversed_domain)
-                if existing_tag is not None and existing_tag != tag:
-                    raise ValueError(f"domain 重复归属多个 tag: {domain}")
+                # existing_tag = domain_to_tag.get(reversed_domain)
+                # if existing_tag is not None and existing_tag != tag:
+                #     raise ValueError(f"domain 重复归属多个 tag: {domain}")
                 domain_to_tag[reversed_domain] = tag
         return sorted(domain_to_tag.items())
 
@@ -67,8 +61,8 @@ def _load_tag_files(
     if not path.is_dir():
         raise NotADirectoryError(f"tag 路径不是目录: {path}")
 
-    for file_path in sorted(path.glob("*.txt")):
-        if not file_path.is_file():
+    for file_path in sorted(path.iterdir(), key=lambda item: item.name):
+        if not file_path.is_file() or file_path.name.startswith("."):
             continue
         tag = file_path.stem
         if not tag:

@@ -280,7 +280,6 @@
         "rules": [
           {
             "name": "proxy-map",
-            "enabled": true,
             "match_tags": [
               "proxy"
             ],

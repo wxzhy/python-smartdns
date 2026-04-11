@@ -61,8 +61,8 @@ def _load_tag_files(
     if not path.is_dir():
         raise NotADirectoryError(f"tag 路径不是目录: {path}")
 
-    for file_path in sorted(path.glob("*.txt")):
-        if not file_path.is_file():
+    for file_path in sorted(path.iterdir(), key=lambda item: item.name):
+        if not file_path.is_file() or file_path.name.startswith("."):
             continue
         tag = file_path.stem
         if not tag:

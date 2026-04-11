@@ -21,10 +21,10 @@ def _write_lines(path: Path, lines: list[str]) -> None:
 def test_domainset_merges_same_tag_files_and_domain_suffix_matches(tmp_path: Path) -> None:
     domain_dir = tmp_path / "domains"
     domain_dir.mkdir()
-    _write_lines(domain_dir / "proxy.txt", ["example.org", "another.example.org", "# comment", "example.org"])
-    _write_lines(domain_dir / "domestic.txt", ["www.example.org"])
-    _write_lines(domain_dir / "deep.txt", ["b.c.com"])
-    _write_lines(domain_dir / "suffix.txt", ["c.com"])
+    _write_lines(domain_dir / "proxy.list", ["example.org", "another.example.org", "# comment", "example.org"])
+    _write_lines(domain_dir / "domestic.list", ["www.example.org"])
+    _write_lines(domain_dir / "deep.list", ["b.c.com"])
+    _write_lines(domain_dir / "suffix.list", ["c.com"])
 
     domainset = DomainSet(str(domain_dir))
 
@@ -37,8 +37,8 @@ def test_domainset_merges_same_tag_files_and_domain_suffix_matches(tmp_path: Pat
 def test_ipset_unions_covering_ip_prefix_tags(tmp_path: Path) -> None:
     ip_dir = tmp_path / "ips"
     ip_dir.mkdir()
-    _write_lines(ip_dir / "proxy.txt", ["203.0.112.0/20", "203.0.113.0/24", "203.0.113.8/32"])
-    _write_lines(ip_dir / "domestic.txt", ["203.0.113.0/25"])
+    _write_lines(ip_dir / "proxy.list", ["203.0.112.0/20", "203.0.113.0/24", "203.0.113.8/32"])
+    _write_lines(ip_dir / "domestic.list", ["203.0.113.0/25"])
 
     ipset = IPSet(str(ip_dir))
 
@@ -50,8 +50,8 @@ def test_ipset_unions_covering_ip_prefix_tags(tmp_path: Path) -> None:
 def test_domainset_rejects_same_domain_in_multiple_tags(tmp_path: Path) -> None:
     domain_dir = tmp_path / "domains"
     domain_dir.mkdir()
-    _write_lines(domain_dir / "proxy.txt", ["example.org"])
-    _write_lines(domain_dir / "domestic.txt", ["example.org"])
+    _write_lines(domain_dir / "proxy.list", ["example.org"])
+    _write_lines(domain_dir / "domestic.list", ["example.org"])
 
     try:
         DomainSet(str(domain_dir))
@@ -64,8 +64,8 @@ def test_domainset_rejects_same_domain_in_multiple_tags(tmp_path: Path) -> None:
 def test_ipset_rejects_same_network_in_multiple_tags(tmp_path: Path) -> None:
     ip_dir = tmp_path / "ips"
     ip_dir.mkdir()
-    _write_lines(ip_dir / "proxy.txt", ["203.0.113.0/24"])
-    _write_lines(ip_dir / "domestic.txt", ["203.0.113.0/24"])
+    _write_lines(ip_dir / "proxy.list", ["203.0.113.0/24"])
+    _write_lines(ip_dir / "domestic.list", ["203.0.113.0/24"])
 
     try:
         IPSet(str(ip_dir))
@@ -80,7 +80,7 @@ async def test_tag_plugin_uses_shared_domainset_and_ipset(tmp_path: Path) -> Non
     ip_dir = tmp_path / "ips"
     domain_dir.mkdir()
     ip_dir.mkdir()
-    _write_lines(domain_dir / "proxy.txt", ["example.org"])
+    _write_lines(domain_dir / "proxy.list", ["example.org"])
 
     domainset = DomainSet(str(domain_dir))
     ipset = IPSet(str(ip_dir))
@@ -104,8 +104,8 @@ async def test_tag_plugin_adds_request_tags_from_domain_files(tmp_path: Path) ->
     ip_dir = tmp_path / "ips"
     domain_dir.mkdir()
     ip_dir.mkdir()
-    _write_lines(domain_dir / "proxy.txt", ["example.org"])
-    _write_lines(domain_dir / "domestic.txt", ["www.example.org"])
+    _write_lines(domain_dir / "proxy.list", ["example.org"])
+    _write_lines(domain_dir / "domestic.list", ["www.example.org"])
 
     plugin = TagPlugin()
     plugin.bind(plugin.config_model(), plugin.variables_model())

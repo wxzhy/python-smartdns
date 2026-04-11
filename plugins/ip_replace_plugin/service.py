@@ -26,7 +26,7 @@ class CompiledIpReplaceRule:
 
 class IpReplaceService:
     def __init__(self, rules: list[IpReplaceRuleConfig], skip_tags: list[str] | None = None) -> None:
-        self._rules = tuple(self._compile_rule(rule) for rule in rules if rule.enabled)
+        self._rules = tuple(self._compile_rule(rule) for rule in rules)
         self._skip_tags = frozenset(skip_tags or [])
 
     def replace_answer(self, answer: dns.resolver.Answer | None, tags: set[str], *, stage: str = "unknown") -> bool:

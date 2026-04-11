@@ -199,6 +199,16 @@ def test_ip_replace_rule_config_requires_at_least_one_target() -> None:
         )
 
 
+def test_ip_replace_rule_config_rejects_legacy_enabled_field() -> None:
+    with pytest.raises(ValidationError, match="enabled"):
+        IpReplaceRuleConfig(
+            name="legacy-enabled",
+            enabled=True,
+            match_tags=["proxy"],
+            ipv4_targets=["10.10.0.0/24"],
+        )
+
+
 def test_ip_replace_service_expands_ipv4_targets_and_deduplicates_stably() -> None:
     service = IpReplaceService(
         [

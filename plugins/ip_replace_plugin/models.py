@@ -11,7 +11,6 @@ class StrictPluginModel(BaseModel):
 
 class IpReplaceRuleConfig(StrictPluginModel):
     name: str
-    enabled: bool = True
     match_tags: list[str] = Field(default_factory=list, min_length=1)
     exclude_tags: list[str] = Field(default_factory=list)
     ipv4_targets: list[str] = Field(default_factory=list)

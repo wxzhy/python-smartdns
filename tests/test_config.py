@@ -393,15 +393,19 @@ def test_discover_available_plugins_lists_installed_plugins() -> None:
     } <= modules
 
 
-def test_plugin_manager_loads_package_plugins_with_isolated_module_namespace() -> None:
+def test_plugin_manager_loads_package_plugins_from_static_registry() -> None:
     plugin_dir = str((Path(__file__).resolve().parents[1] / "plugins").resolve())
 
     module1 = PluginManager._load_module("cache_plugin", [plugin_dir])
     module2 = PluginManager._load_module("cache_plugin", [plugin_dir])
+    plugin1 = PluginManager._create_plugin_instance("cache_plugin", [plugin_dir])
+    plugin2 = PluginManager._create_plugin_instance("cache_plugin", [plugin_dir])
 
-    assert module1.__name__ != module2.__name__
-    assert module1.plugin is not module2.plugin
-    assert type(module1.plugin) is not type(module2.plugin)
+    assert module1 is module2
+    assert module1.__name__ == "plugins.cache_plugin"
+    assert plugin1 is not plugin2
+    assert type(plugin1) is type(module1.plugin)
+    assert type(plugin1) is type(plugin2)
 
 
 def test_config_example_json_is_valid() -> None:

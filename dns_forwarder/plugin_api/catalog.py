@@ -2,7 +2,6 @@ from __future__ import annotations
 
 from copy import deepcopy
 from dataclasses import dataclass
-from pathlib import Path
 from typing import Any
 
 from pydantic import BaseModel
@@ -10,6 +9,7 @@ from pydantic import BaseModel
 from dns_forwarder.config.models import PluginConfig
 
 from .base import Plugin, PluginManager
+from .static_plugins import iter_static_plugin_module_names
 
 
 @dataclass(frozen=True, slots=True)
@@ -53,13 +53,8 @@ class PluginCatalogEntry:
 
 def discover_available_plugins(plugin_dirs: list[str]) -> list[PluginCatalogEntry]:
     entries: list[PluginCatalogEntry] = []
-    seen_modules: set[str] = set()
-
-    for module_name in _iter_plugin_module_names(plugin_dirs):
-        if module_name in seen_modules:
-            continue
+    for module_name in iter_static_plugin_module_names():
         plugin = _load_plugin(module_name, plugin_dirs)
-        seen_modules.add(module_name)
         entries.append(
             PluginCatalogEntry(
                 module=module_name,
@@ -130,28 +125,5 @@ def _rewrite_schema_refs(value: Any, prefix: str) -> None:
             _rewrite_schema_refs(item, prefix)
 
 
-def _iter_plugin_module_names(plugin_dirs: list[str]) -> list[str]:
-    modules: list[str] = []
-    for plugin_dir in plugin_dirs:
-        base = Path(plugin_dir)
-        if not base.exists() or not base.is_dir():
-            continue
-
-        for child in sorted(base.iterdir(), key=lambda item: item.name):
-            if child.name == "__pycache__" or child.name.startswith("_"):
-                continue
-            if child.is_dir() and (child / "__init__.py").exists():
-                modules.append(child.name)
-                continue
-            if child.is_file() and child.suffix == ".py" and child.stem != "__init__":
-                modules.append(child.stem)
-
-    return modules
-
-
 def _load_plugin(module_name: str, plugin_dirs: list[str]) -> Plugin:
-    module = PluginManager._load_module(module_name, plugin_dirs)
-    plugin = getattr(module, "plugin", None)
-    if not isinstance(plugin, Plugin):
-        raise TypeError(f"插件 {module_name} 未导出 plugin 实例")
-    return plugin
+    return PluginManager._create_plugin_instance(module_name, plugin_dirs)

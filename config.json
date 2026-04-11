@@ -30,13 +30,13 @@
   "nameservers": [
     {
       "name": "cloudflare-primary",
-      "protocol": "do53",
-      "address": "1.1.1.1",
+      "protocol": "do53_custom",
+      "address": "1.0.0.1",
       "port": 53
     },
     {
       "name": "google-backup",
-      "protocol": "do53",
+      "protocol": "do53_custom",
       "address": "8.8.8.8",
       "port": 53
     }
@@ -48,8 +48,8 @@
         "cloudflare-primary",
         "google-backup"
       ],
-      "timeout": 1.0,
-      "lifetime": 3.0,
+      "timeout": 2.0,
+      "lifetime": 4.0,
       "use_tcp": true,
       "ecs": null
     }

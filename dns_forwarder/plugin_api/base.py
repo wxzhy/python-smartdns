@@ -1,14 +1,12 @@
 from __future__ import annotations
 
-import importlib.util
-import sys
 from dataclasses import dataclass, field
-from pathlib import Path
 from types import ModuleType
 from typing import TYPE_CHECKING, Any, Callable
-from uuid import uuid4
 
 from pydantic import BaseModel
+
+from .static_plugins import load_static_plugin_module
 
 if TYPE_CHECKING:
     import dns.message
@@ -118,10 +116,7 @@ class PluginManager:
         for plugin_config in plugin_configs:
             if not plugin_config.enabled:
                 continue
-            module = cls._load_module(plugin_config.module, plugin_dirs)
-            plugin = getattr(module, "plugin", None)
-            if not isinstance(plugin, Plugin):
-                raise TypeError(f"插件 {plugin_config.name} 未导出 plugin 实例")
+            plugin = cls._create_plugin_instance(plugin_config.module, plugin_dirs)
 
             config_model = plugin.config_model.model_validate(plugin_config.config)
             variables_model = plugin.variables_model.model_validate(plugin_config.variables)
@@ -139,43 +134,20 @@ class PluginManager:
 
     @staticmethod
     def _load_module(module_name: str, plugin_dirs: list[str]) -> ModuleType:
-        module_path = PluginManager._find_module_path(module_name, plugin_dirs)
-        normalized_name = module_name.replace("\\", ".").replace("/", ".").strip(".")
-        unique_name = f"dns_forwarder.plugins.{normalized_name}_{uuid4().hex}"
-        spec_kwargs: dict[str, Any] = {}
-        if module_path.name == "__init__.py":
-            spec_kwargs["submodule_search_locations"] = [str(module_path.parent)]
-        spec = importlib.util.spec_from_file_location(unique_name, module_path, **spec_kwargs)
-        if spec is None or spec.loader is None:
-            raise ImportError(f"无法加载插件模块: {module_name}")
-
-        module = importlib.util.module_from_spec(spec)
-        sys.modules[unique_name] = module
-        try:
-            spec.loader.exec_module(module)
-        except Exception:
-            PluginManager._unload_module_tree(unique_name)
-            raise
-        return module
+        return load_static_plugin_module(module_name)
 
     @staticmethod
-    def _unload_module_tree(module_name: str) -> None:
-        for loaded_name in tuple(sys.modules):
-            if loaded_name == module_name or loaded_name.startswith(f"{module_name}."):
-                sys.modules.pop(loaded_name, None)
+    def _load_plugin_template(module_name: str, plugin_dirs: list[str]) -> Plugin:
+        module = PluginManager._load_module(module_name, plugin_dirs)
+        plugin = getattr(module, "plugin", None)
+        if not isinstance(plugin, Plugin):
+            raise TypeError(f"插件 {module_name} 未导出 plugin 实例")
+        return plugin
 
     @staticmethod
-    def _find_module_path(module_name: str, plugin_dirs: list[str]) -> Path:
-        candidate_name = module_name if module_name.endswith(".py") else f"{module_name}.py"
-        for plugin_dir in plugin_dirs:
-            base = Path(plugin_dir)
-            direct = base / candidate_name
-            package_init = base / module_name / "__init__.py"
-            if direct.exists():
-                return direct
-            if package_init.exists():
-                return package_init
-        raise FileNotFoundError(f"未找到插件模块: {module_name}")
+    def _create_plugin_instance(module_name: str, plugin_dirs: list[str]) -> Plugin:
+        template = PluginManager._load_plugin_template(module_name, plugin_dirs)
+        return type(template)()
 
     def build_context_extensions(self) -> dict[str, Any]:
         return {

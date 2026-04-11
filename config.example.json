@@ -35,6 +35,12 @@
       "port": 53
     },
     {
+      "name": "cf-udp-custom",
+      "protocol": "do53_custom",
+      "address": "1.0.0.1",
+      "port": 53
+    },
+    {
       "name": "google-udp",
       "protocol": "do53",
       "address": "8.8.8.8",
@@ -58,6 +64,14 @@
       "http_version": "h2"
     },
     {
+      "name": "cloudflare-doh-custom",
+      "protocol": "doh_custom",
+      "url": "https://cloudflare-dns.com/dns-query",
+      "verify": true,
+      "want_get": false,
+      "http_version": "h2"
+    },
+    {
       "name": "adguard-doq",
       "protocol": "doq",
       "address": "94.140.14.14",
@@ -71,6 +85,7 @@
       "name": "public-pool",
       "nameservers": [
         "cf-udp",
+        "cf-udp-custom",
         "google-udp",
         "quad9-dot"
       ],
@@ -83,6 +98,7 @@
       "name": "encrypted-pool",
       "nameservers": [
         "cloudflare-doh",
+        "cloudflare-doh-custom",
         "adguard-doq"
       ],
       "timeout": 1.0,

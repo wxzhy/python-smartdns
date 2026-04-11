@@ -32,7 +32,9 @@ class ListenerProtocol(StrEnum):
 
 class NameserverProtocol(StrEnum):
     DO53 = "do53"
+    DO53_CUSTOM = "do53_custom"
     DOH = "doh"
+    DOH_CUSTOM = "doh_custom"
     DOT = "dot"
     DOQ = "doq"
 
@@ -118,8 +120,23 @@ class Do53NameserverConfig(BaseNameserverConfig):
     port: int = Field(default=53, ge=1, le=65535)
 
 
+class Do53CustomNameserverConfig(BaseNameserverConfig):
+    protocol: Literal[NameserverProtocol.DO53_CUSTOM] = NameserverProtocol.DO53_CUSTOM
+    address: str
+    port: int = Field(default=53, ge=1, le=65535)
+
+
 class DoHNameserverConfig(BaseNameserverConfig):
     protocol: Literal[NameserverProtocol.DOH] = NameserverProtocol.DOH
+    url: str
+    bootstrap_address: str | None = None
+    verify: bool | str = True
+    want_get: bool = False
+    http_version: HTTPVersionType = HTTPVersionType.DEFAULT
+
+
+class DoHCustomNameserverConfig(BaseNameserverConfig):
+    protocol: Literal[NameserverProtocol.DOH_CUSTOM] = NameserverProtocol.DOH_CUSTOM
     url: str
     bootstrap_address: str | None = None
     verify: bool | str = True
@@ -144,7 +161,12 @@ class DoQNameserverConfig(BaseNameserverConfig):
 
 
 NameserverConfig = Annotated[
-    Do53NameserverConfig | DoHNameserverConfig | DoTNameserverConfig | DoQNameserverConfig,
+    Do53NameserverConfig
+    | Do53CustomNameserverConfig
+    | DoHNameserverConfig
+    | DoHCustomNameserverConfig
+    | DoTNameserverConfig
+    | DoQNameserverConfig,
     Field(discriminator="protocol"),
 ]
 

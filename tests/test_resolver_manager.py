@@ -13,7 +13,9 @@ import pytest
 
 from dns_forwarder.config import (
     Do53NameserverConfig,
+    Do53CustomNameserverConfig,
     DoHNameserverConfig,
+    DoHCustomNameserverConfig,
     DoQNameserverConfig,
     DoTNameserverConfig,
     ECSConfig,
@@ -35,6 +37,16 @@ def test_build_nameserver_supports_do53() -> None:
     assert nameserver.port == 5301
 
 
+def test_build_nameserver_supports_do53_custom() -> None:
+    nameserver = build_nameserver(
+        Do53CustomNameserverConfig(name="local-custom", address="127.0.0.1", port=5302)
+    )
+
+    assert nameserver.__class__.__name__ == "Do53CustomNameserver"
+    assert nameserver.address == "127.0.0.1"
+    assert nameserver.port == 5302
+
+
 def test_build_nameserver_supports_doh() -> None:
     nameserver = build_nameserver(
         DoHNameserverConfig(
@@ -49,6 +61,22 @@ def test_build_nameserver_supports_doh() -> None:
     assert isinstance(nameserver, dns.nameserver.DoHNameserver)
     assert nameserver.url == "https://cloudflare-dns.com/dns-query"
     assert nameserver.bootstrap_address == "1.1.1.1"
+    assert nameserver.want_get is True
+    assert nameserver.http_version is dns.query.HTTPVersion.H2
+
+
+def test_build_nameserver_supports_doh_custom() -> None:
+    nameserver = build_nameserver(
+        DoHCustomNameserverConfig(
+            name="cloudflare-custom",
+            url="https://cloudflare-dns.com/dns-query",
+            want_get=True,
+            http_version=HTTPVersionType.H2,
+        )
+    )
+
+    assert nameserver.__class__.__name__ == "DoHCustomNameserver"
+    assert nameserver.url == "https://cloudflare-dns.com/dns-query"
     assert nameserver.want_get is True
     assert nameserver.http_version is dns.query.HTTPVersion.H2
 
@@ -89,12 +117,13 @@ def test_build_nameserver_map_returns_named_instances() -> None:
     nameservers = build_nameserver_map(
         [
             Do53NameserverConfig(name="primary", address="127.0.0.1", port=5301),
-            Do53NameserverConfig(name="backup", address="127.0.0.2", port=5302),
+            Do53CustomNameserverConfig(name="backup", address="127.0.0.2", port=5302),
         ]
     )
 
     assert set(nameservers) == {"primary", "backup"}
-    assert all(isinstance(item, dns.nameserver.Do53Nameserver) for item in nameservers.values())
+    assert isinstance(nameservers["primary"], dns.nameserver.Do53Nameserver)
+    assert nameservers["backup"].__class__.__name__ == "Do53CustomNameserver"
 
 
 def test_upstream_resolver_configures_ecs_option() -> None:

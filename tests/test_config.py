@@ -85,12 +85,26 @@ def test_parse_config_text_accepts_all_supported_nameserver_protocols() -> None:
             "port": 53,
         },
         {
+            "name": "udp-custom-ns",
+            "protocol": "do53_custom",
+            "address": "1.0.0.1",
+            "port": 53,
+        },
+        {
             "name": "doh-ns",
             "protocol": "doh",
             "url": "https://cloudflare-dns.com/dns-query",
             "bootstrap_address": "1.1.1.1",
             "verify": True,
             "want_get": False,
+            "http_version": "h2",
+        },
+        {
+            "name": "doh-custom-ns",
+            "protocol": "doh_custom",
+            "url": "https://dns.google/dns-query",
+            "verify": True,
+            "want_get": True,
             "http_version": "h2",
         },
         {
@@ -113,15 +127,22 @@ def test_parse_config_text_accepts_all_supported_nameserver_protocols() -> None:
     config_dict["upstreams"] = [
         {
             "name": "mixed",
-            "nameservers": ["udp-ns", "doh-ns", "dot-ns", "doq-ns"],
+            "nameservers": ["udp-ns", "udp-custom-ns", "doh-ns", "doh-custom-ns", "dot-ns", "doq-ns"],
         }
     ]
     config_dict["groups"][0]["upstreams"] = ["mixed"]
 
     config = parse_config_dict(config_dict)
 
-    assert len(config.nameservers) == 4
-    assert config.upstreams[0].nameservers == ["udp-ns", "doh-ns", "dot-ns", "doq-ns"]
+    assert len(config.nameservers) == 6
+    assert config.upstreams[0].nameservers == [
+        "udp-ns",
+        "udp-custom-ns",
+        "doh-ns",
+        "doh-custom-ns",
+        "dot-ns",
+        "doq-ns",
+    ]
 
 
 def test_parse_config_text_allows_doh_without_udp_tcp_listeners() -> None:

@@ -6,14 +6,18 @@ import dns.nameserver
 
 from dns_forwarder.config import (
     Do53NameserverConfig,
+    Do53CustomNameserverConfig,
     DoHNameserverConfig,
+    DoHCustomNameserverConfig,
     DoQNameserverConfig,
     DoTNameserverConfig,
     NameserverConfig,
 )
 
 from .do53 import build_nameserver as build_do53_nameserver
+from .do53_custom import build_nameserver as build_do53_custom_nameserver
 from .doh import build_nameserver as build_doh_nameserver
+from .doh_custom import build_nameserver as build_doh_custom_nameserver
 from .doq import build_nameserver as build_doq_nameserver
 from .dot import build_nameserver as build_dot_nameserver
 
@@ -21,8 +25,12 @@ from .dot import build_nameserver as build_dot_nameserver
 def build_nameserver(config: NameserverConfig) -> dns.nameserver.Nameserver:
     if isinstance(config, Do53NameserverConfig):
         return build_do53_nameserver(config)
+    if isinstance(config, Do53CustomNameserverConfig):
+        return build_do53_custom_nameserver(config)
     if isinstance(config, DoHNameserverConfig):
         return build_doh_nameserver(config)
+    if isinstance(config, DoHCustomNameserverConfig):
+        return build_doh_custom_nameserver(config)
     if isinstance(config, DoTNameserverConfig):
         return build_dot_nameserver(config)
     if isinstance(config, DoQNameserverConfig):

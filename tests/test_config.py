@@ -263,6 +263,7 @@ def test_parse_config_text_materializes_missing_plugins_as_disabled_defaults() -
         "cache_plugin",
         "cloudflare_ech_plugin",
         "https_plugin",
+        "ip_filter_plugin",
         "speedtest_plugin",
         "tag_plugin",
         "ip_replace_plugin",
@@ -292,6 +293,14 @@ def test_parse_config_text_materializes_missing_plugins_as_disabled_defaults() -
     assert plugins_by_module["tag_plugin"].enabled is False
     assert plugins_by_module["tag_plugin"].config == {}
     assert plugins_by_module["tag_plugin"].variables == {}
+    assert plugins_by_module["ip_filter_plugin"].enabled is False
+    assert plugins_by_module["ip_filter_plugin"].config == {
+        "match_tags": [],
+        "exclude_tags": [],
+        "whitelist_tags": [],
+        "blacklist_tags": [],
+    }
+    assert plugins_by_module["ip_filter_plugin"].variables == {}
     assert plugins_by_module["ip_replace_plugin"].enabled is False
     assert plugins_by_module["ip_replace_plugin"].config == {"skip_tags": [], "rules": []}
     assert plugins_by_module["ip_replace_plugin"].variables == {}
@@ -312,6 +321,7 @@ def test_build_config_json_schema_includes_available_plugin_schemas() -> None:
     )
     https_option = next(item for item in options if item["properties"]["module"]["const"] == "https_plugin")
     tag_option = next(item for item in options if item["properties"]["module"]["const"] == "tag_plugin")
+    ip_filter_option = next(item for item in options if item["properties"]["module"]["const"] == "ip_filter_plugin")
     ip_replace_option = next(item for item in options if item["properties"]["module"]["const"] == "ip_replace_plugin")
 
     assert sample_option["title"] == "Sample Plugin"
@@ -332,6 +342,14 @@ def test_build_config_json_schema_includes_available_plugin_schemas() -> None:
     assert "fallback_rules" in speedtest_option["properties"]["config"]["properties"]
     assert tag_option["properties"]["config"]["type"] == "object"
     assert tag_option["default"]["config"] == {}
+    assert "whitelist_tags" in ip_filter_option["properties"]["config"]["properties"]
+    assert "blacklist_tags" in ip_filter_option["properties"]["config"]["properties"]
+    assert ip_filter_option["default"]["config"] == {
+        "match_tags": [],
+        "exclude_tags": [],
+        "whitelist_tags": [],
+        "blacklist_tags": [],
+    }
     assert "rules" in ip_replace_option["properties"]["config"]["properties"]
     assert "skip_tags" in ip_replace_option["properties"]["config"]["properties"]
     assert ip_replace_option["default"]["config"] == {"skip_tags": [], "rules": []}
@@ -347,6 +365,7 @@ def test_discover_available_plugins_lists_installed_plugins() -> None:
         "cache_plugin",
         "cloudflare_ech_plugin",
         "https_plugin",
+        "ip_filter_plugin",
         "ip_replace_plugin",
         "sample_plugin",
         "speedtest_plugin",

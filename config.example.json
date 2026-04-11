@@ -271,6 +271,24 @@
       "variables": {}
     },
     {
+      "name": "ip_filter",
+      "module": "ip_filter_plugin",
+      "enabled": false,
+      "config": {
+        "match_tags": [
+          "proxy"
+        ],
+        "exclude_tags": [
+          "direct"
+        ],
+        "whitelist_tags": [],
+        "blacklist_tags": [
+          "blocked"
+        ]
+      },
+      "variables": {}
+    },
+    {
       "name": "tags",
       "module": "tag_plugin",
       "enabled": false,

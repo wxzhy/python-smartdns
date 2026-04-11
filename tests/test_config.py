@@ -336,6 +336,9 @@ def test_build_config_json_schema_includes_available_plugin_schemas() -> None:
     assert https_option["title"] == "HTTPS Plugin"
     assert https_option["default"]["config"] == {}
     assert "fallback_rules" in speedtest_option["properties"]["config"]["properties"]
+    fallback_rule_ref = speedtest_option["properties"]["config"]["properties"]["fallback_rules"]["items"]["$ref"]
+    fallback_rule_name = fallback_rule_ref.removeprefix("#/$defs/")
+    assert "exclude_tags" in schema["$defs"][fallback_rule_name]["properties"]
     assert tag_option["properties"]["config"]["type"] == "object"
     assert tag_option["default"]["config"] == {}
     assert "whitelist_tags" in ip_filter_option["properties"]["config"]["properties"]

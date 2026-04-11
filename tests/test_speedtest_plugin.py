@@ -439,6 +439,65 @@ async def test_speedtest_plugin_on_response_uses_fallback_ips_when_all_ips_timeo
     assert answer.rrset.ttl == 180
 
 
+async def test_speedtest_plugin_on_response_skips_excluded_fallback_rule() -> None:
+    plugin = SpeedTestPlugin()
+    plugin.bind(
+        SpeedTestPluginConfig(
+            response_ip_limit=2,
+            response_ttl_seconds=180,
+            fallback_rules=[
+                SpeedTestFallbackRuleConfig(
+                    match_tags=["proxy"],
+                    exclude_tags=["direct"],
+                    ipv4_addresses=["10.10.0.2", "10.10.0.3"],
+                ),
+                SpeedTestFallbackRuleConfig(
+                    match_tags=["proxy"],
+                    ipv4_addresses=["10.20.0.2", "10.20.0.3"],
+                ),
+            ],
+        ),
+        plugin.variables_model(),
+    )
+    registry = PluginRegistry()
+    await plugin.setup(registry)
+    manager = PluginManager([], registry)
+
+    request = dns.message.make_query("example.test", "A")
+    response = dns.message.make_response(request)
+    response.answer.append(
+        dns.rrset.from_text(
+            "example.test.",
+            60,
+            "IN",
+            "A",
+            "203.0.113.10",
+            "203.0.113.11",
+        )
+    )
+    answer = build_answer_from_response(request, response)
+    context = RequestContext(
+        request=request,
+        clientaddr=("127.0.0.1", 5300),
+        listener_name="udp",
+        tags={"proxy", "direct"},
+        extensions=manager.build_context_extensions(),
+        final_answer=answer,
+    )
+    speedtest_context = get_speedtest_context(context)
+    await speedtest_context.add_results(
+        [
+            IpRttResult(ip="203.0.113.10", best_ms=None),
+            IpRttResult(ip="203.0.113.11", best_ms=None),
+        ]
+    )
+
+    await plugin.on_response(context)
+
+    assert [item.address for item in answer.rrset] == ["10.20.0.2", "10.20.0.3"]
+    assert answer.rrset.ttl == 180
+
+
 def test_plugin_manager_build_context_extensions_creates_request_scoped_context() -> None:
     registry = PluginRegistry()
     service = object()

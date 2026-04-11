@@ -22,10 +22,11 @@ from .service import SpeedTestService
 
 class SpeedTestFallbackRuleConfig(BaseModel):
     match_tags: list[str] = Field(default_factory=list, min_length=1)
+    exclude_tags: list[str] = Field(default_factory=list)
     ipv4_addresses: list[str] = Field(default_factory=list)
     ipv6_addresses: list[str] = Field(default_factory=list)
 
-    @field_validator("match_tags", mode="before")
+    @field_validator("match_tags", "exclude_tags", mode="before")
     @classmethod
     def normalize_tags(cls, value: list[str] | None) -> list[str]:
         return _normalize_tags(value)
@@ -189,6 +190,8 @@ class SpeedTestPlugin(Plugin):
 
     def _select_fallback_ips(self, tags: set[str], rdtype: dns.rdatatype.RdataType) -> list[str]:
         for rule in self.runtime_config.fallback_rules:
+            if self._has_any_tag(tags, rule.exclude_tags):
+                continue
             if not self._has_any_tag(tags, rule.match_tags):
                 continue
             ips = rule.ipv4_addresses if rdtype == dns.rdatatype.A else rule.ipv6_addresses

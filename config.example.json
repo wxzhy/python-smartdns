@@ -211,6 +211,9 @@
             "match_tags": [
               "proxy"
             ],
+            "exclude_tags": [
+              "direct"
+            ],
             "ipv4_addresses": [
               "10.10.0.2",
               "10.10.0.3"

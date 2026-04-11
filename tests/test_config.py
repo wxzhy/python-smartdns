@@ -279,12 +279,7 @@ def test_parse_config_text_materializes_missing_plugins_as_disabled_defaults() -
     assert plugins_by_module["https_plugin"].config == {}
     assert plugins_by_module["https_plugin"].variables == {}
     assert plugins_by_module["block_plugin"].enabled is False
-    assert plugins_by_module["block_plugin"].config == {
-        "match_tags": [],
-        "response_ttl_seconds": 86400,
-        "ipv4_address": "127.0.0.1",
-        "ipv6_address": "::1",
-    }
+    assert plugins_by_module["block_plugin"].config == {"rules": []}
     assert plugins_by_module["block_plugin"].variables == {}
     assert plugins_by_module["speedtest_plugin"].enabled is False
     assert plugins_by_module["speedtest_plugin"].config["response_ip_limit"] == 2
@@ -327,8 +322,9 @@ def test_build_config_json_schema_includes_available_plugin_schemas() -> None:
     assert sample_option["title"] == "Sample Plugin"
     assert "domains" in sample_option["properties"]["config"]["properties"]
     assert "ttl" in sample_option["properties"]["variables"]["properties"]
-    assert "match_tags" in block_option["properties"]["config"]["properties"]
-    assert block_option["default"]["config"]["ipv4_address"] == "127.0.0.1"
+    assert block_option["title"] == "Static Answer Plugin"
+    assert "rules" in block_option["properties"]["config"]["properties"]
+    assert block_option["default"]["config"] == {"rules": []}
     speedtest_option = next(item for item in options if item["properties"]["module"]["const"] == "speedtest_plugin")
     assert cache_option["properties"]["enabled"]["default"] is False
     assert cache_option["default"]["enabled"] is False

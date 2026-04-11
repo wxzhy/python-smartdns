@@ -1,34 +1,51 @@
 from __future__ import annotations
 
+from ipaddress import ip_address
+
 import dns.message
 import dns.rdatatype
 import dns.rrset
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from dns_forwarder.pipeline import RequestContext, build_answer_from_response
 from dns_forwarder.plugin_api import EmptyModel, Plugin, PluginRegistry
 
 
-class BlockPluginConfig(BaseModel):
-    match_tags: list[str] = Field(default_factory=list)
-    response_ttl_seconds: int = Field(default=86400, ge=1)
-    ipv4_address: str = "127.0.0.1"
-    ipv6_address: str = "::1"
+class StrictPluginModel(BaseModel):
+    model_config = ConfigDict(extra="forbid")
 
-    @field_validator("match_tags", mode="before")
+
+class BlockPluginRuleConfig(StrictPluginModel):
+    match_tags: list[str] = Field(default_factory=list, min_length=1)
+    exclude_tags: list[str] = Field(default_factory=list)
+    ipv4_addresses: list[str] = Field(default_factory=list)
+    ipv6_addresses: list[str] = Field(default_factory=list)
+    response_ttl_seconds: int = Field(default=86400, ge=1)
+
+    @field_validator("match_tags", "exclude_tags", mode="before")
     @classmethod
-    def normalize_match_tags(cls, value: list[str] | None) -> list[str]:
-        if value is None:
-            return []
-        seen: set[str] = set()
-        normalized: list[str] = []
-        for item in value:
-            tag = str(item).strip()
-            if not tag or tag in seen:
-                continue
-            seen.add(tag)
-            normalized.append(tag)
-        return normalized
+    def normalize_tags(cls, value: list[str] | None) -> list[str]:
+        return _normalize_tags(value)
+
+    @field_validator("ipv4_addresses", mode="before")
+    @classmethod
+    def normalize_ipv4_addresses(cls, value: list[str] | None) -> list[str]:
+        return _normalize_addresses(value, version=4)
+
+    @field_validator("ipv6_addresses", mode="before")
+    @classmethod
+    def normalize_ipv6_addresses(cls, value: list[str] | None) -> list[str]:
+        return _normalize_addresses(value, version=6)
+
+    @model_validator(mode="after")
+    def validate_addresses(self) -> "BlockPluginRuleConfig":
+        if not self.ipv4_addresses and not self.ipv6_addresses:
+            raise ValueError("静态应答规则至少需要一个 IPv4 或 IPv6 地址")
+        return self
+
+
+class BlockPluginConfig(StrictPluginModel):
+    rules: list[BlockPluginRuleConfig] = Field(default_factory=list)
 
 
 class BlockPlugin(Plugin):
@@ -38,56 +55,111 @@ class BlockPlugin(Plugin):
     request_order = -50
     response_order = 900
     ui_meta = {
-        "title": "Block Plugin",
-        "description": "按 tag 拦截请求或在响应末尾改写结果，对 A/AAAA 返回 localhost 地址。",
+        "title": "Static Answer Plugin",
+        "description": "按 tag 返回静态 A/AAAA 结果，可在请求阶段短路或在响应阶段覆盖结果。",
     }
 
     async def setup(self, registry: PluginRegistry) -> None:
         return None
 
     async def on_request(self, context: RequestContext) -> None:
-        if not self._matches(context.tags):
-            return
-        self._apply_block_response(context)
+        self._apply_static_response(context, context.tags)
 
     async def on_response(self, context: RequestContext) -> None:
         response_tags = set(context.tags)
         if context.upstream_results:
             response_tags.update(context.upstream_results[-1].tags)
-        if not self._matches(response_tags):
-            return
-        self._apply_block_response(context)
+        self._apply_static_response(context, response_tags)
 
-    def _matches(self, tags: set[str]) -> bool:
-        return bool(tags.intersection(self.runtime_config.match_tags))
-
-    def _apply_block_response(self, context: RequestContext) -> None:
-        response = dns.message.make_response(context.request)
+    def _apply_static_response(self, context: RequestContext, tags: set[str]) -> None:
         question = context.request.question[0]
-        record = self._build_record(question.name.to_text(), question.rdtype)
-        if record is not None:
-            response.answer.append(record)
+        rule = self._resolve_rule(tags, question.rdtype)
+        if rule is None:
+            return
+
+        response = dns.message.make_response(context.request)
+        response.answer.append(
+            self._build_record(question.name.to_text(), question.rdtype, rule)
+        )
         context.final_response = response
         context.final_answer = build_answer_from_response(context.request, response)
 
-    def _build_record(self, qname: str, rdtype: dns.rdatatype.RdataType) -> dns.rrset.RRset | None:
+    def _resolve_rule(
+        self,
+        tags: set[str],
+        rdtype: dns.rdatatype.RdataType,
+    ) -> BlockPluginRuleConfig | None:
+        if rdtype not in {dns.rdatatype.A, dns.rdatatype.AAAA}:
+            return None
+
+        for rule in self.runtime_config.rules:
+            if self._has_any_tag(tags, rule.exclude_tags):
+                continue
+            if not self._has_any_tag(tags, rule.match_tags):
+                continue
+            if rdtype == dns.rdatatype.A and rule.ipv4_addresses:
+                return rule
+            if rdtype == dns.rdatatype.AAAA and rule.ipv6_addresses:
+                return rule
+        return None
+
+    def _build_record(
+        self,
+        qname: str,
+        rdtype: dns.rdatatype.RdataType,
+        rule: BlockPluginRuleConfig,
+    ) -> dns.rrset.RRset:
         if rdtype == dns.rdatatype.A:
-            return dns.rrset.from_text(
+            return dns.rrset.from_text_list(
                 qname,
-                self.runtime_config.response_ttl_seconds,
+                rule.response_ttl_seconds,
                 "IN",
                 "A",
-                self.runtime_config.ipv4_address,
+                rule.ipv4_addresses,
             )
-        if rdtype == dns.rdatatype.AAAA:
-            return dns.rrset.from_text(
-                qname,
-                self.runtime_config.response_ttl_seconds,
-                "IN",
-                "AAAA",
-                self.runtime_config.ipv6_address,
-            )
-        return None
+        return dns.rrset.from_text_list(
+            qname,
+            rule.response_ttl_seconds,
+            "IN",
+            "AAAA",
+            rule.ipv6_addresses,
+        )
+
+    @staticmethod
+    def _has_any_tag(current_tags: set[str], configured_tags: list[str]) -> bool:
+        return bool(current_tags.intersection(configured_tags))
+
+
+def _normalize_tags(value: list[str] | None) -> list[str]:
+    if value is None:
+        return []
+    seen: set[str] = set()
+    normalized: list[str] = []
+    for item in value:
+        tag = str(item).strip()
+        if not tag or tag in seen:
+            continue
+        seen.add(tag)
+        normalized.append(tag)
+    return normalized
+
+
+def _normalize_addresses(value: list[str] | None, *, version: int) -> list[str]:
+    if value is None:
+        return []
+    seen: set[str] = set()
+    normalized: list[str] = []
+    for item in value:
+        address = ip_address(str(item).strip())
+        if address.version != version:
+            family = "IPv4" if version == 4 else "IPv6"
+            raise ValueError(f"静态应答地址必须是 {family}")
+        text = address.compressed
+        if text in seen:
+            continue
+        seen.add(text)
+        normalized.append(text)
+    return normalized
 
 
 plugin = BlockPlugin()

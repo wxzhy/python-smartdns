@@ -50,6 +50,7 @@ class RequestContext:
     final_answer: dns.resolver.Answer | None = None
     final_response: dns.message.Message | None = None
     drop_request: bool = False
+    stop_processing: bool = False
     metadata: dict[str, Any] = field(default_factory=dict)
     tags: set[str] = field(default_factory=set)
     extensions: dict[str, Any] = field(default_factory=dict)

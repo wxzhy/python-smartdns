@@ -99,7 +99,14 @@ class PipelineEngine:
                 )
                 return None
 
-            if context.final_answer is None and context.final_response is None:
+            if context.stop_processing:
+                self._logger.debug(
+                    "请求在 request 阶段短路返回 request_id=%s listener=%s tags=%s",
+                    context.request_id,
+                    context.listener_name,
+                    format_tags(context.tags),
+                )
+            elif context.final_answer is None and context.final_response is None:
                 result = await self._dispatch_context(context)
                 self._logger.debug(
                     "dispatcher 返回 request_id=%s upstream=%s success=%s error=%s tags=%s",
@@ -116,16 +123,17 @@ class PipelineEngine:
                     elif isinstance(result.error, dns.resolver.NXDOMAIN):
                         context.final_response = make_error_response(request, dns.rcode.NXDOMAIN)
 
-            await self._plugin_manager.on_response(context)
-            if context.drop_request:
-                self._logger.debug(
-                    "响应阶段被插件丢弃 request_id=%s listener=%s client=%r tags=%s",
-                    context.request_id,
-                    context.listener_name,
-                    context.clientaddr,
-                    format_tags(context.tags),
-                )
-                return None
+            if not context.stop_processing:
+                await self._plugin_manager.on_response(context)
+                if context.drop_request:
+                    self._logger.debug(
+                        "响应阶段被插件丢弃 request_id=%s listener=%s client=%r tags=%s",
+                        context.request_id,
+                        context.listener_name,
+                        context.clientaddr,
+                        format_tags(context.tags),
+                    )
+                    return None
 
             self._finalize_context(context)
             final_result_tags = (

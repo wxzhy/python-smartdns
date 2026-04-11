@@ -1,10 +1,15 @@
 from __future__ import annotations
 
+import dns.rdatatype
+
 from dns_forwarder.pipeline import RequestContext, UpstreamResult
+from dns_forwarder.logging import format_tags, get_logger
 from dns_forwarder.plugin_api import EmptyModel, Plugin, PluginRegistry
 
 from .models import IpReplacePluginConfig
 from .service import IpReplaceService
+
+logger = get_logger("plugins.ip_replace")
 
 
 class IpReplacePlugin(Plugin):
@@ -29,12 +34,24 @@ class IpReplacePlugin(Plugin):
         )
 
     async def on_upstream_response(self, context: RequestContext, result: UpstreamResult) -> None:
-        self._service.replace_answer(result.answer, result.tags)
+        if self._service.replace_answer(result.answer, result.tags, stage="upstream_response"):
+            logger.debug(
+                "IP 替换已应用 request_id=%s stage=upstream_response upstream=%s result_tags=%s",
+                context.request_id,
+                result.upstream_name,
+                format_tags(result.tags),
+            )
 
     async def on_response(self, context: RequestContext) -> None:
         if not context.upstream_results:
             return
-        self._service.replace_answer(context.final_answer, context.upstream_results[-1].tags)
+        if self._service.replace_answer(context.final_answer, context.upstream_results[-1].tags, stage="response"):
+            logger.debug(
+                "IP 替换已应用 request_id=%s stage=response qtype=%s result_tags=%s",
+                context.request_id,
+                dns.rdatatype.to_text(context.request.question[0].rdtype),
+                format_tags(context.upstream_results[-1].tags),
+            )
 
 
 plugin = IpReplacePlugin()

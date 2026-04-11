@@ -9,6 +9,7 @@ import dns.rrset
 import dns.resolver
 from pydantic import BaseModel, Field, field_validator, model_validator
 
+from dns_forwarder.logging import format_tags, get_logger
 from dns_forwarder.pipeline import RequestContext, UpstreamResult
 from dns_forwarder.plugin_api import EmptyModel, Plugin, PluginRegistry
 
@@ -18,6 +19,8 @@ from .models import (
     SpeedTestContext,
 )
 from .service import SpeedTestService
+
+logger = get_logger("plugins.speedtest")
 
 
 class SpeedTestFallbackRuleConfig(BaseModel):
@@ -97,13 +100,32 @@ class SpeedTestPlugin(Plugin):
         )
         registry.register_context(SPEEDTEST_SERVICE_KEY, self._service)
         registry.register_context_factory(SPEEDTEST_CONTEXT_KEY, SpeedTestContext)
+        logger.debug(
+            "测速插件初始化完成 response_ip_limit=%s response_ttl=%s skip_tags=%s fallback_rule_count=%s",
+            self.runtime_config.response_ip_limit,
+            self.runtime_config.response_ttl_seconds,
+            self.runtime_config.skip_tags,
+            len(self.runtime_config.fallback_rules),
+        )
 
     async def on_upstream_response(self, context: RequestContext, result: UpstreamResult) -> None:
-        if self._service is None or result.answer is None or self._has_any_tag(context.tags, self.runtime_config.skip_tags):
+        if self._service is None or result.answer is None:
+            return
+        if self._has_any_tag(context.tags, self.runtime_config.skip_tags):
+            logger.debug(
+                "测速跳过 request_id=%s stage=upstream_response reason=skip_tags request_tags=%s",
+                context.request_id,
+                format_tags(context.tags),
+            )
             return
 
         speedtest_context = get_speedtest_context(context)
-        await self._measure_new_ips(speedtest_context, self._extract_unique_ips(result.answer))
+        await self._measure_new_ips(
+            context.request_id,
+            speedtest_context,
+            self._extract_unique_ips(result.answer),
+            phase="upstream_response",
+        )
 
     @staticmethod
     def _extract_unique_ips(answer: dns.resolver.Answer) -> list[str]:
@@ -124,6 +146,11 @@ class SpeedTestPlugin(Plugin):
 
     async def on_response(self, context: RequestContext) -> None:
         if self._has_any_tag(context.tags, self.runtime_config.skip_tags):
+            logger.debug(
+                "测速跳过 request_id=%s stage=response reason=skip_tags request_tags=%s",
+                context.request_id,
+                format_tags(context.tags),
+            )
             return
 
         answer = context.final_answer
@@ -131,7 +158,12 @@ class SpeedTestPlugin(Plugin):
             speedtest_context = get_speedtest_context(context)
             current_ips = self._extract_unique_ips(answer)
             if current_ips:
-                await self._measure_new_ips(speedtest_context, current_ips)
+                await self._measure_new_ips(
+                    context.request_id,
+                    speedtest_context,
+                    current_ips,
+                    phase="response",
+                )
 
             measured_results = {
                 item.ip: item
@@ -153,18 +185,58 @@ class SpeedTestPlugin(Plugin):
                 sorted_ips = sorted_ips[: self.runtime_config.response_ip_limit]
                 if sorted_ips != current_ips:
                     self._replace_answer_ips(answer, sorted_ips)
+                    logger.debug(
+                        "测速结果已应用 request_id=%s qtype=%s original_ips=%s selected_ips=%s",
+                        context.request_id,
+                        dns.rdatatype.to_text(answer.rdtype),
+                        current_ips,
+                        sorted_ips,
+                    )
             else:
                 fallback_ips = self._select_fallback_ips(context.tags, answer.rdtype)
                 if fallback_ips:
                     self._replace_answer_ips(answer, fallback_ips)
+                    logger.debug(
+                        "测速 fallback 已应用 request_id=%s qtype=%s request_tags=%s fallback_ips=%s",
+                        context.request_id,
+                        dns.rdatatype.to_text(answer.rdtype),
+                        format_tags(context.tags),
+                        fallback_ips,
+                    )
+                else:
+                    logger.debug(
+                        "测速未得到有效结果且无可用 fallback request_id=%s qtype=%s request_tags=%s",
+                        context.request_id,
+                        dns.rdatatype.to_text(answer.rdtype),
+                        format_tags(context.tags),
+                    )
 
-    async def _measure_new_ips(self, speedtest_context: SpeedTestContext, ips: list[str]) -> None:
+    async def _measure_new_ips(
+        self,
+        request_id: int,
+        speedtest_context: SpeedTestContext,
+        ips: list[str],
+        *,
+        phase: str,
+    ) -> None:
         if self._service is None or not ips:
             return
 
         candidate_ips = await speedtest_context.reserve_ips(ips)
         if not candidate_ips:
+            logger.debug(
+                "测速跳过，所有 IP 已有结果 request_id=%s phase=%s ip_count=%s",
+                request_id,
+                phase,
+                len(ips),
+            )
             return
+        logger.debug(
+            "开始测速 request_id=%s phase=%s candidate_ips=%s",
+            request_id,
+            phase,
+            candidate_ips,
+        )
 
         measurements = await asyncio.gather(
             *(self._service.measure(ip) for ip in candidate_ips),
@@ -176,6 +248,13 @@ class SpeedTestPlugin(Plugin):
                 continue
             successful_results.append(item)
         await speedtest_context.add_results(successful_results)
+        logger.debug(
+            "测速完成 request_id=%s phase=%s measured_count=%s success_count=%s",
+            request_id,
+            phase,
+            len(candidate_ips),
+            len(successful_results),
+        )
 
     def _replace_answer_ips(self, answer: dns.resolver.Answer, ips: list[str]) -> None:
         ttl = self.runtime_config.response_ttl_seconds

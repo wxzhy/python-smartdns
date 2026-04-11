@@ -81,16 +81,34 @@ class ResponseMutatingPlugin(Plugin):
     config_model = EmptyModel
     variables_model = EmptyModel
 
+    def __init__(self) -> None:
+        super().__init__()
+        self.calls = 0
+
     async def on_response(self, context: RequestContext) -> None:
         if context.final_answer is None:
             return
+        self.calls += 1
         context.final_answer.rrset = dns.rrset.from_text(
             context.final_answer.rrset.name.to_text(),
             120,
             "IN",
             "A",
-            "198.51.100.99",
+            f"198.51.100.{98 + self.calls}",
         )
+
+
+class RequestObserverPlugin(Plugin):
+    name = "request-observer"
+    config_model = EmptyModel
+    variables_model = EmptyModel
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.calls = 0
+
+    async def on_request(self, context: RequestContext) -> None:
+        self.calls += 1
 
 
 async def build_plugin_manager(
@@ -125,6 +143,32 @@ async def build_plugin_manager_with_mutator() -> tuple[PluginManager, CachePlugi
         ),
     ]
     return PluginManager(loaded, plugin_manager.registry), cache_plugin
+
+
+async def build_plugin_manager_with_interference_plugins() -> tuple[
+    PluginManager, CachePlugin, RequestObserverPlugin, ResponseMutatingPlugin
+]:
+    plugin_manager, cache_plugin = await build_plugin_manager()
+    request_observer = RequestObserverPlugin()
+    request_observer.bind(request_observer.config_model(), request_observer.variables_model())
+    mutator = ResponseMutatingPlugin()
+    mutator.bind(mutator.config_model(), mutator.variables_model())
+    loaded = [
+        plugin_manager.loaded_plugins[0],
+        LoadedPlugin(
+            instance=request_observer,
+            config=request_observer.runtime_config,
+            variables=request_observer.runtime_variables,
+            raw_config=PluginConfig(name="observer", module="request_observer"),
+        ),
+        LoadedPlugin(
+            instance=mutator,
+            config=mutator.runtime_config,
+            variables=mutator.runtime_variables,
+            raw_config=PluginConfig(name="mutator", module="response_mutator"),
+        ),
+    ]
+    return PluginManager(loaded, plugin_manager.registry), cache_plugin, request_observer, mutator
 
 
 def make_answer(request: dns.message.Message, address: str) -> dns.resolver.Answer:
@@ -310,6 +354,28 @@ async def test_cache_plugin_runs_last_in_response_hooks_and_caches_mutated_answe
     assert resolver_manager.calls == 1
 
 
+async def test_cache_hit_short_circuits_later_plugins() -> None:
+    manager, _, request_observer, mutator = await build_plugin_manager_with_interference_plugins()
+    request = dns.message.make_query("example.test", "A")
+    answer = make_answer(request, "203.0.113.41")
+    resolver_manager = CountingResolverManager(
+        build_config(),
+        UpstreamResult(upstream_name="upstream-a", duration_ms=5.0, answer=answer),
+    )
+    engine = PipelineEngine(build_config(), resolver_manager, DispatcherRegistry(), manager)
+
+    first_response = await engine.handle_message(request, ("127.0.0.1", 10000), "udp")
+    second_response = await engine.handle_message(request, ("127.0.0.1", 10000), "udp")
+
+    assert first_response is not None
+    assert second_response is not None
+    assert first_response.answer[0][0].address == "198.51.100.99"
+    assert second_response.answer[0][0].address == "198.51.100.99"
+    assert request_observer.calls == 1
+    assert mutator.calls == 1
+    assert resolver_manager.calls == 1
+
+
 async def test_cache_plugin_coalesces_concurrent_requests_by_cache_key() -> None:
     manager, plugin = await build_plugin_manager()
     request_one = dns.message.make_query("example.test", "A")
@@ -337,3 +403,51 @@ async def test_cache_plugin_coalesces_concurrent_requests_by_cache_key() -> None
     assert resolver_manager.calls == 1
     assert plugin._service is not None
     assert plugin._service.get_for_request(request_two) is not None
+
+
+async def test_cache_plugin_pending_followers_recheck_cache_and_receive_reduced_ttl(monkeypatch) -> None:
+    manager, _ = await build_plugin_manager()
+    request_one = dns.message.make_query("example.test", "A")
+    request_two = dns.message.make_query("example.test", "A")
+    answer = make_answer(request_one, "203.0.113.51")
+    answer.expiration = 1060.0
+    resolver_manager = BlockingResolverManager(
+        build_config(),
+        UpstreamResult(upstream_name="upstream-a", duration_ms=5.0, answer=answer),
+    )
+    engine = PipelineEngine(build_config(), resolver_manager, DispatcherRegistry(), manager)
+    current_time = 1000.0
+    pending_released = asyncio.Event()
+    follower_resume = asyncio.Event()
+    original_wait = DnsCacheService.wait_for_pending_response
+
+    monkeypatch.setattr("plugins.cache_plugin.service.time.time", lambda: current_time)
+    monkeypatch.setattr("dns.resolver.time.time", lambda: current_time)
+
+    async def delayed_wait_for_pending_response(pending, request):
+        result = await original_wait(pending, request)
+        pending_released.set()
+        await follower_resume.wait()
+        return result
+
+    monkeypatch.setattr(
+        DnsCacheService,
+        "wait_for_pending_response",
+        staticmethod(delayed_wait_for_pending_response),
+    )
+
+    first_task = asyncio.create_task(engine.handle_message(request_one, ("127.0.0.1", 10000), "udp"))
+    await resolver_manager.started.wait()
+    second_task = asyncio.create_task(engine.handle_message(request_two, ("127.0.0.1", 10001), "udp"))
+    await asyncio.sleep(0)
+
+    resolver_manager.release.set()
+    await pending_released.wait()
+    current_time = 1012.4
+    follower_resume.set()
+    first_response, second_response = await asyncio.gather(first_task, second_task)
+
+    assert first_response is not None
+    assert second_response is not None
+    assert first_response.answer[0].ttl == 60
+    assert second_response.answer[0].ttl == 47

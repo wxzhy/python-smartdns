@@ -192,6 +192,8 @@ class PluginManager:
         for plugin in self._ordered_plugins("request_order"):
             context.metadata.setdefault("plugin_order", []).append(plugin.instance.name)
             await plugin.instance.on_request(context)
+            if context.drop_request or context.stop_processing:
+                break
 
     async def on_upstream_response(self, context: "RequestContext", result: "UpstreamResult") -> None:
         for plugin in self._ordered_plugins("upstream_response_order"):
@@ -200,6 +202,8 @@ class PluginManager:
     async def on_response(self, context: "RequestContext") -> None:
         for plugin in self._ordered_plugins("response_order"):
             await plugin.instance.on_response(context)
+            if context.drop_request or context.stop_processing:
+                break
 
     def describe(self) -> list[dict[str, Any]]:
         result: list[dict[str, Any]] = []

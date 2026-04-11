@@ -8,6 +8,7 @@ import dns.rrset
 import dns.resolver
 
 from dns_forwarder.core import IPSET_CONTEXT_KEY, IPSet
+from dns_forwarder.logging import format_tags
 from dns_forwarder.logging import get_logger
 from dns_forwarder.pipeline import RequestContext, build_answer_from_response
 from dns_forwarder.plugin_api import EmptyModel, Plugin, PluginRegistry
@@ -49,25 +50,70 @@ class CloudflareEchPlugin(Plugin):
 
     async def on_response(self, context: RequestContext) -> None:
         answer = self._get_https_answer(context)
-        if answer is None or self._has_any_ech(answer):
+        if answer is None:
+            return
+        if self._has_any_ech(answer):
+            self._logger.debug(
+                "跳过 Cloudflare ECH：响应已包含 ech request_id=%s qname=%s",
+                context.request_id,
+                context.request.question[0].name.to_text().rstrip("."),
+            )
             return
 
         base_tags = set(context.upstream_results[-1].tags) if context.upstream_results else set(context.tags)
         if self._has_any_tag(base_tags, self.runtime_config.exclude_tags):
+            self._logger.debug(
+                "跳过 Cloudflare ECH：命中 exclude_tags request_id=%s tags=%s",
+                context.request_id,
+                format_tags(base_tags),
+            )
             return
         if not self._has_any_tag(base_tags, self.runtime_config.match_tags):
             if HAS_HINT_TAG in base_tags:
+                self._logger.debug(
+                    "跳过 Cloudflare ECH：存在 hints 但未命中 match_tags request_id=%s tags=%s",
+                    context.request_id,
+                    format_tags(base_tags),
+                )
                 return
             subquery_tags = await self._resolve_address_tags(context, get_ipset(context))
             if self._has_any_tag(subquery_tags, self.runtime_config.exclude_tags):
+                self._logger.debug(
+                    "跳过 Cloudflare ECH：A subquery 命中 exclude_tags request_id=%s tags=%s",
+                    context.request_id,
+                    format_tags(subquery_tags),
+                )
                 return
             if not self._has_any_tag(subquery_tags, self.runtime_config.match_tags):
+                self._logger.debug(
+                    "跳过 Cloudflare ECH：A subquery 未命中 match_tags request_id=%s tags=%s",
+                    context.request_id,
+                    format_tags(subquery_tags),
+                )
                 return
+            self._logger.debug(
+                "Cloudflare ECH 通过 A subquery 命中 request_id=%s tags=%s",
+                context.request_id,
+                format_tags(subquery_tags),
+            )
+        else:
+            self._logger.debug(
+                "Cloudflare ECH 直接命中基础 tags request_id=%s tags=%s",
+                context.request_id,
+                format_tags(base_tags),
+            )
 
         ech_bytes = await self._load_cloudflare_ech_for_context(context)
         if ech_bytes is None:
             return
-        self._inject_ech(answer, ech_bytes)
+        updated_records = self._inject_ech(answer, ech_bytes)
+        if updated_records:
+            self._logger.debug(
+                "Cloudflare ECH 注入完成 request_id=%s qname=%s updated_records=%s",
+                context.request_id,
+                context.request.question[0].name.to_text().rstrip("."),
+                updated_records,
+            )
 
     def _get_https_answer(self, context: RequestContext) -> dns.resolver.Answer | None:
         answer = context.final_answer
@@ -157,10 +203,11 @@ class CloudflareEchPlugin(Plugin):
                 return ech_bytes
         return None
 
-    def _inject_ech(self, answer: dns.resolver.Answer, ech_bytes: bytes) -> None:
+    def _inject_ech(self, answer: dns.resolver.Answer, ech_bytes: bytes) -> int:
         rrset = answer.rrset
         updated_rdatas = []
         changed = False
+        updated_count = 0
         for rdata in rrset:
             if getattr(rdata, "priority", 0) == 0 or HTTPS_PARAM_KEY.ECH in rdata.params:
                 updated_rdatas.append(rdata)
@@ -169,8 +216,10 @@ class CloudflareEchPlugin(Plugin):
             params[HTTPS_PARAM_KEY.ECH] = dns.rdtypes.svcbbase.ECHParam(ech_bytes)
             updated_rdatas.append(rdata.replace(params=params))
             changed = True
+            updated_count += 1
         if changed:
             answer.rrset = dns.rrset.from_rdata_list(rrset.name, rrset.ttl, updated_rdatas)
+        return updated_count
 
 
 plugin = CloudflareEchPlugin()

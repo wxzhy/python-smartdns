@@ -4,8 +4,11 @@ import dns.message
 import dns.rrset
 from pydantic import BaseModel, Field, field_validator
 
+from dns_forwarder.logging import get_logger
 from dns_forwarder.pipeline import build_answer_from_response, sync_answer_response
 from dns_forwarder.plugin_api import Plugin, PluginRegistry
+
+logger = get_logger("plugins.sample")
 
 
 def _normalize_domain(value: str) -> str:
@@ -61,6 +64,14 @@ class SamplePlugin(Plugin):
             self.runtime_variables.address,
         )
         context.final_answer = sync_answer_response(answer)
+        logger.debug(
+            "示例插件命中 request_id=%s qname=%s answer_name=%s address=%s ttl=%s",
+            context.request_id,
+            qname,
+            self.runtime_config.answer_name,
+            self.runtime_variables.address,
+            self.runtime_variables.ttl,
+        )
 
     def _build_static_answer(self, context) -> dns.message.Message:
         return dns.message.make_response(context.request)

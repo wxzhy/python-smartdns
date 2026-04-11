@@ -7,8 +7,11 @@ import dns.rdatatype
 import dns.rrset
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
+from dns_forwarder.logging import format_tags, get_logger
 from dns_forwarder.pipeline import RequestContext, build_answer_from_response
 from dns_forwarder.plugin_api import EmptyModel, Plugin, PluginRegistry
+
+logger = get_logger("plugins.block")
 
 
 class StrictPluginModel(BaseModel):
@@ -63,26 +66,37 @@ class BlockPlugin(Plugin):
         return None
 
     async def on_request(self, context: RequestContext) -> None:
-        self._apply_static_response(context, context.tags)
+        self._apply_static_response(context, context.tags, phase="request")
 
     async def on_response(self, context: RequestContext) -> None:
         response_tags = set(context.tags)
         if context.upstream_results:
             response_tags.update(context.upstream_results[-1].tags)
-        self._apply_static_response(context, response_tags)
+        self._apply_static_response(context, response_tags, phase="response")
 
-    def _apply_static_response(self, context: RequestContext, tags: set[str]) -> None:
+    def _apply_static_response(self, context: RequestContext, tags: set[str], *, phase: str) -> None:
         question = context.request.question[0]
         rule = self._resolve_rule(tags, question.rdtype)
         if rule is None:
             return
 
+        addresses = rule.ipv4_addresses if question.rdtype == dns.rdatatype.A else rule.ipv6_addresses
         response = dns.message.make_response(context.request)
         response.answer.append(
             self._build_record(question.name.to_text(), question.rdtype, rule)
         )
         context.final_response = response
         context.final_answer = build_answer_from_response(context.request, response)
+        logger.debug(
+            "静态应答已应用 request_id=%s phase=%s qname=%s qtype=%s tags=%s address_count=%s ttl=%s",
+            context.request_id,
+            phase,
+            question.name.to_text().rstrip("."),
+            dns.rdatatype.to_text(question.rdtype),
+            format_tags(tags),
+            len(addresses),
+            rule.response_ttl_seconds,
+        )
 
     def _resolve_rule(
         self,

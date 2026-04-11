@@ -5,8 +5,11 @@ import dns.rdtypes.svcbbase
 import dns.resolver
 
 from dns_forwarder.core import DOMAINSET_CONTEXT_KEY, IPSET_CONTEXT_KEY, DomainSet, IPSet
+from dns_forwarder.logging import format_tags, get_logger
 from dns_forwarder.pipeline import RequestContext, UpstreamResult
 from dns_forwarder.plugin_api import EmptyModel, Plugin, PluginRegistry
+
+logger = get_logger("plugins.tag")
 
 
 HAS_HINT_TAG = "has_hint"
@@ -41,25 +44,64 @@ class TagPlugin(Plugin):
 
     async def on_request(self, context: RequestContext) -> None:
         qname = context.request.question[0].name.to_text().rstrip(".")
-        context.tags.update(get_domainset(context).lookup(qname))
+        added_tags = get_domainset(context).lookup(qname)
+        context.tags.update(added_tags)
+        if added_tags:
+            logger.debug(
+                "请求标签命中 request_id=%s qname=%s added_tags=%s",
+                context.request_id,
+                qname,
+                format_tags(added_tags),
+            )
 
     async def on_upstream_response(self, context: RequestContext, result: UpstreamResult) -> None:
         domainset = get_domainset(context)
         ipset = get_ipset(context)
+        before_tags = set(result.tags)
         result.tags.update(context.tags)
+        cname_domains: list[str] = []
         for domain in self._extract_cname_chain_domains(result.answer):
+            cname_domains.append(domain)
             result.tags.update(domainset.lookup(domain))
+        hint_ip_count = 0
+        has_hints = False
         if result.answer is None or result.answer.rrset is None:
+            self._log_result_tags(context, result, before_tags, cname_domains, hint_ip_count, has_hints)
             return
         if result.answer.rdtype == dns.rdatatype.HTTPS:
             hint_ips, has_hints = self._extract_https_hints(result.answer)
+            hint_ip_count = len(hint_ips)
             if has_hints:
                 result.tags.add(HAS_HINT_TAG)
             for ip in hint_ips:
                 result.tags.update(ipset.lookup(ip))
+            self._log_result_tags(context, result, before_tags, cname_domains, hint_ip_count, has_hints)
             return
         for ip in self._extract_answer_ips(result.answer):
             result.tags.update(ipset.lookup(ip))
+        self._log_result_tags(context, result, before_tags, cname_domains, hint_ip_count, has_hints)
+
+    @staticmethod
+    def _log_result_tags(
+        context: RequestContext,
+        result: UpstreamResult,
+        before_tags: set[str],
+        cname_domains: list[str],
+        hint_ip_count: int,
+        has_hints: bool,
+    ) -> None:
+        added_tags = result.tags - before_tags
+        if not added_tags and not cname_domains and not has_hints:
+            return
+        logger.debug(
+            "结果标签已更新 request_id=%s upstream=%s added_tags=%s cname_domains=%s hint_ip_count=%s has_hint=%s",
+            context.request_id,
+            result.upstream_name,
+            format_tags(added_tags),
+            cname_domains,
+            hint_ip_count,
+            has_hints,
+        )
 
     @staticmethod
     def _extract_cname_chain_domains(answer: dns.resolver.Answer | None) -> list[str]:

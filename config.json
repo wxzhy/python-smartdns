@@ -119,7 +119,7 @@
         "ping_count": 1,
         "ping_privileged": false,
         "response_ip_limit": 2,
-        "response_ttl_seconds": 60,
+        "response_ttl_seconds": 300,
         "skip_tags": [],
         "fallback_rules": []
       },

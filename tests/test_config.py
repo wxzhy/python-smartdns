@@ -294,7 +294,11 @@ def test_parse_config_text_materializes_missing_plugins_as_disabled_defaults() -
     assert plugins_by_module["cache_plugin"].config == {"max_size": 100000}
     assert plugins_by_module["cache_plugin"].variables == {}
     assert plugins_by_module["cloudflare_ech_plugin"].enabled is False
-    assert plugins_by_module["cloudflare_ech_plugin"].config == {"match_tags": [], "exclude_tags": []}
+    assert plugins_by_module["cloudflare_ech_plugin"].config == {
+        "match_tags": [],
+        "exclude_tags": [],
+        "skip_tags": [],
+    }
     assert plugins_by_module["cloudflare_ech_plugin"].variables == {}
     assert plugins_by_module["https_plugin"].enabled is False
     assert plugins_by_module["https_plugin"].config == {}
@@ -346,6 +350,9 @@ def test_build_config_json_schema_includes_available_plugin_schemas() -> None:
     assert block_option["title"] == "Static Answer Plugin"
     assert "rules" in block_option["properties"]["config"]["properties"]
     assert block_option["default"]["config"] == {"rules": []}
+    block_rule_ref = block_option["properties"]["config"]["properties"]["rules"]["items"]["$ref"]
+    block_rule_name = block_rule_ref.removeprefix("#/$defs/")
+    assert "block_other" in schema["$defs"][block_rule_name]["properties"]
     speedtest_option = next(item for item in options if item["properties"]["module"]["const"] == "speedtest_plugin")
     assert cache_option["properties"]["enabled"]["default"] is False
     assert cache_option["default"]["enabled"] is False
@@ -353,7 +360,12 @@ def test_build_config_json_schema_includes_available_plugin_schemas() -> None:
     assert cloudflare_ech_option["title"] == "Cloudflare ECH Plugin"
     assert "match_tags" in cloudflare_ech_option["properties"]["config"]["properties"]
     assert "exclude_tags" in cloudflare_ech_option["properties"]["config"]["properties"]
-    assert cloudflare_ech_option["default"]["config"] == {"match_tags": [], "exclude_tags": []}
+    assert "skip_tags" in cloudflare_ech_option["properties"]["config"]["properties"]
+    assert cloudflare_ech_option["default"]["config"] == {
+        "match_tags": [],
+        "exclude_tags": [],
+        "skip_tags": [],
+    }
     assert https_option["title"] == "HTTPS Plugin"
     assert https_option["default"]["config"] == {}
     assert "fallback_rules" in speedtest_option["properties"]["config"]["properties"]

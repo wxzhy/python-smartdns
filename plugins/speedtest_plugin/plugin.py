@@ -23,6 +23,9 @@ from .service import SpeedTestService
 logger = get_logger("plugins.speedtest")
 
 
+ADDRESS_TYPES = {dns.rdatatype.A, dns.rdatatype.AAAA}
+
+
 class SpeedTestFallbackRuleConfig(BaseModel):
     match_tags: list[str] = Field(default_factory=list, min_length=1)
     exclude_tags: list[str] = Field(default_factory=list)
@@ -109,6 +112,8 @@ class SpeedTestPlugin(Plugin):
         )
 
     async def on_upstream_response(self, context: RequestContext, result: UpstreamResult) -> None:
+        if context.request.question[0].rdtype not in ADDRESS_TYPES:
+            return
         if self._service is None or result.answer is None:
             return
         if self._has_any_tag(context.tags, self.runtime_config.skip_tags):
@@ -145,6 +150,8 @@ class SpeedTestPlugin(Plugin):
         return ips
 
     async def on_response(self, context: RequestContext) -> None:
+        if context.request.question[0].rdtype not in ADDRESS_TYPES:
+            return
         if self._has_any_tag(context.tags, self.runtime_config.skip_tags):
             logger.debug(
                 "测速跳过 request_id=%s stage=response reason=skip_tags request_tags=%s",

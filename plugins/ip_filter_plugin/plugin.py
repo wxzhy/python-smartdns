@@ -41,6 +41,8 @@ class IpFilterPlugin(Plugin):
         return None
 
     async def on_upstream_response(self, context: RequestContext, result: UpstreamResult) -> None:
+        if context.request.question[0].rdtype not in ADDRESS_TYPES:
+            return
         matches_request, reason = self._matches_request(context.tags)
         if not matches_request:
             logger.debug(

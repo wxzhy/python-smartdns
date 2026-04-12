@@ -23,6 +23,7 @@ class BlockPluginRuleConfig(StrictPluginModel):
     exclude_tags: list[str] = Field(default_factory=list)
     ipv4_addresses: list[str] = Field(default_factory=list)
     ipv6_addresses: list[str] = Field(default_factory=list)
+    block_other: bool = False
     response_ttl_seconds: int = Field(default=86400, ge=1)
 
     @field_validator("match_tags", "exclude_tags", mode="before")
@@ -42,8 +43,8 @@ class BlockPluginRuleConfig(StrictPluginModel):
 
     @model_validator(mode="after")
     def validate_addresses(self) -> "BlockPluginRuleConfig":
-        if not self.ipv4_addresses and not self.ipv6_addresses:
-            raise ValueError("静态应答规则至少需要一个 IPv4 或 IPv6 地址")
+        if not self.ipv4_addresses and not self.ipv6_addresses and not self.block_other:
+            raise ValueError("静态应答规则至少需要一个 IPv4、IPv6 地址或启用 block_other")
         return self
 
 
@@ -59,7 +60,7 @@ class BlockPlugin(Plugin):
     response_order = 900
     ui_meta = {
         "title": "Static Answer Plugin",
-        "description": "按 tag 返回静态 A/AAAA 结果，可在请求阶段短路或在响应阶段覆盖结果。",
+        "description": "按 tag 返回静态 A/AAAA 结果，或对非 A/AAAA 查询直接返回空的 NOERROR。",
     }
 
     async def setup(self, registry: PluginRegistry) -> None:
@@ -80,15 +81,22 @@ class BlockPlugin(Plugin):
         if rule is None:
             return
 
-        addresses = rule.ipv4_addresses if question.rdtype == dns.rdatatype.A else rule.ipv6_addresses
         response = dns.message.make_response(context.request)
-        response.answer.append(
-            self._build_record(question.name.to_text(), question.rdtype, rule)
-        )
+        addresses: list[str] = []
+        if question.rdtype == dns.rdatatype.A:
+            addresses = rule.ipv4_addresses
+            response.answer.append(
+                self._build_record(question.name.to_text(), question.rdtype, rule)
+            )
+        elif question.rdtype == dns.rdatatype.AAAA:
+            addresses = rule.ipv6_addresses
+            response.answer.append(
+                self._build_record(question.name.to_text(), question.rdtype, rule)
+            )
         context.final_response = response
         context.final_answer = build_answer_from_response(context.request, response)
         logger.debug(
-            "静态应答已应用 request_id=%s phase=%s qname=%s qtype=%s tags=%s address_count=%s ttl=%s",
+            "静态应答已应用 request_id=%s phase=%s qname=%s qtype=%s tags=%s address_count=%s ttl=%s block_other=%s",
             context.request_id,
             phase,
             question.name.to_text().rstrip("."),
@@ -96,6 +104,7 @@ class BlockPlugin(Plugin):
             format_tags(tags),
             len(addresses),
             rule.response_ttl_seconds,
+            rule.block_other,
         )
 
     def _resolve_rule(
@@ -103,9 +112,6 @@ class BlockPlugin(Plugin):
         tags: set[str],
         rdtype: dns.rdatatype.RdataType,
     ) -> BlockPluginRuleConfig | None:
-        if rdtype not in {dns.rdatatype.A, dns.rdatatype.AAAA}:
-            return None
-
         for rule in self.runtime_config.rules:
             if self._has_any_tag(tags, rule.exclude_tags):
                 continue
@@ -114,6 +120,8 @@ class BlockPlugin(Plugin):
             if rdtype == dns.rdatatype.A and rule.ipv4_addresses:
                 return rule
             if rdtype == dns.rdatatype.AAAA and rule.ipv6_addresses:
+                return rule
+            if rdtype not in {dns.rdatatype.A, dns.rdatatype.AAAA} and rule.block_other:
                 return rule
         return None
 

@@ -432,6 +432,23 @@ async def test_ip_filter_plugin_skips_non_noerror_and_non_address_answers(tmp_pa
     assert result_none.answer.rrset is None
 
 
+async def test_ip_filter_plugin_skips_non_address_request_even_if_answer_is_address() -> None:
+    plugin = make_plugin(match_tags=["proxy"], blacklist_tags=["blocked"])
+    await plugin.setup(PluginRegistry())
+    request = dns.message.make_query("example.org", "TXT")
+    context = make_context(request, tags={"proxy"})
+    address_answer = make_answer(dns.message.make_query("example.org", "A"), "203.0.113.20")
+    result = UpstreamResult(
+        upstream_name="upstream-a",
+        duration_ms=1.0,
+        answer=address_answer,
+    )
+
+    await plugin.on_upstream_response(context, result)
+
+    assert answer_addresses(result.answer) == ["203.0.113.20"]
+
+
 async def test_ip_filter_plugin_preserves_record_order(tmp_path: Path) -> None:
     plugin = make_plugin(match_tags=["proxy"], whitelist_tags=["allowed"])
     await plugin.setup(PluginRegistry())

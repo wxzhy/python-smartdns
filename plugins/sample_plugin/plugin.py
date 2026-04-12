@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import dns.message
+import dns.rdatatype
 import dns.rrset
 from pydantic import BaseModel, Field, field_validator
 
@@ -51,6 +52,8 @@ class SamplePlugin(Plugin):
 
     async def on_request(self, context) -> None:
         question = context.request.question[0]
+        if question.rdtype != dns.rdatatype.A:
+            return
         qname = question.name.to_text().rstrip(".").lower()
         if qname not in self.runtime_config.domains:
             return

@@ -10,8 +10,9 @@ class StrictPluginModel(BaseModel):
 class CloudflareEchPluginConfig(StrictPluginModel):
     match_tags: list[str] = Field(default_factory=list)
     exclude_tags: list[str] = Field(default_factory=list)
+    skip_tags: list[str] = Field(default_factory=list)
 
-    @field_validator("match_tags", "exclude_tags", mode="before")
+    @field_validator("match_tags", "exclude_tags", "skip_tags", mode="before")
     @classmethod
     def normalize_tags(cls, value: list[str] | None) -> list[str]:
         if value is None:

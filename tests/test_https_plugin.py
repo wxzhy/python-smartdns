@@ -149,6 +149,29 @@ async def test_https_plugin_removes_empty_alpn_and_no_default_alpn_when_needed()
     assert dns.rdtypes.svcbbase.ParamKey.MANDATORY not in rdata.params
 
 
+async def test_https_plugin_skips_non_https_request_even_if_final_answer_is_https() -> None:
+    plugin = HttpsPlugin()
+    plugin.bind(plugin.config_model(), plugin.variables_model())
+    registry = PluginRegistry()
+    await plugin.setup(registry)
+
+    request = dns.message.make_query("example.test", "A")
+    answer = make_https_answer(dns.message.make_query("example.test", "HTTPS"))
+    context = RequestContext(
+        request=request,
+        clientaddr=("127.0.0.1", 5300),
+        listener_name="udp",
+        final_answer=answer,
+    )
+
+    await plugin.on_response(context)
+
+    rdata = next(iter(answer.rrset))
+    assert rdata.params[dns.rdtypes.svcbbase.ParamKey.ALPN].ids == (b"h3", b"h2")
+    assert dns.rdtypes.svcbbase.ParamKey.IPV4HINT in rdata.params
+    assert dns.rdtypes.svcbbase.ParamKey.IPV6HINT in rdata.params
+
+
 async def test_https_plugin_runs_before_cache_plugin_and_cached_response_stays_sanitized() -> None:
     https_plugin = HttpsPlugin()
     cache_plugin = CachePlugin()

@@ -1,7 +1,10 @@
 from __future__ import annotations
 
+from base64 import b64encode
+
 from async_lru import alru_cache
 import dns.rcode
+import dns.rdata
 import dns.rdatatype
 import dns.rdtypes.svcbbase
 import dns.rrset
@@ -49,6 +52,16 @@ class CloudflareEchPlugin(Plugin):
         return None
 
     async def on_response(self, context: RequestContext) -> None:
+        if context.request.question[0].rdtype != dns.rdatatype.HTTPS:
+            return
+        if self._has_any_tag(context.tags, self.runtime_config.skip_tags):
+            self._logger.debug(
+                "跳过 Cloudflare ECH：命中 skip_tags request_id=%s request_tags=%s",
+                context.request_id,
+                format_tags(context.tags),
+            )
+            return
+
         answer = self._get_https_answer(context)
         if answer is None:
             return
@@ -103,10 +116,11 @@ class CloudflareEchPlugin(Plugin):
                 format_tags(base_tags),
             )
 
-        ech_bytes = await self._load_cloudflare_ech_for_context(context)
-        if ech_bytes is None:
+        ech_payload = await self._load_cloudflare_ech_for_context(context)
+        if ech_payload is None:
             return
-        updated_records = self._inject_ech(answer, ech_bytes)
+        ech_bytes, ttl = ech_payload
+        updated_records = self._inject_ech(answer, ech_bytes, ttl)
         if updated_records:
             self._logger.debug(
                 "Cloudflare ECH 注入完成 request_id=%s qname=%s updated_records=%s",
@@ -127,7 +141,9 @@ class CloudflareEchPlugin(Plugin):
         if answer.response.rcode() != dns.rcode.NOERROR:
             return None
         rrset = answer.rrset
-        if rrset is None or answer.rdtype != dns.rdatatype.HTTPS or rrset.rdtype != dns.rdatatype.HTTPS:
+        if answer.rdtype != dns.rdatatype.HTTPS:
+            return None
+        if rrset is not None and rrset.rdtype != dns.rdatatype.HTTPS:
             return None
         return answer
 
@@ -137,6 +153,8 @@ class CloudflareEchPlugin(Plugin):
 
     @staticmethod
     def _has_any_ech(answer: dns.resolver.Answer) -> bool:
+        if answer.rrset is None:
+            return False
         return any(HTTPS_PARAM_KEY.ECH in rdata.params for rdata in answer.rrset)
 
     async def _resolve_address_tags(self, context: RequestContext, ipset: IPSet) -> set[str]:
@@ -163,7 +181,7 @@ class CloudflareEchPlugin(Plugin):
             tags.update(ipset.lookup(address))
         return tags
 
-    async def _load_cloudflare_ech_for_context(self, context: RequestContext) -> bytes | None:
+    async def _load_cloudflare_ech_for_context(self, context: RequestContext) -> tuple[bytes, int] | None:
         resolve_key = context._resolve_handler
         if resolve_key is None:
             return None
@@ -171,7 +189,7 @@ class CloudflareEchPlugin(Plugin):
         return await self._load_cloudflare_ech(resolve_key)
 
     @alru_cache(maxsize=1, ttl=300)
-    async def _load_cloudflare_ech(self, resolve_key: object) -> bytes | None:
+    async def _load_cloudflare_ech(self, resolve_key: object) -> tuple[bytes, int] | None:
         resolve = self._cloudflare_resolvers.get(resolve_key)
         if resolve is None:
             return None
@@ -187,11 +205,12 @@ class CloudflareEchPlugin(Plugin):
         return extracted
 
     @staticmethod
-    def _extract_ech_bytes(answer: dns.resolver.Answer | None) -> bytes | None:
+    def _extract_ech_bytes(answer: dns.resolver.Answer | None) -> tuple[bytes, int] | None:
         if answer is None or answer.rrset is None:
             return None
         if answer.rdtype != dns.rdatatype.HTTPS or answer.rrset.rdtype != dns.rdatatype.HTTPS:
             return None
+        ttl = max(answer.rrset.ttl, 1)
         for rdata in answer.rrset:
             if getattr(rdata, "priority", 0) == 0:
                 continue
@@ -200,11 +219,15 @@ class CloudflareEchPlugin(Plugin):
                 continue
             ech_bytes = getattr(ech_param, "ech", None)
             if isinstance(ech_bytes, bytes):
-                return ech_bytes
+                return ech_bytes, ttl
         return None
 
-    def _inject_ech(self, answer: dns.resolver.Answer, ech_bytes: bytes) -> int:
+    def _inject_ech(self, answer: dns.resolver.Answer, ech_bytes: bytes, ttl: int) -> int:
         rrset = answer.rrset
+        if rrset is None:
+            answer.rrset = self._build_service_mode_rrset(answer.qname, ttl, ech_bytes)
+            return 1
+
         updated_rdatas = []
         changed = False
         updated_count = 0
@@ -220,6 +243,16 @@ class CloudflareEchPlugin(Plugin):
         if changed:
             answer.rrset = dns.rrset.from_rdata_list(rrset.name, rrset.ttl, updated_rdatas)
         return updated_count
+
+    @staticmethod
+    def _build_service_mode_rrset(name, ttl: int, ech_bytes: bytes) -> dns.rrset.RRset:
+        ech_text = b64encode(ech_bytes).decode("ascii")
+        rdata = dns.rdata.from_text(
+            "IN",
+            "HTTPS",
+            f'1 . ech="{ech_text}"',
+        )
+        return dns.rrset.from_rdata_list(name, max(ttl, 1), [rdata])
 
 
 plugin = CloudflareEchPlugin()

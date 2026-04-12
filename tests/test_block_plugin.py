@@ -109,6 +109,7 @@ def build_rule(
     exclude_tags: list[str] | None = None,
     ipv4_addresses: list[str] | None = None,
     ipv6_addresses: list[str] | None = None,
+    block_other: bool = False,
     response_ttl_seconds: int = 86400,
 ) -> BlockPluginRuleConfig:
     return BlockPluginRuleConfig(
@@ -116,18 +117,27 @@ def build_rule(
         exclude_tags=[] if exclude_tags is None else exclude_tags,
         ipv4_addresses=[] if ipv4_addresses is None else ipv4_addresses,
         ipv6_addresses=[] if ipv6_addresses is None else ipv6_addresses,
+        block_other=block_other,
         response_ttl_seconds=response_ttl_seconds,
     )
 
 
 def test_block_plugin_rule_config_requires_at_least_one_address_family() -> None:
-    with pytest.raises(ValidationError, match="至少需要一个 IPv4 或 IPv6 地址"):
+    with pytest.raises(ValidationError, match="至少需要一个 IPv4、IPv6 地址或启用 block_other"):
         BlockPluginRuleConfig(match_tags=["blackhole"])
 
 
 def test_block_plugin_rule_config_rejects_wrong_address_family() -> None:
     with pytest.raises(ValidationError, match="IPv4"):
         BlockPluginRuleConfig(match_tags=["blackhole"], ipv4_addresses=["::1"])
+
+
+def test_block_plugin_rule_config_allows_block_other_without_address_family() -> None:
+    rule = BlockPluginRuleConfig(match_tags=["blackhole"], block_other=True)
+
+    assert rule.block_other is True
+    assert rule.ipv4_addresses == []
+    assert rule.ipv6_addresses == []
 
 
 async def test_block_plugin_short_circuits_request_for_a() -> None:
@@ -203,6 +213,32 @@ async def test_block_plugin_skips_non_address_query() -> None:
     assert context.final_answer is None
 
 
+async def test_block_plugin_blocks_non_address_query_when_block_other_enabled() -> None:
+    plugin = build_plugin(
+        build_rule(
+            match_tags=["blackhole"],
+            block_other=True,
+        )
+    )
+    registry = PluginRegistry()
+    await plugin.setup(registry)
+
+    context = RequestContext(
+        request=dns.message.make_query("example.test", "TXT"),
+        clientaddr=("127.0.0.1", 5300),
+        listener_name="udp",
+        tags={"blackhole"},
+    )
+
+    await plugin.on_request(context)
+
+    assert context.final_response is not None
+    assert context.final_response.rcode() == 0
+    assert context.final_response.answer == []
+    assert context.final_answer is not None
+    assert context.final_answer.rrset is None
+
+
 async def test_block_plugin_rewrites_final_response_for_matching_result_tags() -> None:
     plugin = build_plugin(
         build_rule(
@@ -231,6 +267,36 @@ async def test_block_plugin_rewrites_final_response_for_matching_result_tags() -
     assert context.final_answer.rrset is not None
     assert set(answer_addresses(context.final_answer)) == {"127.0.0.1", "127.0.0.2"}
     assert context.final_answer.rrset.ttl == 600
+
+
+async def test_block_plugin_rewrites_non_address_response_to_empty_noerror_when_block_other_enabled() -> None:
+    plugin = build_plugin(
+        build_rule(
+            match_tags=["blackhole"],
+            block_other=True,
+        )
+    )
+    registry = PluginRegistry()
+    await plugin.setup(registry)
+
+    request = dns.message.make_query("example.test", "TXT")
+    answer = make_answer(request, "TXT", '"hello"')
+    context = RequestContext(
+        request=request,
+        clientaddr=("127.0.0.1", 5300),
+        listener_name="udp",
+        final_answer=answer,
+        final_response=answer.response,
+        upstream_results=[UpstreamResult(upstream_name="upstream-a", duration_ms=1.0, answer=answer, tags={"blackhole"})],
+    )
+
+    await plugin.on_response(context)
+
+    assert context.final_response is not None
+    assert context.final_response.rcode() == 0
+    assert context.final_response.answer == []
+    assert context.final_answer is not None
+    assert context.final_answer.rrset is None
 
 
 async def test_block_plugin_honors_exclude_tags() -> None:
@@ -276,6 +342,28 @@ async def test_block_plugin_uses_first_rule_with_current_qtype_values() -> None:
 
     assert context.final_answer is not None
     assert answer_addresses(context.final_answer) == ["127.0.0.8"]
+
+
+async def test_block_plugin_uses_later_block_other_rule_for_non_address_query() -> None:
+    plugin = build_plugin(
+        build_rule(match_tags=["proxy"], ipv4_addresses=["127.0.0.8"]),
+        build_rule(match_tags=["proxy"], block_other=True),
+    )
+    registry = PluginRegistry()
+    await plugin.setup(registry)
+
+    context = RequestContext(
+        request=dns.message.make_query("example.test", "TXT"),
+        clientaddr=("127.0.0.1", 5300),
+        listener_name="udp",
+        tags={"proxy"},
+    )
+
+    await plugin.on_request(context)
+
+    assert context.final_response is not None
+    assert context.final_response.rcode() == 0
+    assert context.final_response.answer == []
 
 
 async def test_block_plugin_uses_first_matching_rule_when_multiple_have_current_qtype() -> None:

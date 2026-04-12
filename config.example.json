@@ -249,23 +249,24 @@
       "enabled": false,
       "config": {
         "rules": [
-          {
-            "match_tags": [
-              "blackhole"
-            ],
-            "exclude_tags": [
-              "direct"
-            ],
-            "ipv4_addresses": [
-              "127.0.0.1"
-            ],
-            "ipv6_addresses": [
-              "::1"
-            ],
-            "response_ttl_seconds": 86400
-          }
-        ]
-      },
+            {
+              "match_tags": [
+                "blackhole"
+              ],
+              "exclude_tags": [
+                "direct"
+              ],
+              "ipv4_addresses": [
+                "127.0.0.1"
+              ],
+              "ipv6_addresses": [
+                "::1"
+              ],
+              "block_other": false,
+              "response_ttl_seconds": 86400
+            }
+          ]
+        },
       "variables": {}
     },
     {
@@ -320,6 +321,26 @@
     {
       "name": "tags",
       "module": "tag_plugin",
+      "enabled": false,
+      "config": {},
+      "variables": {}
+    },
+    {
+      "name": "cloudflare-ech",
+      "module": "cloudflare_ech_plugin",
+      "enabled": false,
+      "config": {
+        "match_tags": [
+          "cloudflare"
+        ],
+        "exclude_tags": [],
+        "skip_tags": []
+      },
+      "variables": {}
+    },
+    {
+      "name": "https-sanitize",
+      "module": "https_plugin",
       "enabled": false,
       "config": {},
       "variables": {}

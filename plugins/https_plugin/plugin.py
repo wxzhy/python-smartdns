@@ -29,6 +29,8 @@ class HttpsPlugin(Plugin):
         return None
 
     async def on_response(self, context: RequestContext) -> None:
+        if context.request.question[0].rdtype != dns.rdatatype.HTTPS:
+            return
         answer = context.final_answer
         if answer is None:
             response = context.final_response

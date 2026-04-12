@@ -36,12 +36,18 @@ def build_ipset(tmp_path: Path, items: dict[str, list[str]]) -> IPSet:
     return IPSet(str(ip_dir))
 
 
-def build_plugin(*, match_tags: list[str], exclude_tags: list[str] | None = None) -> CloudflareEchPlugin:
+def build_plugin(
+    *,
+    match_tags: list[str],
+    exclude_tags: list[str] | None = None,
+    skip_tags: list[str] | None = None,
+) -> CloudflareEchPlugin:
     plugin = CloudflareEchPlugin()
     plugin.bind(
         CloudflareEchPluginConfig(
             match_tags=match_tags,
             exclude_tags=[] if exclude_tags is None else exclude_tags,
+            skip_tags=[] if skip_tags is None else skip_tags,
         ),
         plugin.variables_model(),
     )
@@ -62,6 +68,11 @@ def make_https_answer(
             *records,
         )
     )
+    return build_answer_from_response(request, response)
+
+
+def make_empty_answer(request: dns.message.Message) -> dns.resolver.Answer:
+    response = dns.message.make_response(request)
     return build_answer_from_response(request, response)
 
 
@@ -217,6 +228,36 @@ async def test_cloudflare_ech_plugin_injects_ech_when_result_tags_match() -> Non
     plugin._load_cloudflare_ech.cache_clear()
 
 
+async def test_cloudflare_ech_plugin_injects_service_mode_record_into_empty_noerror_answer() -> None:
+    plugin = build_plugin(match_tags=["cf"])
+    request = dns.message.make_query("example.test", "HTTPS")
+    answer = make_empty_answer(request)
+    recorder = ResolveRecorder(
+        {
+            ("cloudflare-ech.com", "HTTPS"): make_https_answer(
+                dns.message.make_query("cloudflare-ech.com", "HTTPS"),
+                '1 . ech="AA=="',
+            )
+        }
+    )
+    context = make_context(
+        request,
+        final_answer=answer,
+        result_tags={"cf"},
+        resolve_handler=recorder.resolve,
+    )
+
+    await plugin.on_response(context)
+
+    assert answer.rrset is not None
+    rdata = next(iter(answer.rrset))
+    assert rdata.priority == 1
+    assert rdata.target.to_text() == "."
+    assert rdata.params[HTTPS_PARAM_KEY.ECH].ech == b"\x00"
+    assert recorder.calls == [("cloudflare-ech.com", "HTTPS")]
+    plugin._load_cloudflare_ech.cache_clear()
+
+
 async def test_cloudflare_ech_plugin_caches_cloudflare_ech_between_responses() -> None:
     plugin = build_plugin(match_tags=["cf"])
     recorder = ResolveRecorder(
@@ -271,6 +312,32 @@ async def test_cloudflare_ech_plugin_skips_non_https_nxdomain_and_existing_ech()
     assert recorder.calls == []
 
 
+async def test_cloudflare_ech_plugin_skips_non_https_request_even_if_final_answer_is_https() -> None:
+    plugin = build_plugin(match_tags=["cf"])
+    request = dns.message.make_query("example.test", "A")
+    answer = make_https_answer(dns.message.make_query("example.test", "HTTPS"), '1 . alpn="h2"')
+    recorder = ResolveRecorder(
+        {
+            ("cloudflare-ech.com", "HTTPS"): make_https_answer(
+                dns.message.make_query("cloudflare-ech.com", "HTTPS"),
+                '1 . ech="AA=="',
+            )
+        }
+    )
+    context = make_context(
+        request,
+        final_answer=answer,
+        result_tags={"cf"},
+        resolve_handler=recorder.resolve,
+    )
+
+    await plugin.on_response(context)
+
+    rdata = next(iter(answer.rrset))
+    assert HTTPS_PARAM_KEY.ECH not in rdata.params
+    assert recorder.calls == []
+
+
 async def test_cloudflare_ech_plugin_skips_when_exclude_tag_matches() -> None:
     plugin = build_plugin(match_tags=["cf"], exclude_tags=["skip"])
     request = dns.message.make_query("example.test", "HTTPS")
@@ -280,6 +347,54 @@ async def test_cloudflare_ech_plugin_skips_when_exclude_tag_matches() -> None:
         request,
         final_answer=answer,
         result_tags={"cf", "skip"},
+        resolve_handler=recorder.resolve,
+    )
+
+    await plugin.on_response(context)
+
+    rdata = next(iter(answer.rrset))
+    assert HTTPS_PARAM_KEY.ECH not in rdata.params
+    assert recorder.calls == []
+
+
+async def test_cloudflare_ech_plugin_skips_when_request_tag_matches_skip_tags() -> None:
+    plugin = build_plugin(match_tags=["cf"], skip_tags=["direct"])
+    request = dns.message.make_query("example.test", "HTTPS")
+    answer = make_https_answer(request, '1 . alpn="h2"')
+    recorder = ResolveRecorder({})
+    context = make_context(
+        request,
+        final_answer=answer,
+        tags={"direct"},
+        result_tags={"cf"},
+        resolve_handler=recorder.resolve,
+    )
+
+    await plugin.on_response(context)
+
+    rdata = next(iter(answer.rrset))
+    assert HTTPS_PARAM_KEY.ECH not in rdata.params
+    assert recorder.calls == []
+
+
+async def test_cloudflare_ech_plugin_skip_tags_short_circuits_before_a_subquery_or_ech_lookup() -> None:
+    plugin = build_plugin(match_tags=["cf"], skip_tags=["direct"])
+    request = dns.message.make_query("example.test", "HTTPS")
+    answer = make_https_answer(request, '1 . alpn="h2"')
+    recorder = ResolveRecorder(
+        {
+            ("example.test", "A"): make_address_answer(dns.message.make_query("example.test", "A"), "203.0.113.25"),
+            ("cloudflare-ech.com", "HTTPS"): make_https_answer(
+                dns.message.make_query("cloudflare-ech.com", "HTTPS"),
+                '1 . ech="AA=="',
+            ),
+        }
+    )
+    context = make_context(
+        request,
+        final_answer=answer,
+        tags={"direct"},
+        result_tags=set(),
         resolve_handler=recorder.resolve,
     )
 
@@ -528,6 +643,67 @@ async def test_cloudflare_ech_plugin_runs_before_https_and_cache_plugins() -> No
     assert HTTPS_PARAM_KEY.IPV4HINT not in second_rdata.params
     assert resolver_manager.calls == [
         ("example.test", "HTTPS"),
+        ("cloudflare-ech.com", "HTTPS"),
+    ]
+    cloudflare_plugin._load_cloudflare_ech.cache_clear()
+
+
+async def test_cloudflare_ech_plugin_handles_empty_noerror_answers_before_https_and_cache_plugins() -> None:
+    cloudflare_plugin = build_plugin(match_tags=["cf"])
+    https_plugin = HttpsPlugin()
+    cache_plugin = CachePlugin()
+    registry = PluginRegistry()
+    await cloudflare_plugin.setup(registry)
+    for plugin in (https_plugin, cache_plugin):
+        plugin.bind(plugin.config_model(), plugin.variables_model())
+        await plugin.setup(registry)
+
+    manager = PluginManager(
+        [
+            make_loaded_plugin(cloudflare_plugin),
+            make_loaded_plugin(https_plugin),
+            make_loaded_plugin(cache_plugin),
+        ],
+        registry,
+    )
+    config = build_config()
+    request = dns.message.make_query("empty.test", "HTTPS")
+    handlers = {
+        ("empty.test", "HTTPS"): UpstreamResult(
+            upstream_name="upstream-a",
+            duration_ms=5.0,
+            answer=make_empty_answer(request),
+            tags={"cf"},
+        ),
+        ("cloudflare-ech.com", "HTTPS"): UpstreamResult(
+            upstream_name="upstream-a",
+            duration_ms=2.0,
+            answer=make_https_answer(
+                dns.message.make_query("cloudflare-ech.com", "HTTPS"),
+                '1 . ech="AA=="',
+            ),
+        ),
+    }
+    resolver_manager = QueryAwareResolverManager(config, handlers)
+    engine = PipelineEngine(config, resolver_manager, DispatcherRegistry(), manager)
+
+    first_response = await engine.handle_message(request, ("127.0.0.1", 10000), "udp")
+    second_response = await engine.handle_message(request, ("127.0.0.1", 10000), "udp")
+
+    assert first_response is not None
+    assert second_response is not None
+    assert len(first_response.answer) == 1
+    assert len(second_response.answer) == 1
+    first_rdata = next(iter(first_response.answer[0]))
+    second_rdata = next(iter(second_response.answer[0]))
+    assert first_rdata.priority == 1
+    assert second_rdata.priority == 1
+    assert first_rdata.target.to_text() == "."
+    assert second_rdata.target.to_text() == "."
+    assert first_rdata.params[HTTPS_PARAM_KEY.ECH].ech == b"\x00"
+    assert second_rdata.params[HTTPS_PARAM_KEY.ECH].ech == b"\x00"
+    assert resolver_manager.calls == [
+        ("empty.test", "HTTPS"),
         ("cloudflare-ech.com", "HTTPS"),
     ]
     cloudflare_plugin._load_cloudflare_ech.cache_clear()

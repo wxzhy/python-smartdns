@@ -453,6 +453,49 @@ async def test_ip_replace_plugin_honors_global_skip_tags() -> None:
     assert answer_addresses(result.answer) == ["198.51.100.13"]
 
 
+async def test_ip_replace_plugin_skips_non_address_request_even_if_answer_is_address() -> None:
+    plugin = IpReplacePlugin()
+    plugin.bind(
+        IpReplacePluginConfig(
+            rules=[
+                IpReplaceRuleConfig(
+                    name="proxy-map",
+                    match_tags=["proxy"],
+                    ipv4_targets=["10.10.0.0/24"],
+                )
+            ]
+        ),
+        plugin.variables_model(),
+    )
+    registry = PluginRegistry()
+    await plugin.setup(registry)
+
+    request = dns.message.make_query("example.org", "TXT")
+    upstream_answer = make_answer(dns.message.make_query("example.org", "A"), "198.51.100.14")
+    result = UpstreamResult(
+        upstream_name="upstream-a",
+        duration_ms=1.0,
+        answer=upstream_answer,
+        tags={"proxy"},
+    )
+    context = RequestContext(
+        request=request,
+        clientaddr=("127.0.0.1", 5300),
+        listener_name="udp",
+        final_answer=make_answer(dns.message.make_query("example.org", "A"), "198.51.100.15"),
+        upstream_results=[UpstreamResult(upstream_name="upstream-a", duration_ms=1.0, tags={"proxy"})],
+        extensions={},
+    )
+
+    await plugin.on_upstream_response(context, result)
+    await plugin.on_response(context)
+
+    assert result.answer is not None
+    assert answer_addresses(result.answer) == ["198.51.100.14"]
+    assert context.final_answer is not None
+    assert answer_addresses(context.final_answer) == ["198.51.100.15"]
+
+
 async def test_ip_replace_plugin_runs_after_tagging_and_before_cache(tmp_path: Path) -> None:
     config = build_config()
     plugin_manager = await build_plugin_manager_with_tag_replace_and_cache(tmp_path)

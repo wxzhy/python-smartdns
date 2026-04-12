@@ -199,6 +199,38 @@ async def test_speedtest_plugin_skips_measurement_for_global_skip_tags() -> None
     assert {item.address for item in answer.rrset} == {"203.0.113.10"}
 
 
+async def test_speedtest_plugin_skips_non_address_request_even_if_answer_is_address() -> None:
+    plugin = SpeedTestPlugin()
+    plugin.bind(SpeedTestPluginConfig(response_ip_limit=1), plugin.variables_model())
+    registry = PluginRegistry()
+    await plugin.setup(registry)
+
+    address_request = dns.message.make_query("example.test", "A")
+    address_response = dns.message.make_response(address_request)
+    address_response.answer.append(
+        dns.rrset.from_text(
+            "example.test.",
+            60,
+            "IN",
+            "A",
+            "203.0.113.10",
+        )
+    )
+    address_answer = build_answer_from_response(address_request, address_response)
+    context = RequestContext(
+        request=dns.message.make_query("example.test", "TXT"),
+        clientaddr=("127.0.0.1", 5300),
+        listener_name="udp",
+        final_answer=address_answer,
+    )
+    result = UpstreamResult(upstream_name="default", duration_ms=1.0, answer=address_answer)
+
+    await plugin.on_upstream_response(context, result)
+    await plugin.on_response(context)
+
+    assert {item.address for item in address_answer.rrset} == {"203.0.113.10"}
+
+
 async def test_speedtest_plugin_on_response_measures_only_new_ips_from_multi_ip_rrset() -> None:
     plugin = SpeedTestPlugin()
     plugin.bind(SpeedTestPluginConfig(response_ip_limit=2), plugin.variables_model())

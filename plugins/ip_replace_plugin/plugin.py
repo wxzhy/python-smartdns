@@ -12,6 +12,9 @@ from .service import IpReplaceService
 logger = get_logger("plugins.ip_replace")
 
 
+ADDRESS_TYPES = {dns.rdatatype.A, dns.rdatatype.AAAA}
+
+
 class IpReplacePlugin(Plugin):
     name = "ip-replace-plugin"
     config_model = IpReplacePluginConfig
@@ -34,6 +37,8 @@ class IpReplacePlugin(Plugin):
         )
 
     async def on_upstream_response(self, context: RequestContext, result: UpstreamResult) -> None:
+        if context.request.question[0].rdtype not in ADDRESS_TYPES:
+            return
         if self._service.replace_answer(result.answer, result.tags, stage="upstream_response"):
             logger.debug(
                 "IP 替换已应用 request_id=%s stage=upstream_response upstream=%s result_tags=%s",
@@ -43,6 +48,8 @@ class IpReplacePlugin(Plugin):
             )
 
     async def on_response(self, context: RequestContext) -> None:
+        if context.request.question[0].rdtype not in ADDRESS_TYPES:
+            return
         if not context.upstream_results:
             return
         if self._service.replace_answer(context.final_answer, context.upstream_results[-1].tags, stage="response"):

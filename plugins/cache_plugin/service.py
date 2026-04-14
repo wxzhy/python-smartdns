@@ -37,12 +37,16 @@ class DnsCacheService:
         cached = self._cache.get(self.make_key_from_request(request))
         if cached is None:
             return None
-        return self._clone_answer(cached, remaining_ttl=max(0, int(cached.expiration - time.time())))
+        return self._clone_answer(
+            cached, remaining_ttl=max(0, int(cached.expiration - time.time()))
+        )
 
     def put_answer(self, answer: dns.resolver.Answer) -> None:
         self._cache.put(self.make_key_from_answer(answer), self._clone_answer(answer))
 
-    async def acquire_pending(self, key: dns.resolver.CacheKey) -> asyncio.Future[bytes | None] | None:
+    async def acquire_pending(
+        self, key: dns.resolver.CacheKey
+    ) -> asyncio.Future[bytes | None] | None:
         async with self._pending_lock:
             pending = self._pending.get(key)
             if pending is not None:
@@ -84,10 +88,16 @@ class DnsCacheService:
         return self._cache.misses()
 
     @staticmethod
-    def _clone_answer(answer: dns.resolver.Answer, remaining_ttl: int | None = None) -> dns.resolver.Answer:
+    def _clone_answer(
+        answer: dns.resolver.Answer, remaining_ttl: int | None = None
+    ) -> dns.resolver.Answer:
         cloned_response = dns.message.from_wire(answer.response.to_wire())
         if remaining_ttl is not None:
-            for section in (cloned_response.answer, cloned_response.authority, cloned_response.additional):
+            for section in (
+                cloned_response.answer,
+                cloned_response.authority,
+                cloned_response.additional,
+            ):
                 for rrset in section:
                     if rrset.rdtype in {dns.rdatatype.OPT, dns.rdatatype.TSIG}:
                         continue

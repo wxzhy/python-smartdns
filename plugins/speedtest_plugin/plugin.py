@@ -5,8 +5,8 @@ import ipaddress
 import time
 
 import dns.rdatatype
-import dns.rrset
 import dns.resolver
+import dns.rrset
 from pydantic import BaseModel, Field, field_validator, model_validator
 
 from dns_forwarder.logging import format_tags, get_logger
@@ -161,7 +161,11 @@ class SpeedTestPlugin(Plugin):
             return
 
         answer = context.final_answer
-        if answer is not None and answer.rrset is not None and answer.rdtype in {dns.rdatatype.A, dns.rdatatype.AAAA}:
+        if (
+            answer is not None
+            and answer.rrset is not None
+            and answer.rdtype in {dns.rdatatype.A, dns.rdatatype.AAAA}
+        ):
             speedtest_context = get_speedtest_context(context)
             current_ips = self._extract_unique_ips(answer)
             if current_ips:

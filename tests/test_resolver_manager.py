@@ -2,8 +2,8 @@ from __future__ import annotations
 
 from unittest.mock import AsyncMock, patch
 
-import dns.message
 import dns.edns
+import dns.message
 import dns.nameserver
 import dns.query
 import dns.rdataclass
@@ -12,10 +12,10 @@ import dns.rrset
 import pytest
 
 from dns_forwarder.config import (
-    Do53NameserverConfig,
     Do53CustomNameserverConfig,
-    DoHNameserverConfig,
+    Do53NameserverConfig,
     DoHCustomNameserverConfig,
+    DoHNameserverConfig,
     DoQNameserverConfig,
     DoTNameserverConfig,
     ECSConfig,

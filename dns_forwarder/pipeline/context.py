@@ -76,7 +76,9 @@ class RequestContext:
         return await self._resolve_handler(self, normalized_qname, normalized_qtype)
 
 
-def clone_response_for_request(response: dns.message.Message, request: dns.message.Message) -> dns.message.Message:
+def clone_response_for_request(
+    response: dns.message.Message, request: dns.message.Message
+) -> dns.message.Message:
     cloned = dns.message.from_wire(response.to_wire())
     cloned.id = request.id
     return cloned
@@ -149,7 +151,9 @@ def inherit_request_tags(result: UpstreamResult, request_tags: set[str]) -> Upst
     return result
 
 
-def make_error_response(request: dns.message.Message, rcode: dns.rcode.Rcode) -> dns.message.Message:
+def make_error_response(
+    request: dns.message.Message, rcode: dns.rcode.Rcode
+) -> dns.message.Message:
     response = dns.message.make_response(request)
     response.set_rcode(rcode)
     response.id = request.id

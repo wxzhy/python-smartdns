@@ -387,9 +387,13 @@ async def test_cache_plugin_coalesces_concurrent_requests_by_cache_key() -> None
     )
     engine = PipelineEngine(build_config(), resolver_manager, DispatcherRegistry(), manager)
 
-    first_task = asyncio.create_task(engine.handle_message(request_one, ("127.0.0.1", 10000), "udp"))
+    first_task = asyncio.create_task(
+        engine.handle_message(request_one, ("127.0.0.1", 10000), "udp")
+    )
     await resolver_manager.started.wait()
-    second_task = asyncio.create_task(engine.handle_message(request_two, ("127.0.0.1", 10001), "udp"))
+    second_task = asyncio.create_task(
+        engine.handle_message(request_two, ("127.0.0.1", 10001), "udp")
+    )
     await asyncio.sleep(0)
     resolver_manager.release.set()
     first_response, second_response = await asyncio.gather(first_task, second_task)
@@ -405,7 +409,9 @@ async def test_cache_plugin_coalesces_concurrent_requests_by_cache_key() -> None
     assert plugin._service.get_for_request(request_two) is not None
 
 
-async def test_cache_plugin_pending_followers_recheck_cache_and_receive_reduced_ttl(monkeypatch) -> None:
+async def test_cache_plugin_pending_followers_recheck_cache_and_receive_reduced_ttl(
+    monkeypatch,
+) -> None:
     manager, _ = await build_plugin_manager()
     request_one = dns.message.make_query("example.test", "A")
     request_two = dns.message.make_query("example.test", "A")
@@ -436,9 +442,13 @@ async def test_cache_plugin_pending_followers_recheck_cache_and_receive_reduced_
         staticmethod(delayed_wait_for_pending_response),
     )
 
-    first_task = asyncio.create_task(engine.handle_message(request_one, ("127.0.0.1", 10000), "udp"))
+    first_task = asyncio.create_task(
+        engine.handle_message(request_one, ("127.0.0.1", 10000), "udp")
+    )
     await resolver_manager.started.wait()
-    second_task = asyncio.create_task(engine.handle_message(request_two, ("127.0.0.1", 10001), "udp"))
+    second_task = asyncio.create_task(
+        engine.handle_message(request_two, ("127.0.0.1", 10001), "udp")
+    )
     await asyncio.sleep(0)
 
     resolver_manager.release.set()

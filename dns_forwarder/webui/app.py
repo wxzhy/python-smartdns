@@ -3,18 +3,22 @@ from __future__ import annotations
 import asyncio
 import secrets
 from pathlib import Path
-from typing import Annotated
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Annotated
 
-from fastapi import Depends, FastAPI, Form, HTTPException, Request, status
-from fastapi.security import HTTPBasic, HTTPBasicCredentials
-from fastapi.responses import HTMLResponse, RedirectResponse
-from fastapi.templating import Jinja2Templates
 import uvicorn
+from fastapi import Depends, FastAPI, Form, HTTPException, Request, status
+from fastapi.responses import HTMLResponse, RedirectResponse
+from fastapi.security import HTTPBasic, HTTPBasicCredentials
+from fastapi.templating import Jinja2Templates
 
-from dns_forwarder.config import build_config_json_schema, dump_config_text, parse_config_text, save_config
-from dns_forwarder.plugin_api import discover_available_plugins
+from dns_forwarder.config import (
+    build_config_json_schema,
+    dump_config_text,
+    parse_config_text,
+    save_config,
+)
 from dns_forwarder.logging import get_logger
+from dns_forwarder.plugin_api import discover_available_plugins
 from dns_forwarder.server.doh import register_doh_routes
 
 TEMPLATES = Jinja2Templates(directory=str(Path(__file__).parent / "templates"))
@@ -38,7 +42,9 @@ def create_webui_app(runtime_manager: "RuntimeManager") -> FastAPI:
         expected_password = webui_config.password.encode("utf-8")
         current_username = credentials.username.encode("utf-8")
         current_password = credentials.password.encode("utf-8")
-        is_valid = secrets.compare_digest(current_username, expected_username) and secrets.compare_digest(
+        is_valid = secrets.compare_digest(
+            current_username, expected_username
+        ) and secrets.compare_digest(
             current_password,
             expected_password,
         )
@@ -103,7 +109,8 @@ def create_webui_app(runtime_manager: "RuntimeManager") -> FastAPI:
                         "config_text": config_text,
                         "config_schema": build_config_json_schema(state.config.runtime.plugin_dirs),
                         "available_plugins": [
-                            item.describe() for item in discover_available_plugins(state.config.runtime.plugin_dirs)
+                            item.describe()
+                            for item in discover_available_plugins(state.config.runtime.plugin_dirs)
                         ],
                         "editor_mode": "code",
                         "config_filename": runtime_manager.config_path.name,
@@ -133,7 +140,9 @@ def create_webui_app(runtime_manager: "RuntimeManager") -> FastAPI:
                 },
             )
 
-        @app.post(WEBUI_RELOAD_ENDPOINT, response_model=None, dependencies=[Depends(authorize_webui)])
+        @app.post(
+            WEBUI_RELOAD_ENDPOINT, response_model=None, dependencies=[Depends(authorize_webui)]
+        )
         async def manual_reload(request: Request):
             try:
                 logger.info("收到手动 reload 请求 path=%s", runtime_manager.config_path)

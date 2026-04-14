@@ -13,7 +13,6 @@ from dns_forwarder.logging import get_logger
 
 from .models import IpRttResult
 
-
 logger = get_logger("plugins.speedtest")
 
 
@@ -113,7 +112,9 @@ class SpeedTestService:
             logger.debug("ICMP 探测未返回有效 RTT ip=%s", ip)
             return None
 
-        duration_ms = host.avg_rtt if host.avg_rtt is not None else ((time.perf_counter() - started) * 1000)
+        duration_ms = (
+            host.avg_rtt if host.avg_rtt is not None else ((time.perf_counter() - started) * 1000)
+        )
         logger.debug("ICMP 探测完成 ip=%s duration_ms=%.2f", ip, duration_ms)
         return duration_ms
 
@@ -132,7 +133,9 @@ class SpeedTestService:
             await asyncio.wait_for(loop.sock_connect(sock, sockaddr), timeout=self._probe_timeout)
         except ConnectionRefusedError:
             duration_ms = (time.perf_counter() - started) * 1000
-            logger.debug("TCP 探测收到拒绝连接 ip=%s port=%s duration_ms=%.2f", ip, port, duration_ms)
+            logger.debug(
+                "TCP 探测收到拒绝连接 ip=%s port=%s duration_ms=%.2f", ip, port, duration_ms
+            )
             return duration_ms
         except Exception as exc:
             logger.debug("TCP 探测失败 ip=%s port=%s error=%s", ip, port, type(exc).__name__)

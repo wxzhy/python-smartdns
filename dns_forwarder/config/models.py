@@ -303,6 +303,21 @@ class AppConfig(BaseSettings):
 
     @model_validator(mode="after")
     def validate_references(self) -> "AppConfig":
+        self._validate_unique_names()
+        nameserver_names = {item.name for item in self.nameservers}
+        upstream_names = {item.name for item in self.upstreams}
+        group_names = {item.name for item in self.groups}
+
+        self._validate_required_config(group_names, upstream_names)
+        self._validate_upstream_nameserver_refs(nameserver_names)
+        self._validate_group_target_refs(group_names, upstream_names)
+        self._validate_group_cycles(group_names)
+
+        self._validate_rule_refs(group_names)
+
+        return self
+
+    def _validate_unique_names(self) -> None:
         _unique_names(self.listeners, "name")
         _unique_names(self.nameservers, "name")
         _unique_names(self.upstreams, "name")
@@ -310,9 +325,11 @@ class AppConfig(BaseSettings):
         _unique_names(self.rules, "name")
         _unique_names(self.plugins, "name")
 
-        nameserver_names = {item.name for item in self.nameservers}
-        upstream_names = {item.name for item in self.upstreams}
-        group_names = {item.name for item in self.groups}
+    def _validate_required_config(
+        self,
+        group_names: set[str],
+        upstream_names: set[str],
+    ) -> None:
         duplicated_target_names = sorted(upstream_names & group_names)
 
         if not self.listeners and not self.webui.enabled and not self.webui.doh_enabled:
@@ -324,17 +341,27 @@ class AppConfig(BaseSettings):
         if not self.groups:
             raise ValueError("至少需要一个 upstream group")
         if self.runtime.default_upstream_group not in group_names:
-            raise ValueError(f"default_upstream_group 未定义: {self.runtime.default_upstream_group}")
+            raise ValueError(
+                f"default_upstream_group 未定义: {self.runtime.default_upstream_group}"
+            )
         if duplicated_target_names:
             duplicated_names = ", ".join(duplicated_target_names)
             raise ValueError(f"group 与 upstream 名称冲突: {duplicated_names}")
 
+    def _validate_upstream_nameserver_refs(self, nameserver_names: set[str]) -> None:
         for upstream in self.upstreams:
             missing = set(upstream.nameservers) - nameserver_names
             if missing:
                 missing_names = ", ".join(sorted(missing))
-                raise ValueError(f"upstream {upstream.name} 引用了不存在的 nameserver: {missing_names}")
+                raise ValueError(
+                    f"upstream {upstream.name} 引用了不存在的 nameserver: {missing_names}"
+                )
 
+    def _validate_group_target_refs(
+        self,
+        group_names: set[str],
+        upstream_names: set[str],
+    ) -> None:
         available_target_names = upstream_names | group_names
         for group in self.groups:
             missing = set(group.upstreams) - available_target_names
@@ -342,15 +369,15 @@ class AppConfig(BaseSettings):
                 missing_names = ", ".join(sorted(missing))
                 raise ValueError(f"group {group.name} 引用了不存在的 target: {missing_names}")
 
-        self._validate_group_cycles(group_names)
-
+    def _validate_rule_refs(self, group_names: set[str]) -> None:
         for rule in self.rules:
-            if rule.action.upstream_group is not None and rule.action.upstream_group not in group_names:
+            if (
+                rule.action.upstream_group is not None
+                and rule.action.upstream_group not in group_names
+            ):
                 raise ValueError(
                     f"rule {rule.name} 引用了不存在的 upstream_group: {rule.action.upstream_group}"
                 )
-
-        return self
 
     def _validate_group_cycles(self, group_names: set[str]) -> None:
         adjacency = {

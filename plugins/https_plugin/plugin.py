@@ -1,8 +1,8 @@
 from __future__ import annotations
 
 import dns.rdatatype
-import dns.rrset
 import dns.rdtypes.svcbbase
+import dns.rrset
 
 from dns_forwarder.logging import get_logger
 from dns_forwarder.pipeline import RequestContext, build_answer_from_response
@@ -55,7 +55,11 @@ class HttpsPlugin(Plugin):
 
     def _sanitize_https_answer(self, answer) -> tuple[int, int, int]:
         rrset = answer.rrset
-        if rrset is None or answer.rdtype != dns.rdatatype.HTTPS or rrset.rdtype != dns.rdatatype.HTTPS:
+        if (
+            rrset is None
+            or answer.rdtype != dns.rdatatype.HTTPS
+            or rrset.rdtype != dns.rdatatype.HTTPS
+        ):
             return 0, 0, 0
 
         changed = False
@@ -64,7 +68,9 @@ class HttpsPlugin(Plugin):
         removed_hint_params = 0
         sanitized_rdatas = []
         for rdata in rrset:
-            sanitized_rdata, removed_h3_count, removed_hint_count = self._sanitize_https_rdata(rdata)
+            sanitized_rdata, removed_h3_count, removed_hint_count = self._sanitize_https_rdata(
+                rdata
+            )
             changed = changed or sanitized_rdata is not rdata
             if sanitized_rdata is not rdata:
                 changed_records += 1
@@ -113,7 +119,9 @@ class HttpsPlugin(Plugin):
             if remaining_keys != mandatory.keys:
                 changed = True
                 if remaining_keys:
-                    params[HTTPS_PARAM_KEY.MANDATORY] = dns.rdtypes.svcbbase.MandatoryParam(remaining_keys)
+                    params[HTTPS_PARAM_KEY.MANDATORY] = dns.rdtypes.svcbbase.MandatoryParam(
+                        remaining_keys
+                    )
                 else:
                     params.pop(HTTPS_PARAM_KEY.MANDATORY, None)
 

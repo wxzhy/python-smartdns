@@ -2,23 +2,21 @@ from __future__ import annotations
 
 from base64 import b64encode
 
-from async_lru import alru_cache
 import dns.rcode
 import dns.rdata
 import dns.rdatatype
 import dns.rdtypes.svcbbase
-import dns.rrset
 import dns.resolver
+import dns.rrset
+from async_lru import alru_cache
 
 from dns_forwarder.core import IPSET_CONTEXT_KEY, IPSet
-from dns_forwarder.logging import format_tags
-from dns_forwarder.logging import get_logger
+from dns_forwarder.logging import format_tags, get_logger
 from dns_forwarder.pipeline import RequestContext, build_answer_from_response
 from dns_forwarder.plugin_api import EmptyModel, Plugin, PluginRegistry
 from plugins.tag_plugin import HAS_HINT_TAG
 
 from .models import CloudflareEchPluginConfig
-
 
 HTTPS_PARAM_KEY = dns.rdtypes.svcbbase.ParamKey
 CLOUDFLARE_ECH_DOMAIN = "cloudflare-ech.com"
@@ -73,7 +71,11 @@ class CloudflareEchPlugin(Plugin):
             )
             return
 
-        base_tags = set(context.upstream_results[-1].tags) if context.upstream_results else set(context.tags)
+        base_tags = (
+            set(context.upstream_results[-1].tags)
+            if context.upstream_results
+            else set(context.tags)
+        )
         if self._has_any_tag(base_tags, self.runtime_config.exclude_tags):
             self._logger.debug(
                 "跳过 Cloudflare ECH：命中 exclude_tags request_id=%s tags=%s",
@@ -181,7 +183,9 @@ class CloudflareEchPlugin(Plugin):
             tags.update(ipset.lookup(address))
         return tags
 
-    async def _load_cloudflare_ech_for_context(self, context: RequestContext) -> tuple[bytes, int] | None:
+    async def _load_cloudflare_ech_for_context(
+        self, context: RequestContext
+    ) -> tuple[bytes, int] | None:
         resolve_key = context._resolve_handler
         if resolve_key is None:
             return None

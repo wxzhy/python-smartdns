@@ -13,7 +13,7 @@ from dns_forwarder.pipeline.engine import PipelineEngine
 from dns_forwarder.plugin_api import PluginManager
 from dns_forwarder.resolver import ResolverManager
 from dns_forwarder.server import TcpDnsServer, UdpDnsServer
-from dns_forwarder.webui import ManagedUvicornServer, WEBUI_RELOAD_ENDPOINT, create_webui_app
+from dns_forwarder.webui import WEBUI_RELOAD_ENDPOINT, ManagedUvicornServer, create_webui_app
 
 from .domainset import DOMAINSET_CONTEXT_KEY, DomainSet
 from .ipset import IPSET_CONTEXT_KEY, IPSet
@@ -73,7 +73,9 @@ class RuntimeManager:
             logger.info("开始 reload config=%s", self.config_path)
             new_state = await self._build_state()
             if self._state is not None and self._services_started():
-                if self._service_signature(self._state.config) != self._service_signature(new_state.config):
+                if self._service_signature(self._state.config) != self._service_signature(
+                    new_state.config
+                ):
                     message = "listener 或 webui 地址变更需要重启进程"
                     logger.error("reload 失败 config=%s error=%s", self.config_path, message)
                     raise RuntimeError(message)

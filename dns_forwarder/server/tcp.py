@@ -27,7 +27,9 @@ class TcpDnsServer:
             host=self.listener.host,
             port=self.listener.port,
         )
-        logger.debug("TCP listener 已绑定 name=%s address=%r", self.listener.name, self.bound_address())
+        logger.debug(
+            "TCP listener 已绑定 name=%s address=%r", self.listener.name, self.bound_address()
+        )
 
     async def stop(self) -> None:
         if self.server is not None:
@@ -36,7 +38,9 @@ class TcpDnsServer:
             self.server = None
             logger.debug("TCP listener 已停止 name=%s", self.listener.name)
 
-    async def handle_client(self, reader: asyncio.StreamReader, writer: asyncio.StreamWriter) -> None:
+    async def handle_client(
+        self, reader: asyncio.StreamReader, writer: asyncio.StreamWriter
+    ) -> None:
         clientaddr = writer.get_extra_info("peername")
         logger.debug("TCP 客户端连接 name=%s client=%r", self.listener.name, clientaddr)
         try:
@@ -53,10 +57,14 @@ class TcpDnsServer:
                 try:
                     request = dns.message.from_wire(payload)
                 except Exception:
-                    logger.warning("TCP 请求解析失败 name=%s client=%r", self.listener.name, clientaddr)
+                    logger.warning(
+                        "TCP 请求解析失败 name=%s client=%r", self.listener.name, clientaddr
+                    )
                     break
 
-                response = await self.runtime_manager.process_query(request, clientaddr, self.listener.name)
+                response = await self.runtime_manager.process_query(
+                    request, clientaddr, self.listener.name
+                )
                 if response is None:
                     logger.debug("TCP 请求被丢弃 name=%s client=%r", self.listener.name, clientaddr)
                     continue

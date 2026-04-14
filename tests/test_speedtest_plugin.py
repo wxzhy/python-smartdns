@@ -11,9 +11,9 @@ import pytest
 from dns_forwarder.pipeline import RequestContext, UpstreamResult, build_answer_from_response
 from dns_forwarder.plugin_api import PluginManager, PluginRegistry
 from plugins.speedtest_plugin import (
-    IpRttResult,
     SPEEDTEST_CONTEXT_KEY,
     SPEEDTEST_SERVICE_KEY,
+    IpRttResult,
     SpeedTestContext,
     SpeedTestFallbackRuleConfig,
     SpeedTestPlugin,
@@ -154,7 +154,10 @@ async def test_speedtest_plugin_collects_unique_ip_rtts() -> None:
     await plugin.on_upstream_response(context, result)
 
     speedtest_context = get_speedtest_context(context)
-    assert {item.ip for item in speedtest_context.ip_rtt_results} == {"203.0.113.10", "203.0.113.11"}
+    assert {item.ip for item in speedtest_context.ip_rtt_results} == {
+        "203.0.113.10",
+        "203.0.113.11",
+    }
     assert len(speedtest_context.ip_rtt_results) == 2
     assert set(stub_service.calls) == {"203.0.113.10", "203.0.113.11"}
     assert len(stub_service.calls) == 2
@@ -190,7 +193,9 @@ async def test_speedtest_plugin_skips_measurement_for_global_skip_tags() -> None
         extensions=manager.build_context_extensions(),
         final_answer=answer,
     )
-    result = UpstreamResult(upstream_name="default", duration_ms=1.0, answer=answer, tags={"direct"})
+    result = UpstreamResult(
+        upstream_name="default", duration_ms=1.0, answer=answer, tags={"direct"}
+    )
 
     await plugin.on_upstream_response(context, result)
     await plugin.on_response(context)
@@ -330,7 +335,9 @@ async def test_speedtest_plugin_on_response_replaces_answer_rrset_with_fastest_i
     assert len(answer.response.answer[0]) == 3
 
 
-async def test_speedtest_plugin_on_response_updates_ttl_and_expiration_when_replacing(monkeypatch) -> None:
+async def test_speedtest_plugin_on_response_updates_ttl_and_expiration_when_replacing(
+    monkeypatch,
+) -> None:
     plugin = SpeedTestPlugin()
     plugin.bind(
         SpeedTestPluginConfig(response_ip_limit=1, response_ttl_seconds=120),

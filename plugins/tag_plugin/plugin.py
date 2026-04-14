@@ -66,7 +66,9 @@ class TagPlugin(Plugin):
         hint_ip_count = 0
         has_hints = False
         if result.answer is None or result.answer.rrset is None:
-            self._log_result_tags(context, result, before_tags, cname_domains, hint_ip_count, has_hints)
+            self._log_result_tags(
+                context, result, before_tags, cname_domains, hint_ip_count, has_hints
+            )
             return
         if result.answer.rdtype == dns.rdatatype.HTTPS:
             hint_ips, has_hints = self._extract_https_hints(result.answer)
@@ -75,7 +77,9 @@ class TagPlugin(Plugin):
                 result.tags.add(HAS_HINT_TAG)
             for ip in hint_ips:
                 result.tags.update(ipset.lookup(ip))
-            self._log_result_tags(context, result, before_tags, cname_domains, hint_ip_count, has_hints)
+            self._log_result_tags(
+                context, result, before_tags, cname_domains, hint_ip_count, has_hints
+            )
             return
         for ip in self._extract_answer_ips(result.answer):
             result.tags.update(ipset.lookup(ip))

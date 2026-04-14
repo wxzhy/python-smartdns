@@ -16,7 +16,6 @@ from dns_forwarder.pipeline.context import RequestContext, UpstreamResult
 
 from .base import BaseUpstreamResolver
 
-
 logger = get_logger("resolver.upstream")
 
 

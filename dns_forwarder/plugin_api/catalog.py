@@ -78,7 +78,9 @@ def validate_plugin_configs(plugin_configs: list[PluginConfig], plugin_dirs: lis
         entry.variables_model.model_validate(plugin_config.variables)
 
 
-def materialize_plugin_configs(plugin_configs: list[PluginConfig], plugin_dirs: list[str]) -> list[PluginConfig]:
+def materialize_plugin_configs(
+    plugin_configs: list[PluginConfig], plugin_dirs: list[str]
+) -> list[PluginConfig]:
     available_plugins = discover_available_plugins(plugin_dirs)
     materialized = [plugin.model_copy(deep=True) for plugin in plugin_configs]
     configured_modules = {plugin.module for plugin in materialized}
@@ -95,7 +97,9 @@ def materialize_plugin_configs(plugin_configs: list[PluginConfig], plugin_dirs: 
     return materialized
 
 
-def namespace_json_schema(schema: dict[str, Any], prefix: str) -> tuple[dict[str, Any], dict[str, Any]]:
+def namespace_json_schema(
+    schema: dict[str, Any], prefix: str
+) -> tuple[dict[str, Any], dict[str, Any]]:
     namespaced_schema = deepcopy(schema)
     definitions = namespaced_schema.pop("$defs", {})
     _rewrite_schema_refs(namespaced_schema, prefix)

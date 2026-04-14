@@ -1,4 +1,4 @@
-from .models import IpRttResult, SPEEDTEST_CONTEXT_KEY, SPEEDTEST_SERVICE_KEY, SpeedTestContext
+from .models import SPEEDTEST_CONTEXT_KEY, SPEEDTEST_SERVICE_KEY, IpRttResult, SpeedTestContext
 from .plugin import (
     SpeedTestFallbackRuleConfig,
     SpeedTestPlugin,

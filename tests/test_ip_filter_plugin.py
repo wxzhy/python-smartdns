@@ -233,7 +233,9 @@ async def test_ip_filter_plugin_filters_blacklist_only(tmp_path: Path) -> None:
 
     await plugin.on_upstream_response(context, result)
 
-    assert answer_addresses(result.answer) == [ip for ip in before_addresses if ip != "203.0.113.20"]
+    assert answer_addresses(result.answer) == [
+        ip for ip in before_addresses if ip != "203.0.113.20"
+    ]
 
 
 async def test_ip_filter_plugin_filters_whitelist_only(tmp_path: Path) -> None:
@@ -254,11 +256,15 @@ async def test_ip_filter_plugin_filters_whitelist_only(tmp_path: Path) -> None:
 
     await plugin.on_upstream_response(context, result)
 
-    assert answer_addresses(result.answer) == [ip for ip in before_addresses if ip.startswith("198.51.100.")]
+    assert answer_addresses(result.answer) == [
+        ip for ip in before_addresses if ip.startswith("198.51.100.")
+    ]
 
 
 async def test_ip_filter_plugin_combines_whitelist_and_blacklist(tmp_path: Path) -> None:
-    plugin = make_plugin(match_tags=["proxy"], whitelist_tags=["allowed"], blacklist_tags=["blocked"])
+    plugin = make_plugin(
+        match_tags=["proxy"], whitelist_tags=["allowed"], blacklist_tags=["blocked"]
+    )
     await plugin.setup(PluginRegistry())
     request = dns.message.make_query("example.org", "A")
     context = make_context(
@@ -281,7 +287,9 @@ async def test_ip_filter_plugin_combines_whitelist_and_blacklist(tmp_path: Path)
 
     await plugin.on_upstream_response(context, result)
 
-    assert answer_addresses(result.answer) == [ip for ip in before_addresses if ip.startswith("198.51.100.")]
+    assert answer_addresses(result.answer) == [
+        ip for ip in before_addresses if ip.startswith("198.51.100.")
+    ]
 
 
 async def test_ip_filter_plugin_matches_all_requests_when_match_tags_empty(tmp_path: Path) -> None:
@@ -346,7 +354,9 @@ async def test_ip_filter_plugin_skips_when_request_hits_exclude_tags(tmp_path: P
     assert answer_addresses(result.answer) == before_addresses
 
 
-async def test_ip_filter_plugin_handles_untagged_ips_based_on_whitelist_presence(tmp_path: Path) -> None:
+async def test_ip_filter_plugin_handles_untagged_ips_based_on_whitelist_presence(
+    tmp_path: Path,
+) -> None:
     plugin = make_plugin(match_tags=["proxy"], whitelist_tags=["allowed"])
     await plugin.setup(PluginRegistry())
     request = dns.message.make_query("example.org", "A")
@@ -415,7 +425,7 @@ async def test_ip_filter_plugin_skips_non_noerror_and_non_address_answers(tmp_pa
     request_txt = dns.message.make_query("example.org", "TXT")
     context_txt = make_context(request_txt, tags={"proxy"}, ipset=ipset)
     response_txt = dns.message.make_response(request_txt)
-    response_txt.answer.append(dns.rrset.from_text("example.org.", 60, "IN", "TXT", "\"hello\""))
+    response_txt.answer.append(dns.rrset.from_text("example.org.", 60, "IN", "TXT", '"hello"'))
     answer_txt = build_answer_from_response(request_txt, response_txt)
     result_txt = UpstreamResult(upstream_name="upstream-a", duration_ms=1.0, answer=answer_txt)
     await plugin.on_upstream_response(context_txt, result_txt)
@@ -467,7 +477,9 @@ async def test_ip_filter_plugin_preserves_record_order(tmp_path: Path) -> None:
 
     await plugin.on_upstream_response(context, result)
 
-    assert answer_addresses(result.answer) == [ip for ip in before_addresses if ip != "203.0.113.40"]
+    assert answer_addresses(result.answer) == [
+        ip for ip in before_addresses if ip != "203.0.113.40"
+    ]
 
 
 async def test_ip_filter_plugin_sets_empty_rrset_when_all_ips_are_filtered(tmp_path: Path) -> None:
@@ -491,10 +503,14 @@ async def test_ip_filter_plugin_sets_empty_rrset_when_all_ips_are_filtered(tmp_p
     assert result.answer.rrset is None
 
 
-async def test_ip_filter_plugin_keeps_empty_noerror_response_after_pipeline_finalize(tmp_path: Path) -> None:
+async def test_ip_filter_plugin_keeps_empty_noerror_response_after_pipeline_finalize(
+    tmp_path: Path,
+) -> None:
     config = build_config()
     registry = PluginRegistry()
-    registry.register_context(IPSET_CONTEXT_KEY, build_ipset(tmp_path, {"blocked": ["203.0.113.0/24"]}))
+    registry.register_context(
+        IPSET_CONTEXT_KEY, build_ipset(tmp_path, {"blocked": ["203.0.113.0/24"]})
+    )
     plugin = make_plugin(blacklist_tags=["blocked"])
     await plugin.setup(registry)
     manager = PluginManager(

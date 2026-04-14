@@ -2,10 +2,10 @@ from .models import (
     AppConfig,
     BaseNameserverConfig,
     DispatchStrategyType,
-    Do53NameserverConfig,
     Do53CustomNameserverConfig,
-    DoHNameserverConfig,
+    Do53NameserverConfig,
     DoHCustomNameserverConfig,
+    DoHNameserverConfig,
     DoQNameserverConfig,
     DoTNameserverConfig,
     ECSConfig,
@@ -54,6 +54,7 @@ def build_config_json_schema(*args, **kwargs):
     from .loader import build_config_json_schema as _build_config_json_schema
 
     return _build_config_json_schema(*args, **kwargs)
+
 
 __all__ = [
     "AppConfig",

@@ -22,7 +22,9 @@ DOH_DNS_QUERY_PATH = "/dns-query"
 logger = get_logger("server.doh")
 
 
-def register_doh_routes(app: FastAPI, runtime_manager: "RuntimeManager", listener_name: str = "doh") -> None:
+def register_doh_routes(
+    app: FastAPI, runtime_manager: "RuntimeManager", listener_name: str = "doh"
+) -> None:
     router = APIRouter()
 
     @router.get(DOH_DNS_QUERY_PATH, response_class=Response)
@@ -31,7 +33,9 @@ def register_doh_routes(app: FastAPI, runtime_manager: "RuntimeManager", listene
         dns: Annotated[str | None, Query()] = None,
     ) -> Response:
         if dns is None:
-            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="missing dns query parameter")
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST, detail="missing dns query parameter"
+            )
         wire = _decode_doh_query(dns)
         return await _handle_doh_wire(runtime_manager, listener_name, request, wire, is_get=True)
 
@@ -39,10 +43,14 @@ def register_doh_routes(app: FastAPI, runtime_manager: "RuntimeManager", listene
     async def handle_post(request: Request) -> Response:
         content_type = _normalize_media_type(request.headers.get("content-type"))
         if content_type != DOH_MEDIA_TYPE:
-            raise HTTPException(status_code=status.HTTP_415_UNSUPPORTED_MEDIA_TYPE, detail="unsupported media type")
+            raise HTTPException(
+                status_code=status.HTTP_415_UNSUPPORTED_MEDIA_TYPE, detail="unsupported media type"
+            )
         wire = await request.body()
         if not wire:
-            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="empty dns request body")
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST, detail="empty dns request body"
+            )
         return await _handle_doh_wire(runtime_manager, listener_name, request, wire, is_get=False)
 
     app.include_router(router)
@@ -62,7 +70,9 @@ async def _handle_doh_wire(
         message = dns.message.from_wire(wire)
     except Exception as exc:
         logger.warning("DoH 请求解析失败 listener=%s error=%s", listener_name, type(exc).__name__)
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="invalid dns message") from exc
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST, detail="invalid dns message"
+        ) from exc
 
     clientaddr = _client_address(request)
     logger.debug(
@@ -89,7 +99,9 @@ def _decode_doh_query(value: str) -> bytes:
     try:
         return base64.b64decode(padded.encode("ascii"), altchars=b"-_", validate=True)
     except (UnicodeEncodeError, ValueError, binascii.Error) as exc:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="invalid dns query parameter") from exc
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST, detail="invalid dns query parameter"
+        ) from exc
 
 
 def _normalize_media_type(value: str | None) -> str | None:
@@ -102,13 +114,13 @@ def _ensure_accepts_dns_message(value: str | None) -> None:
     if value is None or not value.strip():
         return
     media_types = {
-        part.split(";", 1)[0].strip().lower()
-        for part in value.split(",")
-        if part.strip()
+        part.split(";", 1)[0].strip().lower() for part in value.split(",") if part.strip()
     }
     if DOH_MEDIA_TYPE in media_types or "*/*" in media_types or "application/*" in media_types:
         return
-    raise HTTPException(status_code=status.HTTP_406_NOT_ACCEPTABLE, detail="response type not acceptable")
+    raise HTTPException(
+        status_code=status.HTTP_406_NOT_ACCEPTABLE, detail="response type not acceptable"
+    )
 
 
 def _cache_control_header(response: dns.message.Message) -> str:

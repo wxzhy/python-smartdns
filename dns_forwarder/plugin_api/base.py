@@ -80,7 +80,9 @@ class Plugin:
     async def on_request(self, context: "RequestContext") -> None:
         return None
 
-    async def on_upstream_response(self, context: "RequestContext", result: "UpstreamResult") -> None:
+    async def on_upstream_response(
+        self, context: "RequestContext", result: "UpstreamResult"
+    ) -> None:
         return None
 
     async def on_response(self, context: "RequestContext") -> None:
@@ -151,7 +153,8 @@ class PluginManager:
 
     def build_context_extensions(self) -> dict[str, Any]:
         return {
-            name: registration.build() for name, registration in self.registry.context_registry.items()
+            name: registration.build()
+            for name, registration in self.registry.context_registry.items()
         }
 
     def build_answer_registry(self) -> dict[str, AnswerBuilder]:
@@ -167,7 +170,9 @@ class PluginManager:
             if context.drop_request or context.stop_processing:
                 break
 
-    async def on_upstream_response(self, context: "RequestContext", result: "UpstreamResult") -> None:
+    async def on_upstream_response(
+        self, context: "RequestContext", result: "UpstreamResult"
+    ) -> None:
         for plugin in self._ordered_plugins("upstream_response_order"):
             await plugin.instance.on_upstream_response(context, result)
 

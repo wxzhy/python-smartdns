@@ -5,7 +5,12 @@ import dns.rrset
 
 from dns_forwarder.config import AppConfig, PluginConfig
 from dns_forwarder.dispatcher import DispatcherRegistry
-from dns_forwarder.pipeline import RequestContext, UpstreamResult, build_answer_from_response, sync_answer_response
+from dns_forwarder.pipeline import (
+    RequestContext,
+    UpstreamResult,
+    build_answer_from_response,
+    sync_answer_response,
+)
 from dns_forwarder.pipeline.engine import PipelineEngine
 from dns_forwarder.plugin_api import LoadedPlugin, PluginManager, PluginRegistry
 from plugins.cache_plugin import CachePlugin

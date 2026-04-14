@@ -100,7 +100,9 @@ def _build_context(qtype: str = "A") -> RequestContext:
 
 async def test_race_dispatcher_returns_first_success_even_after_failures() -> None:
     registry = DispatcherRegistry()
-    group = UpstreamGroupConfig(name="default", strategy=DispatchStrategyType.RACE, upstreams=["boom", "ok"])
+    group = UpstreamGroupConfig(
+        name="default", strategy=DispatchStrategyType.RACE, upstreams=["boom", "ok"]
+    )
     manager = StubResolverManager(
         {
             "boom": _raising("boom", delay=0.01),
@@ -116,7 +118,9 @@ async def test_race_dispatcher_returns_first_success_even_after_failures() -> No
 
 async def test_race_dispatcher_returns_nxdomain_when_no_success_exists() -> None:
     registry = DispatcherRegistry()
-    group = UpstreamGroupConfig(name="default", strategy=DispatchStrategyType.RACE, upstreams=["error", "nx", "boom"])
+    group = UpstreamGroupConfig(
+        name="default", strategy=DispatchStrategyType.RACE, upstreams=["error", "nx", "boom"]
+    )
     manager = StubResolverManager(
         {
             "error": _failure("error", delay=0.01),
@@ -132,8 +136,12 @@ async def test_race_dispatcher_returns_nxdomain_when_no_success_exists() -> None
 
 async def test_race_dispatcher_supports_nested_groups() -> None:
     registry = DispatcherRegistry()
-    nested = UpstreamGroupConfig(name="nested", strategy=DispatchStrategyType.RACE, upstreams=["bad", "ok"])
-    parent = UpstreamGroupConfig(name="default", strategy=DispatchStrategyType.RACE, upstreams=["nested", "fallback"])
+    nested = UpstreamGroupConfig(
+        name="nested", strategy=DispatchStrategyType.RACE, upstreams=["bad", "ok"]
+    )
+    parent = UpstreamGroupConfig(
+        name="default", strategy=DispatchStrategyType.RACE, upstreams=["nested", "fallback"]
+    )
     manager = StubResolverManager(
         {
             "bad": _failure("bad"),
@@ -239,7 +247,9 @@ async def test_wait_all_dispatcher_supports_nested_groups() -> None:
 async def test_race_dispatcher_emits_failure_log_while_continuing(capture_dns_logs, caplog) -> None:
     capture_dns_logs("DEBUG")
     registry = DispatcherRegistry()
-    group = UpstreamGroupConfig(name="default", strategy=DispatchStrategyType.RACE, upstreams=["a", "b"])
+    group = UpstreamGroupConfig(
+        name="default", strategy=DispatchStrategyType.RACE, upstreams=["a", "b"]
+    )
     manager = StubResolverManager(
         {
             "a": _failure("a"),

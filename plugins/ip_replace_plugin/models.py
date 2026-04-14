@@ -52,7 +52,9 @@ class IpReplacePluginConfig(StrictPluginModel):
     skip_tags: list[str] = Field(default_factory=list)
     rules: list[IpReplaceRuleConfig] = Field(default_factory=list)
 
-    _normalize_skip_tags = field_validator("skip_tags", mode="before")(IpReplaceRuleConfig.normalize_tags)
+    _normalize_skip_tags = field_validator("skip_tags", mode="before")(
+        IpReplaceRuleConfig.normalize_tags
+    )
 
 
 def _normalize_networks(value: list[str] | None, *, version: int) -> list[str]:

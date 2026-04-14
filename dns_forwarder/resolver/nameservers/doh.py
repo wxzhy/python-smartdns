@@ -5,7 +5,6 @@ import dns.query
 
 from dns_forwarder.config import DoHNameserverConfig, HTTPVersionType
 
-
 HTTP_VERSION_MAP: dict[HTTPVersionType, dns.query.HTTPVersion] = {
     HTTPVersionType.DEFAULT: dns.query.HTTPVersion.DEFAULT,
     HTTPVersionType.H1: dns.query.HTTPVersion.H1,

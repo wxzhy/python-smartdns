@@ -2,8 +2,8 @@ from __future__ import annotations
 
 import dns.rcode
 import dns.rdatatype
-import dns.rrset
 import dns.resolver
+import dns.rrset
 
 from dns_forwarder.core import IPSET_CONTEXT_KEY, IPSet
 from dns_forwarder.logging import format_tags, get_logger
@@ -71,7 +71,9 @@ class IpFilterPlugin(Plugin):
     def _matches_request(self, tags: set[str]) -> tuple[bool, str]:
         if self._has_any_tag(tags, self.runtime_config.exclude_tags):
             return False, "exclude_tags"
-        if self.runtime_config.match_tags and not self._has_any_tag(tags, self.runtime_config.match_tags):
+        if self.runtime_config.match_tags and not self._has_any_tag(
+            tags, self.runtime_config.match_tags
+        ):
             return False, "match_tags_miss"
         return True, "matched"
 
@@ -101,7 +103,9 @@ class IpFilterPlugin(Plugin):
         return original_count, len(kept_records)
 
     def _should_keep_ip_tags(self, ip_tags: set[str]) -> bool:
-        if self.runtime_config.whitelist_tags and not self._has_any_tag(ip_tags, self.runtime_config.whitelist_tags):
+        if self.runtime_config.whitelist_tags and not self._has_any_tag(
+            ip_tags, self.runtime_config.whitelist_tags
+        ):
             return False
         if self._has_any_tag(ip_tags, self.runtime_config.blacklist_tags):
             return False

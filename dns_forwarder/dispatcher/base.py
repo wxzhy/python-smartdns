@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 from abc import ABC, abstractmethod
 from typing import TYPE_CHECKING, ClassVar
 
@@ -9,8 +10,9 @@ from dns_forwarder.config import DispatchStrategyType, UpstreamGroupConfig
 from dns_forwarder.pipeline.context import RequestContext, UpstreamResult
 
 if TYPE_CHECKING:
-    from .registry import DispatcherRegistry
     from dns_forwarder.resolver import ResolverManager
+
+    from .registry import DispatcherRegistry
 
 
 class DispatchStrategy(ABC):
@@ -39,6 +41,13 @@ class DispatchStrategy(ABC):
         if result.error is None:
             return ""
         return type(result.error).__name__
+
+    @staticmethod
+    async def _cancel_pending_tasks(tasks: list[asyncio.Task[UpstreamResult]]) -> None:
+        for task in tasks:
+            if not task.done():
+                task.cancel()
+        await asyncio.gather(*tasks, return_exceptions=True)
 
     @classmethod
     def pick_failure_result(

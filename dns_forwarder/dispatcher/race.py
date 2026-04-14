@@ -12,8 +12,9 @@ from dns_forwarder.pipeline.context import RequestContext, UpstreamResult
 from .base import DispatchStrategy
 
 if TYPE_CHECKING:
-    from .registry import DispatcherRegistry
     from dns_forwarder.resolver import ResolverManager
+
+    from .registry import DispatcherRegistry
 
 
 logger = get_logger("dispatcher.race")
@@ -62,14 +63,13 @@ class RaceDispatchStrategy(DispatchStrategy):
 
         fallback = self.pick_failure_result(failures, "所有上游均失败")
         if isinstance(fallback.error, dns.resolver.NXDOMAIN):
-            logger.debug("并发调度未命中成功结果，返回 NXDOMAIN request_id=%s group=%s", context.request_id, group.name)
+            logger.debug(
+                "并发调度未命中成功结果，返回 NXDOMAIN request_id=%s group=%s",
+                context.request_id,
+                group.name,
+            )
             return fallback
-        logger.warning("并发调度所有上游均失败 request_id=%s group=%s", context.request_id, group.name)
+        logger.warning(
+            "并发调度所有上游均失败 request_id=%s group=%s", context.request_id, group.name
+        )
         return fallback
-
-    @staticmethod
-    async def _cancel_pending_tasks(tasks: list[asyncio.Task[UpstreamResult]]) -> None:
-        for task in tasks:
-            if not task.done():
-                task.cancel()
-        await asyncio.gather(*tasks, return_exceptions=True)

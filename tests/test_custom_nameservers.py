@@ -5,7 +5,10 @@ from unittest.mock import AsyncMock, patch
 import dns.message
 import dns.query
 
-from dns_forwarder.resolver.nameservers._trick_sockets import TrickyDatagramSocket, TrickyStreamSocket
+from dns_forwarder.resolver.nameservers._trick_sockets import (
+    TrickyDatagramSocket,
+    TrickyStreamSocket,
+)
 from dns_forwarder.resolver.nameservers.do53_custom import Do53CustomNameserver
 from dns_forwarder.resolver.nameservers.doh_custom import DoHCustomNameserver, _get_shared_client
 
@@ -117,7 +120,9 @@ async def test_doh_custom_async_query_falls_back_for_h3(https_mock: AsyncMock) -
 
 
 @patch("dns.asyncquery.https", new_callable=AsyncMock)
-async def test_doh_custom_async_query_falls_back_for_bootstrap_address(https_mock: AsyncMock) -> None:
+async def test_doh_custom_async_query_falls_back_for_bootstrap_address(
+    https_mock: AsyncMock,
+) -> None:
     request = dns.message.make_query("example.test", "A")
     response = dns.message.make_response(request)
     https_mock.return_value = response

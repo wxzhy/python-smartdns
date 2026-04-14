@@ -28,12 +28,16 @@ class FakeUpstreamProtocol(asyncio.DatagramProtocol):
         response = dns.message.make_response(query)
         response.set_rcode(self.rcode)
         if self.address is not None and self.rcode == dns.rcode.NOERROR:
-            rrset = dns.rrset.from_text(query.question[0].name.to_text(), 30, "IN", "A", self.address)
+            rrset = dns.rrset.from_text(
+                query.question[0].name.to_text(), 30, "IN", "A", self.address
+            )
             response.answer.append(rrset)
         self.transport.sendto(response.to_wire(), addr)
 
 
-async def start_fake_upstream(answer: str | None, rcode: int = dns.rcode.NOERROR) -> tuple[asyncio.DatagramTransport, int]:
+async def start_fake_upstream(
+    answer: str | None, rcode: int = dns.rcode.NOERROR
+) -> tuple[asyncio.DatagramTransport, int]:
     loop = asyncio.get_running_loop()
     transport, _ = await loop.create_datagram_endpoint(
         lambda: FakeUpstreamProtocol(answer, rcode=rcode),
@@ -130,7 +134,9 @@ async def test_nxdomain_from_upstream_returns_nxdomain(tmp_path: Path) -> None:
 
     try:
         status = manager.get_status()
-        udp_host, udp_port = next(item["address"] for item in status["listeners"] if item["name"] == "udp").split(":")
+        udp_host, udp_port = next(
+            item["address"] for item in status["listeners"] if item["name"] == "udp"
+        ).split(":")
         udp_response = await dns.asyncquery.udp(
             dns.message.make_query("missing.test", "A"),
             where=udp_host,

@@ -258,7 +258,11 @@ async def test_block_plugin_rewrites_final_response_for_matching_result_tags() -
         listener_name="udp",
         final_answer=answer,
         final_response=answer.response,
-        upstream_results=[UpstreamResult(upstream_name="upstream-a", duration_ms=1.0, answer=answer, tags={"blackhole"})],
+        upstream_results=[
+            UpstreamResult(
+                upstream_name="upstream-a", duration_ms=1.0, answer=answer, tags={"blackhole"}
+            )
+        ],
     )
 
     await plugin.on_response(context)
@@ -269,7 +273,9 @@ async def test_block_plugin_rewrites_final_response_for_matching_result_tags() -
     assert context.final_answer.rrset.ttl == 600
 
 
-async def test_block_plugin_rewrites_non_address_response_to_empty_noerror_when_block_other_enabled() -> None:
+async def test_block_plugin_rewrites_non_address_response_to_empty_noerror_when_block_other_enabled() -> (
+    None
+):
     plugin = build_plugin(
         build_rule(
             match_tags=["blackhole"],
@@ -287,7 +293,11 @@ async def test_block_plugin_rewrites_non_address_response_to_empty_noerror_when_
         listener_name="udp",
         final_answer=answer,
         final_response=answer.response,
-        upstream_results=[UpstreamResult(upstream_name="upstream-a", duration_ms=1.0, answer=answer, tags={"blackhole"})],
+        upstream_results=[
+            UpstreamResult(
+                upstream_name="upstream-a", duration_ms=1.0, answer=answer, tags={"blackhole"}
+            )
+        ],
     )
 
     await plugin.on_response(context)
@@ -399,9 +409,7 @@ async def test_block_plugin_works_after_tag_plugin_in_request_phase(tmp_path: Pa
     tag_plugin.bind(tag_plugin.config_model(), tag_plugin.variables_model())
     await tag_plugin.setup(registry)
 
-    block_plugin = build_plugin(
-        build_rule(match_tags=["blackhole"], ipv4_addresses=["127.0.0.1"])
-    )
+    block_plugin = build_plugin(build_rule(match_tags=["blackhole"], ipv4_addresses=["127.0.0.1"]))
     await block_plugin.setup(registry)
 
     plugin_manager = PluginManager(

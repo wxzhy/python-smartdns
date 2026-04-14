@@ -23,7 +23,12 @@ class _DatagramHandler(asyncio.DatagramProtocol):
         self.server.transport = transport
 
     def datagram_received(self, data: bytes, addr: tuple[str, int]) -> None:
-        logger.debug("UDP 收到请求 name=%s client=%r payload_length=%s", self.server.listener.name, addr, len(data))
+        logger.debug(
+            "UDP 收到请求 name=%s client=%r payload_length=%s",
+            self.server.listener.name,
+            addr,
+            len(data),
+        )
         asyncio.create_task(self.server.handle_datagram(data, addr))
 
 
@@ -40,7 +45,9 @@ class UdpDnsServer:
             local_addr=(self.listener.host, self.listener.port),
         )
         self.transport = transport
-        logger.debug("UDP listener 已绑定 name=%s address=%r", self.listener.name, self.bound_address())
+        logger.debug(
+            "UDP listener 已绑定 name=%s address=%r", self.listener.name, self.bound_address()
+        )
 
     async def stop(self) -> None:
         if self.transport is not None:

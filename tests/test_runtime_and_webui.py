@@ -1,16 +1,16 @@
 from __future__ import annotations
 
 import asyncio
-import sys
-import json
 import base64
+import json
+import sys
 from pathlib import Path
 
 import dns.message
 from httpx import ASGITransport, AsyncClient
 
 from dns_forwarder.core.runtime import RuntimeManager, main
-from dns_forwarder.webui import ManagedUvicornServer, WEBUI_RELOAD_ENDPOINT, create_webui_app
+from dns_forwarder.webui import WEBUI_RELOAD_ENDPOINT, ManagedUvicornServer, create_webui_app
 
 
 def _basic_auth_headers(username: str = "admin", password: str = "change-me") -> dict[str, str]:
@@ -127,13 +127,17 @@ async def test_webui_save_and_reload_success(tmp_path: Path, capture_dns_logs, c
         current_data = json.loads(config_path.read_text(encoding="utf-8"))
         current_data["plugins"][0]["variables"]["address"] = "127.0.0.2"
         current_text = json.dumps(current_data, ensure_ascii=False, indent=2) + "\n"
-        saved = await client.post("/config", data={"config_text": current_text}, headers=_basic_auth_headers())
+        saved = await client.post(
+            "/config", data={"config_text": current_text}, headers=_basic_auth_headers()
+        )
         assert saved.status_code == 200
         assert "配置已保存" in saved.text
         assert "jsoneditor.min.js" in saved.text
         assert '"oneOf"' in saved.text
 
-        reloaded = await client.post(WEBUI_RELOAD_ENDPOINT, follow_redirects=False, headers=_basic_auth_headers())
+        reloaded = await client.post(
+            WEBUI_RELOAD_ENDPOINT, follow_redirects=False, headers=_basic_auth_headers()
+        )
         assert reloaded.status_code == 303
         assert "保存配置成功" in caplog.text
         assert "手动 reload 完成" in caplog.text
@@ -146,7 +150,9 @@ async def test_webui_save_and_reload_success(tmp_path: Path, capture_dns_logs, c
     assert response.answer[0][0].address == "127.0.0.2"
 
 
-async def test_webui_reload_failure_keeps_old_runtime(tmp_path: Path, capture_dns_logs, caplog) -> None:
+async def test_webui_reload_failure_keeps_old_runtime(
+    tmp_path: Path, capture_dns_logs, caplog
+) -> None:
     capture_dns_logs("INFO")
     config_path = tmp_path / "config.json"
     write_config(config_path, webui_enabled=True)
@@ -157,7 +163,9 @@ async def test_webui_reload_failure_keeps_old_runtime(tmp_path: Path, capture_dn
     changed_text = config_path.read_text(encoding="utf-8").replace('"port": 0', '"port": 5305', 1)
     transport = ASGITransport(app=app)
     async with AsyncClient(transport=transport, base_url="http://testserver") as client:
-        saved = await client.post("/config", data={"config_text": changed_text}, headers=_basic_auth_headers())
+        saved = await client.post(
+            "/config", data={"config_text": changed_text}, headers=_basic_auth_headers()
+        )
         assert saved.status_code == 200
         failed = await client.post(WEBUI_RELOAD_ENDPOINT, headers=_basic_auth_headers())
         assert failed.status_code == 400
@@ -184,7 +192,9 @@ async def test_webui_requires_basic_auth(tmp_path: Path) -> None:
     transport = ASGITransport(app=app)
     async with AsyncClient(transport=transport, base_url="http://testserver") as client:
         unauthorized = await client.get("/config")
-        forbidden = await client.get("/config", headers=_basic_auth_headers(password="wrong-password"))
+        forbidden = await client.get(
+            "/config", headers=_basic_auth_headers(password="wrong-password")
+        )
         authorized = await client.get("/config", headers=_basic_auth_headers())
 
     assert unauthorized.status_code == 401

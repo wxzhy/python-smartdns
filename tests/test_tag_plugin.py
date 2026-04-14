@@ -21,7 +21,10 @@ def _write_lines(path: Path, lines: list[str]) -> None:
 def test_domainset_merges_same_tag_files_and_domain_suffix_matches(tmp_path: Path) -> None:
     domain_dir = tmp_path / "domains"
     domain_dir.mkdir()
-    _write_lines(domain_dir / "proxy.list", ["example.org", "another.example.org", "# comment", "example.org"])
+    _write_lines(
+        domain_dir / "proxy.list",
+        ["example.org", "another.example.org", "# comment", "example.org"],
+    )
     _write_lines(domain_dir / "domestic.list", ["www.example.org"])
     _write_lines(domain_dir / "deep.list", ["b.c.com"])
     _write_lines(domain_dir / "suffix.list", ["c.com"])
@@ -168,7 +171,9 @@ async def test_tag_plugin_adds_unique_answer_ip_tags_to_upstream_result(tmp_path
         )
     )
     answer = build_answer_from_response(context.request, response)
-    result = UpstreamResult(upstream_name="default", duration_ms=1.0, answer=answer, tags=context.tags.copy())
+    result = UpstreamResult(
+        upstream_name="default", duration_ms=1.0, answer=answer, tags=context.tags.copy()
+    )
 
     await plugin.on_upstream_response(context, result)
 
@@ -229,7 +234,9 @@ async def test_tag_plugin_adds_cname_chain_domain_tags_to_upstream_result(tmp_pa
         )
     )
     answer = build_answer_from_response(context.request, response)
-    result = UpstreamResult(upstream_name="default", duration_ms=1.0, answer=answer, tags=context.tags.copy())
+    result = UpstreamResult(
+        upstream_name="default", duration_ms=1.0, answer=answer, tags=context.tags.copy()
+    )
 
     await plugin.on_upstream_response(context, result)
 
@@ -271,7 +278,9 @@ async def test_tag_plugin_adds_https_hint_ip_tags_to_upstream_result(tmp_path: P
         )
     )
     answer = build_answer_from_response(context.request, response)
-    result = UpstreamResult(upstream_name="default", duration_ms=1.0, answer=answer, tags=context.tags.copy())
+    result = UpstreamResult(
+        upstream_name="default", duration_ms=1.0, answer=answer, tags=context.tags.copy()
+    )
 
     await plugin.on_upstream_response(context, result)
 
@@ -333,14 +342,18 @@ async def test_tag_plugin_adds_https_cname_and_hint_tags_to_upstream_result(tmp_
         )
     )
     answer = build_answer_from_response(context.request, response)
-    result = UpstreamResult(upstream_name="default", duration_ms=1.0, answer=answer, tags=context.tags.copy())
+    result = UpstreamResult(
+        upstream_name="default", duration_ms=1.0, answer=answer, tags=context.tags.copy()
+    )
 
     await plugin.on_upstream_response(context, result)
 
     assert result.tags == {"request-tag", "mid-tag", "final-tag", "v4-tag", "v6-tag", HAS_HINT_TAG}
 
 
-async def test_tag_plugin_marks_has_hint_even_when_hint_ips_do_not_match_ipset(tmp_path: Path) -> None:
+async def test_tag_plugin_marks_has_hint_even_when_hint_ips_do_not_match_ipset(
+    tmp_path: Path,
+) -> None:
     domain_dir = tmp_path / "domains"
     ip_dir = tmp_path / "ips"
     domain_dir.mkdir()
@@ -373,7 +386,9 @@ async def test_tag_plugin_marks_has_hint_even_when_hint_ips_do_not_match_ipset(t
         )
     )
     answer = build_answer_from_response(context.request, response)
-    result = UpstreamResult(upstream_name="default", duration_ms=1.0, answer=answer, tags=context.tags.copy())
+    result = UpstreamResult(
+        upstream_name="default", duration_ms=1.0, answer=answer, tags=context.tags.copy()
+    )
 
     await plugin.on_upstream_response(context, result)
 
@@ -487,7 +502,7 @@ async def test_tag_plugin_skips_non_address_answers(tmp_path: Path) -> None:
             60,
             "IN",
             "TXT",
-            "\"hello\"",
+            '"hello"',
         )
     )
     answer = build_answer_from_response(context.request, response)

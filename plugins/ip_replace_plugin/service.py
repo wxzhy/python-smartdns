@@ -5,8 +5,8 @@ from ipaddress import IPv4Address, IPv4Network, IPv6Address, IPv6Network, ip_add
 
 import dns.rcode
 import dns.rdatatype
-import dns.rrset
 import dns.resolver
+import dns.rrset
 
 from dns_forwarder.logging import format_tags, get_logger
 
@@ -25,11 +25,15 @@ class CompiledIpReplaceRule:
 
 
 class IpReplaceService:
-    def __init__(self, rules: list[IpReplaceRuleConfig], skip_tags: list[str] | None = None) -> None:
+    def __init__(
+        self, rules: list[IpReplaceRuleConfig], skip_tags: list[str] | None = None
+    ) -> None:
         self._rules = tuple(self._compile_rule(rule) for rule in rules)
         self._skip_tags = frozenset(skip_tags or [])
 
-    def replace_answer(self, answer: dns.resolver.Answer | None, tags: set[str], *, stage: str = "unknown") -> bool:
+    def replace_answer(
+        self, answer: dns.resolver.Answer | None, tags: set[str], *, stage: str = "unknown"
+    ) -> bool:
         if not tags:
             return False
         if self._skip_tags.intersection(tags):

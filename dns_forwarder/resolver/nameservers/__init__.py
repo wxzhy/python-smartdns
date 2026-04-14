@@ -5,10 +5,10 @@ from collections.abc import Iterable
 import dns.nameserver
 
 from dns_forwarder.config import (
-    Do53NameserverConfig,
     Do53CustomNameserverConfig,
-    DoHNameserverConfig,
+    Do53NameserverConfig,
     DoHCustomNameserverConfig,
+    DoHNameserverConfig,
     DoQNameserverConfig,
     DoTNameserverConfig,
     NameserverConfig,
@@ -38,7 +38,9 @@ def build_nameserver(config: NameserverConfig) -> dns.nameserver.Nameserver:
     raise TypeError(f"不支持的 nameserver 配置类型: {type(config).__name__}")
 
 
-def build_nameserver_map(configs: Iterable[NameserverConfig]) -> dict[str, dns.nameserver.Nameserver]:
+def build_nameserver_map(
+    configs: Iterable[NameserverConfig],
+) -> dict[str, dns.nameserver.Nameserver]:
     return {config.name: build_nameserver(config) for config in configs}
 
 

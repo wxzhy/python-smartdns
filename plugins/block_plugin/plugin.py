@@ -75,7 +75,9 @@ class BlockPlugin(Plugin):
             response_tags.update(context.upstream_results[-1].tags)
         self._apply_static_response(context, response_tags, phase="response")
 
-    def _apply_static_response(self, context: RequestContext, tags: set[str], *, phase: str) -> None:
+    def _apply_static_response(
+        self, context: RequestContext, tags: set[str], *, phase: str
+    ) -> None:
         question = context.request.question[0]
         rule = self._resolve_rule(tags, question.rdtype)
         if rule is None:

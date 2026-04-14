@@ -52,11 +52,14 @@ def parse_config_text(config_text: str) -> AppConfig:
 def dump_config_text(config: AppConfig) -> str:
     config = config.model_copy(deep=True)
     config.plugins = materialize_plugin_configs(config.plugins, config.runtime.plugin_dirs)
-    return json.dumps(
-        config.model_dump(mode="json"),
-        ensure_ascii=False,
-        indent=2,
-    ) + "\n"
+    return (
+        json.dumps(
+            config.model_dump(mode="json"),
+            ensure_ascii=False,
+            indent=2,
+        )
+        + "\n"
+    )
 
 
 def save_config(config: AppConfig, config_path: str | Path) -> None:

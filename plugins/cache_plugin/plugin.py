@@ -92,7 +92,9 @@ class CachePlugin(Plugin):
                 qname,
                 qtype,
             )
-            shared_response = await self._service.wait_for_pending_response(pending, context.request)
+            shared_response = await self._service.wait_for_pending_response(
+                pending, context.request
+            )
             if shared_response is None:
                 logger.debug(
                     "并发请求等待结束后回到缓存重查 request_id=%s qname=%s qtype=%s",
@@ -179,7 +181,10 @@ class CachePlugin(Plugin):
     @staticmethod
     def _resolve_cacheable_answer(context: RequestContext) -> dns.resolver.Answer | None:
         if context.final_answer is not None:
-            if context.final_response is not None and context.final_response.rcode() != dns.rcode.NOERROR:
+            if (
+                context.final_response is not None
+                and context.final_response.rcode() != dns.rcode.NOERROR
+            ):
                 return None
             return sync_answer_response(context.final_answer)
 

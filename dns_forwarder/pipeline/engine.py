@@ -4,9 +4,9 @@ from typing import Any
 
 import dns.message
 import dns.opcode
+import dns.rcode
 import dns.rdataclass
 import dns.rdatatype
-import dns.rcode
 import dns.resolver
 
 from dns_forwarder.config import AppConfig
@@ -48,38 +48,9 @@ class PipelineEngine:
         clientaddr: Any,
         listener_name: str,
     ) -> dns.message.Message | None:
-        if request.opcode() != dns.opcode.QUERY or len(request.question) != 1:
-            self._logger.warning(
-                "收到非法 DNS 请求 request_id=%s listener=%s client=%r opcode=%s question_count=%s",
-                request.id,
-                listener_name,
-                clientaddr,
-                request.opcode(),
-                len(request.question),
-            )
-            return make_error_response(request, dns.rcode.FORMERR)
-
-        question = request.question[0]
-        if question.rdclass != dns.rdataclass.IN:
-            self._logger.warning(
-                "收到不支持的 DNS 请求 class request_id=%s listener=%s client=%r qclass=%s qname=%s",
-                request.id,
-                listener_name,
-                clientaddr,
-                dns.rdataclass.to_text(question.rdclass),
-                question.name.to_text().rstrip("."),
-            )
-            return make_error_response(request, dns.rcode.FORMERR)
-        qname = question.name.to_text().rstrip(".").lower()
-        qtype = dns.rdatatype.to_text(question.rdtype).upper()
-        self._logger.debug(
-            "收到 DNS 请求 request_id=%s listener=%s client=%r qname=%s qtype=%s",
-            request.id,
-            listener_name,
-            clientaddr,
-            qname,
-            qtype,
-        )
+        error_response = self._validate_request_or_error(request, clientaddr, listener_name)
+        if error_response is not None:
+            return error_response
 
         context = self._build_context(
             request=request,
@@ -88,52 +59,11 @@ class PipelineEngine:
         )
 
         try:
-            await self._plugin_manager.on_request(context)
-            if context.drop_request:
-                self._logger.debug(
-                    "请求被插件丢弃 request_id=%s listener=%s client=%r tags=%s",
-                    context.request_id,
-                    context.listener_name,
-                    context.clientaddr,
-                    format_tags(context.tags),
-                )
+            if await self._run_request_phase(context):
                 return None
 
-            if context.stop_processing:
-                self._logger.debug(
-                    "请求在 request 阶段短路返回 request_id=%s listener=%s tags=%s",
-                    context.request_id,
-                    context.listener_name,
-                    format_tags(context.tags),
-                )
-            elif context.final_answer is None and context.final_response is None:
-                result = await self._dispatch_context(context)
-                self._logger.debug(
-                    "dispatcher 返回 request_id=%s upstream=%s success=%s error=%s tags=%s",
-                    context.request_id,
-                    result.upstream_name,
-                    result.success,
-                    type(result.error).__name__ if result.error is not None else "",
-                    format_tags(result.tags),
-                )
-                await self._plugin_manager.on_upstream_response(context, result)
-                if context.final_answer is None and context.final_response is None:
-                    if result.answer is not None:
-                        context.final_answer = result.answer
-                    elif isinstance(result.error, dns.resolver.NXDOMAIN):
-                        context.final_response = make_error_response(request, dns.rcode.NXDOMAIN)
-
-            if not context.stop_processing:
-                await self._plugin_manager.on_response(context)
-                if context.drop_request:
-                    self._logger.debug(
-                        "响应阶段被插件丢弃 request_id=%s listener=%s client=%r tags=%s",
-                        context.request_id,
-                        context.listener_name,
-                        context.clientaddr,
-                        format_tags(context.tags),
-                    )
-                    return None
+            if await self._run_response_phase(context):
+                return None
 
             self._finalize_context(context)
             final_result_tags = (
@@ -163,6 +93,104 @@ class PipelineEngine:
                 context.clientaddr,
             )
             return make_error_response(request, dns.rcode.SERVFAIL)
+
+    def _validate_request_or_error(
+        self,
+        request: dns.message.Message,
+        clientaddr: Any,
+        listener_name: str,
+    ) -> dns.message.Message | None:
+        if request.opcode() != dns.opcode.QUERY or len(request.question) != 1:
+            self._logger.warning(
+                "收到非法 DNS 请求 request_id=%s listener=%s client=%r opcode=%s question_count=%s",
+                request.id,
+                listener_name,
+                clientaddr,
+                request.opcode(),
+                len(request.question),
+            )
+            return make_error_response(request, dns.rcode.FORMERR)
+
+        question = request.question[0]
+        if question.rdclass != dns.rdataclass.IN:
+            self._logger.warning(
+                "收到不支持的 DNS 请求 class request_id=%s listener=%s client=%r qclass=%s qname=%s",
+                request.id,
+                listener_name,
+                clientaddr,
+                dns.rdataclass.to_text(question.rdclass),
+                question.name.to_text().rstrip("."),
+            )
+            return make_error_response(request, dns.rcode.FORMERR)
+
+        qname = question.name.to_text().rstrip(".").lower()
+        qtype = dns.rdatatype.to_text(question.rdtype).upper()
+        self._logger.debug(
+            "收到 DNS 请求 request_id=%s listener=%s client=%r qname=%s qtype=%s",
+            request.id,
+            listener_name,
+            clientaddr,
+            qname,
+            qtype,
+        )
+        return None
+
+    async def _run_request_phase(self, context: RequestContext) -> bool:
+        await self._plugin_manager.on_request(context)
+        if context.drop_request:
+            self._logger.debug(
+                "请求被插件丢弃 request_id=%s listener=%s client=%r tags=%s",
+                context.request_id,
+                context.listener_name,
+                context.clientaddr,
+                format_tags(context.tags),
+            )
+            return True
+
+        if context.stop_processing:
+            self._logger.debug(
+                "请求在 request 阶段短路返回 request_id=%s listener=%s tags=%s",
+                context.request_id,
+                context.listener_name,
+                format_tags(context.tags),
+            )
+            return False
+
+        if context.final_answer is not None or context.final_response is not None:
+            return False
+
+        result = await self._dispatch_context(context)
+        self._logger.debug(
+            "dispatcher 返回 request_id=%s upstream=%s success=%s error=%s tags=%s",
+            context.request_id,
+            result.upstream_name,
+            result.success,
+            type(result.error).__name__ if result.error is not None else "",
+            format_tags(result.tags),
+        )
+        await self._plugin_manager.on_upstream_response(context, result)
+        if context.final_answer is None and context.final_response is None:
+            if result.answer is not None:
+                context.final_answer = result.answer
+            elif isinstance(result.error, dns.resolver.NXDOMAIN):
+                context.final_response = make_error_response(context.request, dns.rcode.NXDOMAIN)
+        return False
+
+    async def _run_response_phase(self, context: RequestContext) -> bool:
+        if context.stop_processing:
+            return False
+
+        await self._plugin_manager.on_response(context)
+        if context.drop_request:
+            self._logger.debug(
+                "响应阶段被插件丢弃 request_id=%s listener=%s client=%r tags=%s",
+                context.request_id,
+                context.listener_name,
+                context.clientaddr,
+                format_tags(context.tags),
+            )
+            return True
+        return False
 
     def _build_context(
         self,
@@ -233,9 +261,7 @@ class PipelineEngine:
     ) -> dns.resolver.Answer:
         signature = (qname, qtype)
         if signature in context._nested_resolve_chain:
-            raise NestedResolveRecursionError(
-                f"检测到内部解析递归 qname={qname} qtype={qtype}"
-            )
+            raise NestedResolveRecursionError(f"检测到内部解析递归 qname={qname} qtype={qtype}")
         if len(context._nested_resolve_chain) >= context._nested_resolve_max_depth:
             raise NestedResolveRecursionError(
                 f"内部解析超过最大递归深度({context._nested_resolve_max_depth})"
@@ -281,20 +307,28 @@ class PipelineEngine:
 
     def _finalize_context(self, context: RequestContext) -> None:
         if context.final_answer is None and context.final_response is not None:
-            context.final_answer = build_answer_from_response(context.request, context.final_response)
+            context.final_answer = build_answer_from_response(
+                context.request, context.final_response
+            )
             return
 
         if context.final_response is None and context.final_answer is not None:
             sync_answer_response(context.final_answer)
-            context.final_response = clone_response_for_request(context.final_answer.response, context.request)
+            context.final_response = clone_response_for_request(
+                context.final_answer.response, context.request
+            )
             return
 
         if context.final_answer is None and context.final_response is None:
             self._logger.error("未生成最终答案 request_id=%s，使用 SERVFAIL", context.request_id)
             context.final_response = make_error_response(context.request, dns.rcode.SERVFAIL)
-            context.final_answer = build_answer_from_response(context.request, context.final_response)
+            context.final_answer = build_answer_from_response(
+                context.request, context.final_response
+            )
             return
 
         if context.final_answer is not None and context.final_response is not None:
             sync_answer_response(context.final_answer)
-            context.final_response = clone_response_for_request(context.final_answer.response, context.request)
+            context.final_response = clone_response_for_request(
+                context.final_answer.response, context.request
+            )

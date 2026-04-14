@@ -127,7 +127,14 @@ def test_parse_config_text_accepts_all_supported_nameserver_protocols() -> None:
     config_dict["upstreams"] = [
         {
             "name": "mixed",
-            "nameservers": ["udp-ns", "udp-custom-ns", "doh-ns", "doh-custom-ns", "dot-ns", "doq-ns"],
+            "nameservers": [
+                "udp-ns",
+                "udp-custom-ns",
+                "doh-ns",
+                "doh-custom-ns",
+                "dot-ns",
+                "doq-ns",
+            ],
         }
     ]
     config_dict["groups"][0]["upstreams"] = ["mixed"]
@@ -333,16 +340,30 @@ def test_build_config_json_schema_includes_available_plugin_schemas() -> None:
 
     plugin_schema = schema["$defs"]["PluginConfig"]
     options = plugin_schema["oneOf"]
-    sample_option = next(item for item in options if item["properties"]["module"]["const"] == "sample_plugin")
-    block_option = next(item for item in options if item["properties"]["module"]["const"] == "block_plugin")
-    cache_option = next(item for item in options if item["properties"]["module"]["const"] == "cache_plugin")
+    sample_option = next(
+        item for item in options if item["properties"]["module"]["const"] == "sample_plugin"
+    )
+    block_option = next(
+        item for item in options if item["properties"]["module"]["const"] == "block_plugin"
+    )
+    cache_option = next(
+        item for item in options if item["properties"]["module"]["const"] == "cache_plugin"
+    )
     cloudflare_ech_option = next(
         item for item in options if item["properties"]["module"]["const"] == "cloudflare_ech_plugin"
     )
-    https_option = next(item for item in options if item["properties"]["module"]["const"] == "https_plugin")
-    tag_option = next(item for item in options if item["properties"]["module"]["const"] == "tag_plugin")
-    ip_filter_option = next(item for item in options if item["properties"]["module"]["const"] == "ip_filter_plugin")
-    ip_replace_option = next(item for item in options if item["properties"]["module"]["const"] == "ip_replace_plugin")
+    https_option = next(
+        item for item in options if item["properties"]["module"]["const"] == "https_plugin"
+    )
+    tag_option = next(
+        item for item in options if item["properties"]["module"]["const"] == "tag_plugin"
+    )
+    ip_filter_option = next(
+        item for item in options if item["properties"]["module"]["const"] == "ip_filter_plugin"
+    )
+    ip_replace_option = next(
+        item for item in options if item["properties"]["module"]["const"] == "ip_replace_plugin"
+    )
 
     assert sample_option["title"] == "Sample Plugin"
     assert "domains" in sample_option["properties"]["config"]["properties"]
@@ -353,7 +374,9 @@ def test_build_config_json_schema_includes_available_plugin_schemas() -> None:
     block_rule_ref = block_option["properties"]["config"]["properties"]["rules"]["items"]["$ref"]
     block_rule_name = block_rule_ref.removeprefix("#/$defs/")
     assert "block_other" in schema["$defs"][block_rule_name]["properties"]
-    speedtest_option = next(item for item in options if item["properties"]["module"]["const"] == "speedtest_plugin")
+    speedtest_option = next(
+        item for item in options if item["properties"]["module"]["const"] == "speedtest_plugin"
+    )
     assert cache_option["properties"]["enabled"]["default"] is False
     assert cache_option["default"]["enabled"] is False
     assert cache_option["default"]["config"] == {"max_size": 100000}
@@ -369,7 +392,9 @@ def test_build_config_json_schema_includes_available_plugin_schemas() -> None:
     assert https_option["title"] == "HTTPS Plugin"
     assert https_option["default"]["config"] == {}
     assert "fallback_rules" in speedtest_option["properties"]["config"]["properties"]
-    fallback_rule_ref = speedtest_option["properties"]["config"]["properties"]["fallback_rules"]["items"]["$ref"]
+    fallback_rule_ref = speedtest_option["properties"]["config"]["properties"]["fallback_rules"][
+        "items"
+    ]["$ref"]
     fallback_rule_name = fallback_rule_ref.removeprefix("#/$defs/")
     assert "exclude_tags" in schema["$defs"][fallback_rule_name]["properties"]
     assert tag_option["properties"]["config"]["type"] == "object"

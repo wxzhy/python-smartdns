@@ -11,7 +11,6 @@ from .base import BaseUpstreamResolver
 from .nameservers import build_nameserver_map
 from .upstream import UpstreamResolver
 
-
 logger = get_logger("resolver.manager")
 
 
@@ -37,7 +36,9 @@ class ResolverManager:
     async def resolve(self, upstream_name: str, context: RequestContext) -> UpstreamResult:
         custom_resolver = self._plugin_registry.resolver_registry.get(upstream_name)
         if custom_resolver is not None:
-            logger.debug("使用插件 resolver request_id=%s upstream=%s", context.request_id, upstream_name)
+            logger.debug(
+                "使用插件 resolver request_id=%s upstream=%s", context.request_id, upstream_name
+            )
             return await custom_resolver.resolve(context)
         return await self._resolvers[upstream_name].resolve(context)
 

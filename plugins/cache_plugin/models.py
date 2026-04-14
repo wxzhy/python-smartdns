@@ -4,7 +4,6 @@ from dataclasses import dataclass
 
 import dns.resolver
 
-
 CACHE_CONTEXT_KEY = "cache.context"
 CACHE_SERVICE_KEY = "cache.service"
 

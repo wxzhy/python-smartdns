@@ -183,7 +183,9 @@ async def test_doh_endpoint_does_not_require_webui_basic_auth(tmp_path: Path) ->
 
     config_data = json.loads(config_path.read_text(encoding="utf-8"))
     config_data["webui"]["enabled"] = True
-    config_path.write_text(json.dumps(config_data, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    config_path.write_text(
+        json.dumps(config_data, ensure_ascii=False, indent=2) + "\n", encoding="utf-8"
+    )
     await manager.reload()
     app = create_webui_app(manager)
 

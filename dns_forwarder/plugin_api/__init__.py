@@ -1,4 +1,11 @@
-from .base import ContextRegistration, EmptyModel, LoadedPlugin, Plugin, PluginManager, PluginRegistry
+from .base import (
+    ContextRegistration,
+    EmptyModel,
+    LoadedPlugin,
+    Plugin,
+    PluginManager,
+    PluginRegistry,
+)
 from .catalog import (
     PluginCatalogEntry,
     discover_available_plugins,

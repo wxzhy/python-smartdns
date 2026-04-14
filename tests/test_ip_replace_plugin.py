@@ -17,7 +17,12 @@ from dns_forwarder.pipeline import RequestContext, UpstreamResult, build_answer_
 from dns_forwarder.pipeline.engine import PipelineEngine
 from dns_forwarder.plugin_api import EmptyModel, LoadedPlugin, Plugin, PluginManager, PluginRegistry
 from plugins.cache_plugin import CachePlugin, CachePluginConfig
-from plugins.ip_replace_plugin import IpReplacePlugin, IpReplacePluginConfig, IpReplaceRuleConfig, IpReplaceService
+from plugins.ip_replace_plugin import (
+    IpReplacePlugin,
+    IpReplacePluginConfig,
+    IpReplaceRuleConfig,
+    IpReplaceService,
+)
 from plugins.tag_plugin import TagPlugin
 
 
@@ -332,7 +337,7 @@ def test_ip_replace_service_skips_non_address_answers() -> None:
     )
     request = dns.message.make_query("example.org", "TXT")
     response = dns.message.make_response(request)
-    response.answer.append(dns.rrset.from_text("example.org.", 60, "IN", "TXT", "\"hello\""))
+    response.answer.append(dns.rrset.from_text("example.org.", 60, "IN", "TXT", '"hello"'))
     answer = build_answer_from_response(request, response)
 
     changed = service.replace_answer(answer, {"proxy"})
@@ -483,7 +488,9 @@ async def test_ip_replace_plugin_skips_non_address_request_even_if_answer_is_add
         clientaddr=("127.0.0.1", 5300),
         listener_name="udp",
         final_answer=make_answer(dns.message.make_query("example.org", "A"), "198.51.100.15"),
-        upstream_results=[UpstreamResult(upstream_name="upstream-a", duration_ms=1.0, tags={"proxy"})],
+        upstream_results=[
+            UpstreamResult(upstream_name="upstream-a", duration_ms=1.0, tags={"proxy"})
+        ],
         extensions={},
     )
 

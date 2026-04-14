@@ -4,11 +4,11 @@ from typing import Awaitable, Callable
 
 import dns.message
 import dns.opcode
-import dns.rdataclass
 import dns.rcode
+import dns.rdataclass
 import dns.rdatatype
-import dns.rrset
 import dns.resolver
+import dns.rrset
 import pytest
 
 from dns_forwarder.config import AppConfig
@@ -60,7 +60,8 @@ class RecordingPluginManager:
     def __init__(
         self,
         on_request: Callable[[RequestContext], Awaitable[None]] | None = None,
-        on_upstream_response: Callable[[RequestContext, UpstreamResult], Awaitable[None]] | None = None,
+        on_upstream_response: Callable[[RequestContext, UpstreamResult], Awaitable[None]]
+        | None = None,
         on_response: Callable[[RequestContext], Awaitable[None]] | None = None,
     ) -> None:
         self._on_request = on_request
@@ -95,7 +96,8 @@ class StaticResolverManager:
         self,
         config: AppConfig,
         result: UpstreamResult | None = None,
-        handlers: dict[str, Callable[[RequestContext], Awaitable[UpstreamResult]] | UpstreamResult] | None = None,
+        handlers: dict[str, Callable[[RequestContext], Awaitable[UpstreamResult]] | UpstreamResult]
+        | None = None,
     ) -> None:
         self._groups = {group.name: group for group in config.groups}
         self._handlers = handlers
@@ -173,7 +175,9 @@ def test_upstream_result_tags_are_independent_from_request_tags() -> None:
 def test_sync_answer_response_replaces_main_rrset_and_keeps_cname() -> None:
     request = dns.message.make_query("example.test", "A")
     response = dns.message.make_response(request)
-    response.answer.append(dns.rrset.from_text("example.test.", 30, "IN", "CNAME", "target.example."))
+    response.answer.append(
+        dns.rrset.from_text("example.test.", 30, "IN", "CNAME", "target.example.")
+    )
     response.answer.append(dns.rrset.from_text("target.example.", 30, "IN", "A", "203.0.113.10"))
     answer = build_answer_from_response(request, response)
 
@@ -189,7 +193,9 @@ def test_sync_answer_response_replaces_main_rrset_and_keeps_cname() -> None:
 def test_sync_answer_response_removes_main_rrset_but_keeps_other_rrsets() -> None:
     request = dns.message.make_query("example.test", "A")
     response = dns.message.make_response(request)
-    response.answer.append(dns.rrset.from_text("example.test.", 30, "IN", "CNAME", "target.example."))
+    response.answer.append(
+        dns.rrset.from_text("example.test.", 30, "IN", "CNAME", "target.example.")
+    )
     response.answer.append(dns.rrset.from_text("target.example.", 30, "IN", "A", "203.0.113.10"))
     answer = build_answer_from_response(request, response)
 
@@ -318,7 +324,9 @@ async def test_pipeline_syncs_rrset_change_from_on_response() -> None:
 
     async def plugin_on_response(context: RequestContext) -> None:
         assert context.final_answer is not None
-        context.final_answer.rrset = dns.rrset.from_text("example.test.", 120, "IN", "A", "192.0.2.55")
+        context.final_answer.rrset = dns.rrset.from_text(
+            "example.test.", 120, "IN", "A", "192.0.2.55"
+        )
 
     plugin_manager = RecordingPluginManager(on_response=plugin_on_response)
     resolver_manager = StaticResolverManager(
@@ -680,7 +688,9 @@ async def test_pipeline_preserves_request_tags_on_upstream_result() -> None:
     assert plugin_manager.last_context.upstream_results[0].tags == {"domain-tag"}
 
 
-async def test_pipeline_debug_logs_include_request_and_result_tags(capture_dns_logs, caplog) -> None:
+async def test_pipeline_debug_logs_include_request_and_result_tags(
+    capture_dns_logs, caplog
+) -> None:
     capture_dns_logs("DEBUG")
     config = build_config()
     request = dns.message.make_query("example.test", "A")

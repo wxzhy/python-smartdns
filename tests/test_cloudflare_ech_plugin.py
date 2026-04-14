@@ -6,8 +6,8 @@ import dns.message
 import dns.rcode
 import dns.rdatatype
 import dns.rdtypes.svcbbase
-import dns.rrset
 import dns.resolver
+import dns.rrset
 
 from dns_forwarder.config import AppConfig, PluginConfig
 from dns_forwarder.core import IPSET_CONTEXT_KEY, IPSet
@@ -19,7 +19,6 @@ from plugins.cache_plugin import CachePlugin
 from plugins.cloudflare_ech_plugin import CloudflareEchPlugin, CloudflareEchPluginConfig
 from plugins.https_plugin import HttpsPlugin
 from plugins.tag_plugin import HAS_HINT_TAG
-
 
 HTTPS_PARAM_KEY = dns.rdtypes.svcbbase.ParamKey
 
@@ -196,7 +195,10 @@ class QueryAwareResolverManager:
 
     async def resolve(self, upstream_name: str, context: RequestContext) -> UpstreamResult:
         question = context.request.question[0]
-        key = (question.name.to_text().rstrip(".").lower(), dns.rdatatype.to_text(question.rdtype).upper())
+        key = (
+            question.name.to_text().rstrip(".").lower(),
+            dns.rdatatype.to_text(question.rdtype).upper(),
+        )
         self.calls.append(key)
         return self._handlers[key]
 
@@ -228,7 +230,9 @@ async def test_cloudflare_ech_plugin_injects_ech_when_result_tags_match() -> Non
     plugin._load_cloudflare_ech.cache_clear()
 
 
-async def test_cloudflare_ech_plugin_injects_service_mode_record_into_empty_noerror_answer() -> None:
+async def test_cloudflare_ech_plugin_injects_service_mode_record_into_empty_noerror_answer() -> (
+    None
+):
     plugin = build_plugin(match_tags=["cf"])
     request = dns.message.make_query("example.test", "HTTPS")
     answer = make_empty_answer(request)
@@ -290,14 +294,21 @@ async def test_cloudflare_ech_plugin_skips_non_https_nxdomain_and_existing_ech()
 
     request_a = dns.message.make_query("example.test", "A")
     answer_a = make_address_answer(request_a, "203.0.113.10")
-    context_a = make_context(request_a, final_answer=answer_a, result_tags={"cf"}, resolve_handler=recorder.resolve)
+    context_a = make_context(
+        request_a, final_answer=answer_a, result_tags={"cf"}, resolve_handler=recorder.resolve
+    )
     await plugin.on_response(context_a)
     assert answer_a.rdtype == dns.rdatatype.A
 
     request_https = dns.message.make_query("example.test", "HTTPS")
     response_nx = dns.message.make_response(request_https)
     response_nx.set_rcode(dns.rcode.NXDOMAIN)
-    context_nx = make_context(request_https, final_response=response_nx, result_tags={"cf"}, resolve_handler=recorder.resolve)
+    context_nx = make_context(
+        request_https,
+        final_response=response_nx,
+        result_tags={"cf"},
+        resolve_handler=recorder.resolve,
+    )
     await plugin.on_response(context_nx)
 
     answer_with_ech = make_https_answer(request_https, '1 . ech="AA=="')
@@ -312,7 +323,9 @@ async def test_cloudflare_ech_plugin_skips_non_https_nxdomain_and_existing_ech()
     assert recorder.calls == []
 
 
-async def test_cloudflare_ech_plugin_skips_non_https_request_even_if_final_answer_is_https() -> None:
+async def test_cloudflare_ech_plugin_skips_non_https_request_even_if_final_answer_is_https() -> (
+    None
+):
     plugin = build_plugin(match_tags=["cf"])
     request = dns.message.make_query("example.test", "A")
     answer = make_https_answer(dns.message.make_query("example.test", "HTTPS"), '1 . alpn="h2"')
@@ -377,13 +390,17 @@ async def test_cloudflare_ech_plugin_skips_when_request_tag_matches_skip_tags() 
     assert recorder.calls == []
 
 
-async def test_cloudflare_ech_plugin_skip_tags_short_circuits_before_a_subquery_or_ech_lookup() -> None:
+async def test_cloudflare_ech_plugin_skip_tags_short_circuits_before_a_subquery_or_ech_lookup() -> (
+    None
+):
     plugin = build_plugin(match_tags=["cf"], skip_tags=["direct"])
     request = dns.message.make_query("example.test", "HTTPS")
     answer = make_https_answer(request, '1 . alpn="h2"')
     recorder = ResolveRecorder(
         {
-            ("example.test", "A"): make_address_answer(dns.message.make_query("example.test", "A"), "203.0.113.25"),
+            ("example.test", "A"): make_address_answer(
+                dns.message.make_query("example.test", "A"), "203.0.113.25"
+            ),
             ("cloudflare-ech.com", "HTTPS"): make_https_answer(
                 dns.message.make_query("cloudflare-ech.com", "HTTPS"),
                 '1 . ech="AA=="',
@@ -458,7 +475,9 @@ async def test_cloudflare_ech_plugin_uses_a_subquery_when_no_hints(tmp_path: Pat
     ipset = build_ipset(tmp_path, {"cf": ["203.0.113.0/24"]})
     recorder = ResolveRecorder(
         {
-            ("example.test", "A"): make_address_answer(dns.message.make_query("example.test", "A"), "203.0.113.25"),
+            ("example.test", "A"): make_address_answer(
+                dns.message.make_query("example.test", "A"), "203.0.113.25"
+            ),
             ("cloudflare-ech.com", "HTTPS"): make_https_answer(
                 dns.message.make_query("cloudflare-ech.com", "HTTPS"),
                 '1 . ech="AA=="',
@@ -489,7 +508,9 @@ async def test_cloudflare_ech_plugin_skips_when_a_subquery_misses_or_fails(tmp_p
     miss_answer = make_https_answer(miss_request, '1 . alpn="h2"')
     miss_recorder = ResolveRecorder(
         {
-            ("miss.test", "A"): make_address_answer(dns.message.make_query("miss.test", "A"), "198.51.100.20"),
+            ("miss.test", "A"): make_address_answer(
+                dns.message.make_query("miss.test", "A"), "198.51.100.20"
+            ),
         }
     )
     miss_context = make_context(
@@ -553,7 +574,9 @@ async def test_cloudflare_ech_plugin_skips_when_cloudflare_query_fails_or_has_no
     plugin_fail._load_cloudflare_ech.cache_clear()
 
 
-async def test_cloudflare_ech_plugin_injects_all_service_mode_records_and_keeps_alias_mode() -> None:
+async def test_cloudflare_ech_plugin_injects_all_service_mode_records_and_keeps_alias_mode() -> (
+    None
+):
     plugin = build_plugin(match_tags=["cf"])
     request = dns.message.make_query("example.test", "HTTPS")
     answer = make_https_answer(
@@ -648,7 +671,9 @@ async def test_cloudflare_ech_plugin_runs_before_https_and_cache_plugins() -> No
     cloudflare_plugin._load_cloudflare_ech.cache_clear()
 
 
-async def test_cloudflare_ech_plugin_handles_empty_noerror_answers_before_https_and_cache_plugins() -> None:
+async def test_cloudflare_ech_plugin_handles_empty_noerror_answers_before_https_and_cache_plugins() -> (
+    None
+):
     cloudflare_plugin = build_plugin(match_tags=["cf"])
     https_plugin = HttpsPlugin()
     cache_plugin = CachePlugin()

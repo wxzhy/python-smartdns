@@ -3,9 +3,6 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Iterable
 
-import dns.message
-import dns.rdatatype
-
 from dns_forwarder.config import DispatchStrategyType, RuleConfig
 from dns_forwarder.pipeline.context import RequestContext
 
@@ -27,14 +24,10 @@ class RuleEngine:
         self._default_upstream_group = default_upstream_group
 
     def select(self, context: RequestContext) -> RuleSelection:
-        question = context.request.question[0]
-        qname = question.name.to_text().rstrip(".").lower()
-        qtype = dns.rdatatype.to_text(question.rdtype).upper()
-
         for rule in self._rules:
             if not rule.enabled:
                 continue
-            if not self._matches(rule, qname, qtype, context.tags):
+            if not self._matches(rule, context.tags):
                 continue
             return RuleSelection(
                 upstream_group=rule.action.upstream_group or self._default_upstream_group,
@@ -45,23 +38,11 @@ class RuleEngine:
         return RuleSelection(upstream_group=self._default_upstream_group)
 
     @staticmethod
-    def _matches(rule: RuleConfig, qname: str, qtype: str, tags: set[str]) -> bool:
+    def _matches(rule: RuleConfig, tags: set[str]) -> bool:
         match = rule.match
 
-        if match.qtypes and qtype not in match.qtypes:
+        if match.exclude_tags and any(tag in tags for tag in match.exclude_tags):
             return False
-        if match.tags and not any(tag in tags for tag in match.tags):
+        if match.match_tags and not any(tag in tags for tag in match.match_tags):
             return False
-
-        exact_matched = not match.exact_domains or qname in match.exact_domains
-        suffix_matched = not match.suffix_domains or any(
-            qname == suffix or qname.endswith(f".{suffix}") for suffix in match.suffix_domains
-        )
-
-        if match.exact_domains and match.suffix_domains:
-            return exact_matched or suffix_matched
-        if match.exact_domains:
-            return exact_matched
-        if match.suffix_domains:
-            return suffix_matched
         return True

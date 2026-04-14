@@ -50,7 +50,6 @@ def build_config_dict() -> dict[str, object]:
         "groups": [
             {
                 "name": "default",
-                "strategy": "race",
                 "upstreams": ["local"],
             }
         ],
@@ -237,7 +236,17 @@ def test_parse_config_text_rejects_legacy_upstream_fields() -> None:
 
 def test_parse_config_text_rejects_sequential_dispatcher() -> None:
     config_dict = build_config_dict()
-    config_dict["groups"][0]["strategy"] = "sequential"
+    config_dict["rules"] = [
+        {
+            "name": "bad-dispatcher",
+            "match": {
+                "match_tags": ["proxy"],
+            },
+            "action": {
+                "dispatcher": "sequential",
+            },
+        }
+    ]
 
     with pytest.raises(ValueError):
         parse_config_dict(config_dict)
@@ -454,8 +463,8 @@ def test_config_example_json_is_valid() -> None:
     assert config.runtime.default_upstream_group == "default"
     assert len(config.nameservers) >= 4
     assert config.webui.doh_enabled is True
-    assert any(group.strategy is DispatchStrategyType.RACE for group in config.groups)
-    assert any(group.strategy is DispatchStrategyType.WAIT_ALL for group in config.groups)
+    assert any(group.name == "default" for group in config.groups)
+    assert any(rule.action.dispatcher is DispatchStrategyType.WAIT_ALL for rule in config.rules)
 
 
 def test_parse_config_text_accepts_nested_groups_and_new_dispatchers() -> None:
@@ -481,21 +490,31 @@ def test_parse_config_text_accepts_nested_groups_and_new_dispatchers() -> None:
     config_dict["groups"] = [
         {
             "name": "default",
-            "strategy": "race",
             "upstreams": ["ipv4-chain", "local-b"],
         },
         {
             "name": "ipv4-chain",
-            "strategy": "wait_all",
             "upstreams": ["local-a"],
         },
+    ]
+    config_dict["rules"] = [
+        {
+            "name": "wait-proxy",
+            "enabled": True,
+            "match": {
+                "match_tags": ["proxy"],
+            },
+            "action": {
+                "dispatcher": "wait_all",
+            },
+        }
     ]
 
     config = parse_config_dict(config_dict)
 
-    assert config.groups[0].strategy is DispatchStrategyType.RACE
-    assert config.groups[1].strategy is DispatchStrategyType.WAIT_ALL
     assert config.groups[0].upstreams == ["ipv4-chain", "local-b"]
+    assert config.groups[1].upstreams == ["local-a"]
+    assert config.rules[0].action.dispatcher is DispatchStrategyType.WAIT_ALL
 
 
 def test_parse_config_text_accepts_rule_dispatcher_override_without_group_override() -> None:
@@ -505,9 +524,7 @@ def test_parse_config_text_accepts_rule_dispatcher_override_without_group_overri
             "name": "wait-addresses",
             "enabled": True,
             "match": {
-                "exact_domains": [],
-                "suffix_domains": ["example.org"],
-                "qtypes": ["A"],
+                "match_tags": ["proxy"],
             },
             "action": {
                 "dispatcher": "wait_all",
@@ -528,10 +545,8 @@ def test_parse_config_text_accepts_rule_tag_matcher() -> None:
             "name": "tagged",
             "enabled": True,
             "match": {
-                "exact_domains": [],
-                "suffix_domains": [],
-                "qtypes": ["A"],
-                "tags": ["proxy", "proxy", "domestic"],
+                "match_tags": ["proxy", "proxy", "domestic"],
+                "exclude_tags": ["direct", "direct"],
             },
             "action": {
                 "dispatcher": "wait_all",
@@ -541,7 +556,8 @@ def test_parse_config_text_accepts_rule_tag_matcher() -> None:
 
     config = parse_config_dict(config_dict)
 
-    assert config.rules[0].match.tags == ["proxy", "domestic"]
+    assert config.rules[0].match.match_tags == ["proxy", "domestic"]
+    assert config.rules[0].match.exclude_tags == ["direct"]
 
 
 def test_parse_config_text_accepts_tree_root_config() -> None:
@@ -564,9 +580,7 @@ def test_parse_config_text_rejects_empty_rule_action() -> None:
             "name": "invalid-action",
             "enabled": True,
             "match": {
-                "exact_domains": ["example.org"],
-                "suffix_domains": [],
-                "qtypes": ["A"],
+                "match_tags": ["proxy"],
             },
             "action": {},
         }
@@ -582,12 +596,10 @@ def test_parse_config_text_rejects_group_upstream_name_conflict() -> None:
     config_dict["groups"] = [
         {
             "name": "default",
-            "strategy": "race",
             "upstreams": ["shared"],
         },
         {
             "name": "shared",
-            "strategy": "wait_all",
             "upstreams": ["default"],
         },
     ]
@@ -601,12 +613,10 @@ def test_parse_config_text_rejects_group_cycles() -> None:
     config_dict["groups"] = [
         {
             "name": "default",
-            "strategy": "race",
             "upstreams": ["nested"],
         },
         {
             "name": "nested",
-            "strategy": "wait_all",
             "upstreams": ["default", "local"],
         },
     ]

@@ -31,7 +31,14 @@ class RaceDispatchStrategy(DispatchStrategy):
         registry: "DispatcherRegistry",
     ) -> UpstreamResult:
         tasks = [
-            asyncio.create_task(registry.dispatch_target(context, target_name, resolver_manager))
+            asyncio.create_task(
+                registry.dispatch_target(
+                    context,
+                    target_name,
+                    self.strategy_type,
+                    resolver_manager,
+                )
+            )
             for target_name in group.upstreams
         ]
         failures: list[UpstreamResult] = []

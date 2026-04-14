@@ -63,7 +63,6 @@ def write_config(
         "groups": [
             {
                 "name": "default",
-                "strategy": "race",
                 "upstreams": ["local"],
             }
         ],

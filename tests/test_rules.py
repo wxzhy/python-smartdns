@@ -13,8 +13,9 @@ from dns_forwarder.rules import RuleEngine
 
 
 class NullPluginManager:
-    def __init__(self) -> None:
+    def __init__(self, request_tags: set[str] | None = None) -> None:
         self.last_context: RequestContext | None = None
+        self._request_tags = set() if request_tags is None else set(request_tags)
 
     def build_context_extensions(self) -> dict[str, object]:
         return {}
@@ -24,6 +25,7 @@ class NullPluginManager:
 
     async def on_request(self, context: RequestContext) -> None:
         self.last_context = context
+        context.tags.update(self._request_tags)
 
     async def on_upstream_response(self, context: RequestContext, result: UpstreamResult) -> None:
         self.last_context = context
@@ -85,9 +87,7 @@ def test_rule_engine_returns_default_group_when_no_rule_matches() -> None:
         {
             "name": "only-txt",
             "match": {
-                "exact_domains": [],
-                "suffix_domains": ["example.org"],
-                "qtypes": ["TXT"],
+                "match_tags": ["proxy"],
             },
             "action": {
                 "dispatcher": "wait_all",
@@ -96,7 +96,7 @@ def test_rule_engine_returns_default_group_when_no_rule_matches() -> None:
     )
     engine = RuleEngine([rule], "default")
 
-    selection = engine.select(_build_context("www.example.org", "A"))
+    selection = engine.select(_build_context("www.example.org", "A", tags={"direct"}))
 
     assert selection.rule_name is None
     assert selection.upstream_group == "default"
@@ -108,9 +108,7 @@ def test_rule_engine_allows_dispatcher_override_without_group_override() -> None
         {
             "name": "wait-addresses",
             "match": {
-                "exact_domains": [],
-                "suffix_domains": ["example.org"],
-                "qtypes": ["A", "AAAA"],
+                "match_tags": ["proxy"],
             },
             "action": {
                 "dispatcher": "wait_all",
@@ -119,7 +117,7 @@ def test_rule_engine_allows_dispatcher_override_without_group_override() -> None
     )
     engine = RuleEngine([rule], "default")
 
-    selection = engine.select(_build_context("www.example.org", "A"))
+    selection = engine.select(_build_context("www.example.org", "A", tags={"proxy"}))
 
     assert selection.rule_name == "wait-addresses"
     assert selection.upstream_group == "default"
@@ -131,10 +129,7 @@ def test_rule_engine_matches_tags_with_any_of_semantics() -> None:
         {
             "name": "tagged-traffic",
             "match": {
-                "exact_domains": [],
-                "suffix_domains": [],
-                "qtypes": ["A"],
-                "tags": ["proxy", "domestic"],
+                "match_tags": ["proxy", "domestic"],
             },
             "action": {
                 "dispatcher": "wait_all",
@@ -154,10 +149,7 @@ def test_rule_engine_ignores_ip_only_tags_not_present_on_request_context() -> No
         {
             "name": "ip-tag-only",
             "match": {
-                "exact_domains": [],
-                "suffix_domains": [],
-                "qtypes": ["A"],
-                "tags": ["from-ipset"],
+                "match_tags": ["from-ipset"],
             },
             "action": {
                 "dispatcher": "wait_all",
@@ -167,6 +159,27 @@ def test_rule_engine_ignores_ip_only_tags_not_present_on_request_context() -> No
     engine = RuleEngine([rule], "default")
 
     selection = engine.select(_build_context("www.example.org", "A"))
+
+    assert selection.rule_name is None
+    assert selection.dispatcher is None
+
+
+def test_rule_engine_honors_exclude_tags() -> None:
+    rule = RuleConfig.model_validate(
+        {
+            "name": "proxy-only",
+            "match": {
+                "match_tags": ["proxy"],
+                "exclude_tags": ["direct"],
+            },
+            "action": {
+                "dispatcher": "wait_all",
+            },
+        }
+    )
+    engine = RuleEngine([rule], "default")
+
+    selection = engine.select(_build_context("www.example.org", "A", tags={"proxy", "direct"}))
 
     assert selection.rule_name is None
     assert selection.dispatcher is None
@@ -195,7 +208,6 @@ async def test_pipeline_uses_dispatcher_override_from_matched_rule() -> None:
             "groups": [
                 {
                     "name": "default",
-                    "strategy": "race",
                     "upstreams": ["slow-finish-fast-rtt", "fast-finish-slow-rtt"],
                 },
             ],
@@ -204,9 +216,7 @@ async def test_pipeline_uses_dispatcher_override_from_matched_rule() -> None:
                     "name": "wait-a-records",
                     "enabled": True,
                     "match": {
-                        "exact_domains": [],
-                        "suffix_domains": ["example.org"],
-                        "qtypes": ["A"],
+                        "match_tags": ["wait-all"],
                     },
                     "action": {
                         "dispatcher": "wait_all",
@@ -234,7 +244,7 @@ async def test_pipeline_uses_dispatcher_override_from_matched_rule() -> None:
             ),
         },
     )
-    plugin_manager = NullPluginManager()
+    plugin_manager = NullPluginManager({"wait-all"})
     engine = PipelineEngine(config, resolver_manager, DispatcherRegistry(), plugin_manager)
 
     response = await engine.handle_message(

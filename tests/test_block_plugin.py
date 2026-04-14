@@ -12,7 +12,7 @@ from dns_forwarder.core import DOMAINSET_CONTEXT_KEY, DomainSet
 from dns_forwarder.dispatcher import DispatcherRegistry
 from dns_forwarder.pipeline import RequestContext, UpstreamResult, build_answer_from_response
 from dns_forwarder.pipeline.engine import PipelineEngine
-from dns_forwarder.plugin_api import LoadedPlugin, PluginManager, PluginRegistry
+from dns_forwarder.plugin_api import EmptyModel, LoadedPlugin, Plugin, PluginManager, PluginRegistry
 from plugins.block_plugin import BlockPlugin, BlockPluginConfig, BlockPluginRuleConfig
 from plugins.tag_plugin import TagPlugin
 
@@ -47,7 +47,7 @@ def build_config() -> AppConfig:
                 },
             ],
             "groups": [
-                {"name": "default", "strategy": "race", "upstreams": ["upstream-a"]},
+                {"name": "default", "upstreams": ["upstream-a"]},
             ],
             "rules": [],
             "plugins": [],
@@ -122,6 +122,48 @@ def build_rule(
     )
 
 
+class RequestTaggingPlugin(Plugin):
+    config_model = EmptyModel
+    variables_model = EmptyModel
+
+    def __init__(self, tags: set[str]) -> None:
+        super().__init__()
+        self.name = "request-tagging-plugin"
+        self.request_order = -100
+        self._tags = set(tags)
+
+    async def on_request(self, context: RequestContext) -> None:
+        context.tags.update(self._tags)
+
+
+class RecordingPlugin(Plugin):
+    config_model = EmptyModel
+    variables_model = EmptyModel
+
+    def __init__(self, name: str, *, request_order: int = 0, response_order: int = 0) -> None:
+        super().__init__()
+        self.name = name
+        self.request_order = request_order
+        self.response_order = response_order
+        self.request_calls = 0
+        self.response_calls = 0
+
+    async def on_request(self, context: RequestContext) -> None:
+        self.request_calls += 1
+
+    async def on_response(self, context: RequestContext) -> None:
+        self.response_calls += 1
+
+
+def make_loaded_plugin(instance: Plugin) -> LoadedPlugin:
+    return LoadedPlugin(
+        instance=instance,
+        config=instance.runtime_config,
+        variables=instance.runtime_variables,
+        raw_config=PluginConfig(name=instance.name, module=instance.name),
+    )
+
+
 def test_block_plugin_rule_config_requires_at_least_one_address_family() -> None:
     with pytest.raises(ValidationError, match="至少需要一个 IPv4、IPv6 地址或启用 block_other"):
         BlockPluginRuleConfig(match_tags=["blackhole"])
@@ -166,6 +208,7 @@ async def test_block_plugin_short_circuits_request_for_a() -> None:
     assert context.final_answer.rrset is not None
     assert set(answer_addresses(context.final_answer)) == {"127.0.0.1", "127.0.0.2"}
     assert context.final_answer.rrset.ttl == 7200
+    assert context.stop_processing is True
 
 
 async def test_block_plugin_short_circuits_request_for_aaaa() -> None:
@@ -237,6 +280,7 @@ async def test_block_plugin_blocks_non_address_query_when_block_other_enabled() 
     assert context.final_response.answer == []
     assert context.final_answer is not None
     assert context.final_answer.rrset is None
+    assert context.stop_processing is True
 
 
 async def test_block_plugin_rewrites_final_response_for_matching_result_tags() -> None:
@@ -271,6 +315,7 @@ async def test_block_plugin_rewrites_final_response_for_matching_result_tags() -
     assert context.final_answer.rrset is not None
     assert set(answer_addresses(context.final_answer)) == {"127.0.0.1", "127.0.0.2"}
     assert context.final_answer.rrset.ttl == 600
+    assert context.stop_processing is True
 
 
 async def test_block_plugin_rewrites_non_address_response_to_empty_noerror_when_block_other_enabled() -> (
@@ -307,6 +352,7 @@ async def test_block_plugin_rewrites_non_address_response_to_empty_noerror_when_
     assert context.final_response.answer == []
     assert context.final_answer is not None
     assert context.final_answer.rrset is None
+    assert context.stop_processing is True
 
 
 async def test_block_plugin_honors_exclude_tags() -> None:
@@ -446,3 +492,89 @@ async def test_block_plugin_works_after_tag_plugin_in_request_phase(tmp_path: Pa
     assert response is not None
     assert response.answer[0][0].address == "127.0.0.1"
     assert resolver_manager.calls == 0
+
+
+async def test_block_plugin_stops_later_plugins_after_static_request_answer() -> None:
+    registry = PluginRegistry()
+
+    tag_plugin = RequestTaggingPlugin({"blackhole"})
+    tag_plugin.bind(tag_plugin.config_model(), tag_plugin.variables_model())
+    await tag_plugin.setup(registry)
+
+    block_plugin = build_plugin(build_rule(match_tags=["blackhole"], ipv4_addresses=["127.0.0.1"]))
+    await block_plugin.setup(registry)
+
+    observer = RecordingPlugin("observer", request_order=100, response_order=100)
+    observer.bind(observer.config_model(), observer.variables_model())
+    await observer.setup(registry)
+
+    plugin_manager = PluginManager(
+        [
+            make_loaded_plugin(tag_plugin),
+            make_loaded_plugin(block_plugin),
+            make_loaded_plugin(observer),
+        ],
+        registry,
+    )
+    config = build_config()
+    upstream_answer = make_answer(dns.message.make_query("example.test", "A"), "A", "203.0.113.10")
+    resolver_manager = CountingResolverManager(
+        config,
+        UpstreamResult(upstream_name="upstream-a", duration_ms=1.0, answer=upstream_answer),
+    )
+    engine = PipelineEngine(config, resolver_manager, DispatcherRegistry(), plugin_manager)
+
+    response = await engine.handle_message(
+        dns.message.make_query("example.test", "A"),
+        ("127.0.0.1", 10000),
+        "udp",
+    )
+
+    assert response is not None
+    assert response.answer[0][0].address == "127.0.0.1"
+    assert resolver_manager.calls == 0
+    assert observer.request_calls == 0
+    assert observer.response_calls == 0
+
+
+async def test_block_plugin_stops_later_response_plugins_after_rewrite() -> None:
+    registry = PluginRegistry()
+
+    block_plugin = build_plugin(build_rule(match_tags=["blackhole"], ipv4_addresses=["127.0.0.1"]))
+    await block_plugin.setup(registry)
+
+    observer = RecordingPlugin("observer", response_order=1000)
+    observer.bind(observer.config_model(), observer.variables_model())
+    await observer.setup(registry)
+
+    plugin_manager = PluginManager(
+        [
+            make_loaded_plugin(block_plugin),
+            make_loaded_plugin(observer),
+        ],
+        registry,
+    )
+    config = build_config()
+    request = dns.message.make_query("example.test", "A")
+    upstream_answer = make_answer(request, "A", "203.0.113.10")
+    resolver_manager = CountingResolverManager(
+        config,
+        UpstreamResult(
+            upstream_name="upstream-a",
+            duration_ms=1.0,
+            answer=upstream_answer,
+            tags={"blackhole"},
+        ),
+    )
+    engine = PipelineEngine(config, resolver_manager, DispatcherRegistry(), plugin_manager)
+
+    response = await engine.handle_message(
+        request,
+        ("127.0.0.1", 10000),
+        "udp",
+    )
+
+    assert response is not None
+    assert response.answer[0][0].address == "127.0.0.1"
+    assert resolver_manager.calls == 1
+    assert observer.response_calls == 0

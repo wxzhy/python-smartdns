@@ -172,7 +172,7 @@ def build_config() -> AppConfig:
                 {"name": "upstream-a", "nameservers": ["local-ns"]},
             ],
             "groups": [
-                {"name": "default", "strategy": "race", "upstreams": ["upstream-a"]},
+                {"name": "default", "upstreams": ["upstream-a"]},
             ],
             "rules": [],
             "plugins": [],

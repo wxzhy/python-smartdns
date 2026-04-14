@@ -37,7 +37,7 @@ def build_config() -> AppConfig:
                 },
             ],
             "groups": [
-                {"name": "default", "strategy": "race", "upstreams": ["upstream-a"]},
+                {"name": "default", "upstreams": ["upstream-a"]},
             ],
             "rules": [],
             "plugins": [],

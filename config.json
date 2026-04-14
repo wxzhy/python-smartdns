@@ -57,7 +57,6 @@
   "groups": [
     {
       "name": "default",
-      "strategy": "race",
       "upstreams": [
         "public-default"
       ]
@@ -68,14 +67,10 @@
       "name": "sample-static",
       "enabled": false,
       "match": {
-        "exact_domains": [
-          "sample.internal"
+        "match_tags": [
+          "sample"
         ],
-        "suffix_domains": [],
-        "qtypes": [
-          "A"
-        ],
-        "tags": []
+        "exclude_tags": []
       },
       "action": {
         "upstream_group": "default"

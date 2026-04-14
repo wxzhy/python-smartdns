@@ -77,7 +77,7 @@ def write_integration_config(path: Path, upstream_port: int) -> None:
             }
         ],
         "groups": [
-            {"name": "default", "strategy": "race", "upstreams": ["local"]},
+            {"name": "default", "upstreams": ["local"]},
         ],
         "rules": [],
         "plugins": [],

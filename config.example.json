@@ -110,7 +110,6 @@
   "groups": [
     {
       "name": "default",
-      "strategy": "race",
       "upstreams": [
         "public-pool",
         "encrypted-pool"
@@ -118,7 +117,6 @@
     },
     {
       "name": "all-address-wait",
-      "strategy": "wait_all",
       "upstreams": [
         "public-pool",
         "encrypted-pool"
@@ -130,14 +128,10 @@
       "name": "example-org-addresses",
       "enabled": true,
       "match": {
-        "exact_domains": [],
-        "suffix_domains": [
-          "example.org"
+        "match_tags": [
+          "example-org"
         ],
-        "qtypes": [
-          "A",
-          "AAAA"
-        ]
+        "exclude_tags": []
       },
       "action": {
         "upstream_group": "default",
@@ -148,12 +142,12 @@
       "name": "corp-encrypted",
       "enabled": false,
       "match": {
-        "exact_domains": [],
-        "suffix_domains": [
-          "corp.internal"
+        "match_tags": [
+          "corp"
         ],
-        "qtypes": [],
-        "tags": []
+        "exclude_tags": [
+          "direct"
+        ]
       },
       "action": {
         "upstream_group": "default",
@@ -164,14 +158,11 @@
       "name": "tagged-addresses",
       "enabled": false,
       "match": {
-        "exact_domains": [],
-        "suffix_domains": [],
-        "qtypes": [
-          "A",
-          "AAAA"
-        ],
-        "tags": [
+        "match_tags": [
           "proxy"
+        ],
+        "exclude_tags": [
+          "direct"
         ]
       },
       "action": {
@@ -217,7 +208,7 @@
         "ping_count": 1,
         "ping_privileged": false,
         "response_ip_limit": 2,
-        "response_ttl_seconds": 60,
+        "response_ttl_seconds": 600,
         "skip_tags": [
           "direct",
           "local"
@@ -249,24 +240,24 @@
       "enabled": false,
       "config": {
         "rules": [
-            {
-              "match_tags": [
-                "blackhole"
-              ],
-              "exclude_tags": [
-                "direct"
-              ],
-              "ipv4_addresses": [
-                "127.0.0.1"
-              ],
-              "ipv6_addresses": [
-                "::1"
-              ],
-              "block_other": false,
-              "response_ttl_seconds": 86400
-            }
-          ]
-        },
+          {
+            "match_tags": [
+              "blackhole"
+            ],
+            "exclude_tags": [
+              "direct"
+            ],
+            "ipv4_addresses": [
+              "127.0.0.1"
+            ],
+            "ipv6_addresses": [
+              "::1"
+            ],
+            "block_other": false,
+            "response_ttl_seconds": 86400
+          }
+        ]
+      },
       "variables": {}
     },
     {

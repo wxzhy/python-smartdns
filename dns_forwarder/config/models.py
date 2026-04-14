@@ -8,14 +8,6 @@ from pydantic import BaseModel, ConfigDict, Field, RootModel, field_validator, m
 from pydantic_settings import BaseSettings, PydanticBaseSettingsSource, SettingsConfigDict
 from pydantic_settings.sources.providers.json import JsonConfigSettingsSource
 
-
-def _normalize_domain(value: str) -> str:
-    value = value.strip().rstrip(".").lower()
-    if not value:
-        raise ValueError("域名不能为空")
-    return value
-
-
 def _unique_names(items: list[Any], field_name: str) -> None:
     seen: set[str] = set()
     for item in items:
@@ -182,31 +174,14 @@ class UpstreamConfig(StrictConfigModel):
 
 class UpstreamGroupConfig(StrictConfigModel):
     name: str
-    strategy: DispatchStrategyType = DispatchStrategyType.RACE
     upstreams: list[str] = Field(min_length=1)
 
 
 class RuleMatchConfig(StrictConfigModel):
-    exact_domains: list[str] = Field(default_factory=list)
-    suffix_domains: list[str] = Field(default_factory=list)
-    qtypes: list[str] = Field(default_factory=list)
-    tags: list[str] = Field(default_factory=list)
+    match_tags: list[str] = Field(default_factory=list)
+    exclude_tags: list[str] = Field(default_factory=list)
 
-    @field_validator("exact_domains", "suffix_domains", mode="before")
-    @classmethod
-    def normalize_domains(cls, value: list[str] | None) -> list[str]:
-        if value is None:
-            return []
-        return [_normalize_domain(item) for item in value]
-
-    @field_validator("qtypes", mode="before")
-    @classmethod
-    def normalize_qtypes(cls, value: list[str] | None) -> list[str]:
-        if value is None:
-            return []
-        return [item.strip().upper() for item in value if item.strip()]
-
-    @field_validator("tags", mode="before")
+    @field_validator("match_tags", "exclude_tags", mode="before")
     @classmethod
     def normalize_tags(cls, value: list[str] | None) -> list[str]:
         if value is None:
@@ -220,12 +195,6 @@ class RuleMatchConfig(StrictConfigModel):
             seen.add(tag)
             normalized.append(tag)
         return normalized
-
-    @model_validator(mode="after")
-    def validate_any_matcher(self) -> "RuleMatchConfig":
-        if not self.exact_domains and not self.suffix_domains and not self.qtypes and not self.tags:
-            raise ValueError("规则至少需要一个匹配条件")
-        return self
 
 
 class RuleActionConfig(StrictConfigModel):

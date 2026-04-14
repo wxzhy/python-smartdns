@@ -9,7 +9,7 @@ import dns.rdataclass
 import dns.rdatatype
 import dns.resolver
 
-from dns_forwarder.config import AppConfig
+from dns_forwarder.config import AppConfig, DispatchStrategyType
 from dns_forwarder.dispatcher import DispatcherRegistry
 from dns_forwarder.logging import format_tags, get_logger
 from dns_forwarder.pipeline.context import (
@@ -225,31 +225,23 @@ class PipelineEngine:
         selection = self._rule_engine.select(context)
         context.selected_rule = selection.rule_name
         context.selected_group = selection.upstream_group
+        selected_dispatcher = selection.dispatcher or DispatchStrategyType.RACE
         self._logger.debug(
             "选择上游组 request_id=%s rule=%s group=%s dispatcher=%s tags=%s",
             context.request_id,
             context.selected_rule or "",
             context.selected_group,
-            selection.dispatcher.value if selection.dispatcher is not None else "",
+            selected_dispatcher.value,
             format_tags(context.tags),
         )
         group = self._resolver_manager.get_group(context.selected_group)
-        context.selected_dispatcher = (
-            selection.dispatcher.value if selection.dispatcher is not None else group.strategy.value
+        context.selected_dispatcher = selected_dispatcher.value
+        result = await self._dispatcher_registry.dispatch_group(
+            context,
+            group,
+            selected_dispatcher,
+            self._resolver_manager,
         )
-        if selection.dispatcher is None:
-            result = await self._dispatcher_registry.dispatch_group(
-                context,
-                group,
-                self._resolver_manager,
-            )
-        else:
-            result = await self._dispatcher_registry.dispatch_with_strategy(
-                context,
-                group,
-                selection.dispatcher,
-                self._resolver_manager,
-            )
         context.upstream_results.append(result)
         return result
 

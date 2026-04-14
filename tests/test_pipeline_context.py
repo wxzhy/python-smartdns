@@ -47,7 +47,7 @@ def build_config() -> AppConfig:
                 },
             ],
             "groups": [
-                {"name": "default", "strategy": "race", "upstreams": ["upstream-a"]},
+                {"name": "default", "upstreams": ["upstream-a"]},
             ],
             "rules": [],
             "plugins": [],
@@ -408,14 +408,14 @@ async def test_pipeline_nested_resolve_uses_empty_tags_and_keeps_parent_state_is
                 {"name": "tagged-upstream", "nameservers": ["local-ns"]},
             ],
             "groups": [
-                {"name": "default", "strategy": "race", "upstreams": ["default-upstream"]},
-                {"name": "tagged", "strategy": "race", "upstreams": ["tagged-upstream"]},
+                {"name": "default", "upstreams": ["default-upstream"]},
+                {"name": "tagged", "upstreams": ["tagged-upstream"]},
             ],
             "rules": [
                 {
                     "name": "match-tagged",
                     "enabled": True,
-                    "match": {"tags": ["domain-tag"], "qtypes": ["A"]},
+                    "match": {"match_tags": ["domain-tag"]},
                     "action": {"upstream_group": "tagged"},
                 }
             ],
@@ -529,7 +529,7 @@ async def test_pipeline_nested_resolve_supports_custom_resolver_registry() -> No
                 {"name": "custom-upstream", "nameservers": ["local-ns"]},
             ],
             "groups": [
-                {"name": "default", "strategy": "race", "upstreams": ["custom-upstream"]},
+                {"name": "default", "upstreams": ["custom-upstream"]},
             ],
             "rules": [],
             "plugins": [],
@@ -580,7 +580,7 @@ async def test_pipeline_nested_resolve_blocks_custom_resolver_recursion() -> Non
                 {"name": "custom-upstream", "nameservers": ["local-ns"]},
             ],
             "groups": [
-                {"name": "default", "strategy": "race", "upstreams": ["custom-upstream"]},
+                {"name": "default", "upstreams": ["custom-upstream"]},
             ],
             "rules": [],
             "plugins": [],
@@ -637,8 +637,8 @@ async def test_pipeline_supports_nested_dispatch_groups() -> None:
                 },
             ],
             "groups": [
-                {"name": "default", "strategy": "race", "upstreams": ["nested"]},
-                {"name": "nested", "strategy": "race", "upstreams": ["upstream-a"]},
+                {"name": "default", "upstreams": ["nested"]},
+                {"name": "nested", "upstreams": ["upstream-a"]},
             ],
             "rules": [],
             "plugins": [],

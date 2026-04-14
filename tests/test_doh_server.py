@@ -39,7 +39,6 @@ def write_config(path: Path) -> None:
         "groups": [
             {
                 "name": "default",
-                "strategy": "race",
                 "upstreams": ["local"],
             }
         ],

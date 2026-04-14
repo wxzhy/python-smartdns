@@ -33,10 +33,10 @@ class DispatcherRegistry:
         self,
         context: RequestContext,
         group: UpstreamGroupConfig,
+        strategy: DispatchStrategyType,
         resolver_manager,
     ) -> UpstreamResult:
-        strategy = self.get(group.strategy)
-        return await strategy.dispatch(context, group, resolver_manager, self)
+        return await self.get(strategy).dispatch(context, group, resolver_manager, self)
 
     async def dispatch_with_strategy(
         self,
@@ -45,27 +45,34 @@ class DispatcherRegistry:
         strategy: DispatchStrategyType,
         resolver_manager,
     ) -> UpstreamResult:
-        return await self.get(strategy).dispatch(context, group, resolver_manager, self)
+        return await self.dispatch_group(context, group, strategy, resolver_manager)
 
     async def dispatch_group_name(
         self,
         context: RequestContext,
         group_name: str,
+        strategy: DispatchStrategyType,
         resolver_manager,
     ) -> UpstreamResult:
         return await self.dispatch_group(
-            context, resolver_manager.get_group(group_name), resolver_manager
+            context, resolver_manager.get_group(group_name), strategy, resolver_manager
         )
 
     async def dispatch_target(
         self,
         context: RequestContext,
         target_name: str,
+        strategy: DispatchStrategyType,
         resolver_manager,
     ) -> UpstreamResult:
         try:
             if resolver_manager.has_group(target_name):
-                result = await self.dispatch_group_name(context, target_name, resolver_manager)
+                result = await self.dispatch_group_name(
+                    context,
+                    target_name,
+                    strategy,
+                    resolver_manager,
+                )
             else:
                 result = await resolver_manager.resolve(target_name, context)
             return inherit_request_tags(result, context.tags)

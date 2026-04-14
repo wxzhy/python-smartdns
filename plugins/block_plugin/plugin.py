@@ -97,6 +97,7 @@ class BlockPlugin(Plugin):
             )
         context.final_response = response
         context.final_answer = build_answer_from_response(context.request, response)
+        context.stop_processing = True
         logger.debug(
             "静态应答已应用 request_id=%s phase=%s qname=%s qtype=%s tags=%s address_count=%s ttl=%s block_other=%s",
             context.request_id,

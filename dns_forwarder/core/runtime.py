@@ -14,6 +14,7 @@ from dns_forwarder.plugin_api import PluginManager
 from dns_forwarder.resolver import ResolverManager
 from dns_forwarder.server import TcpDnsServer, UdpDnsServer
 from dns_forwarder.webui import WEBUI_RELOAD_ENDPOINT, ManagedUvicornServer, create_webui_app
+from plugins.query_log_plugin import QUERY_LOG_STORE_KEY, QueryLogStore
 
 from .domainset import DOMAINSET_CONTEXT_KEY, DomainSet
 from .ipset import IPSET_CONTEXT_KEY, IPSet
@@ -126,6 +127,16 @@ class RuntimeManager:
             "error": "",
         }
 
+    def get_query_log_store(self) -> QueryLogStore | None:
+        if self._state is None:
+            return None
+        registration = self._state.plugin_manager.registry.context_registry.get(QUERY_LOG_STORE_KEY)
+        if registration is None or registration.factory is not None:
+            return None
+        if not isinstance(registration.value, QueryLogStore):
+            return None
+        return registration.value
+
     async def _build_state(self) -> RuntimeState:
         config = load_config(self.config_path)
         configure_logging(config.runtime.log_level)
@@ -140,10 +151,7 @@ class RuntimeManager:
         plugin_manager = await PluginManager.build(
             config.plugins,
             config.runtime.plugin_dirs,
-            shared_contexts={
-                DOMAINSET_CONTEXT_KEY: DomainSet(config.tree_root.domain_dir),
-                IPSET_CONTEXT_KEY: IPSet(config.tree_root.ip_dir),
-            },
+            shared_contexts=self._build_shared_contexts(config),
         )
         resolver_manager = ResolverManager(config, plugin_manager.registry)
         dispatcher_registry = DispatcherRegistry()
@@ -155,6 +163,17 @@ class RuntimeManager:
             dispatcher_registry=dispatcher_registry,
             pipeline=pipeline,
         )
+
+    def _build_shared_contexts(self, config: AppConfig) -> dict[str, Any]:
+        shared_contexts: dict[str, Any] = {
+            DOMAINSET_CONTEXT_KEY: DomainSet(config.tree_root.domain_dir),
+            IPSET_CONTEXT_KEY: IPSet(config.tree_root.ip_dir),
+        }
+        if self._is_query_log_plugin_enabled(config):
+            query_log_store = self.get_query_log_store()
+            if query_log_store is not None:
+                shared_contexts[QUERY_LOG_STORE_KEY] = query_log_store
+        return shared_contexts
 
     async def _start_services(self, config: AppConfig) -> None:
         listeners: list[UdpDnsServer | TcpDnsServer] = []
@@ -206,6 +225,13 @@ class RuntimeManager:
             config.webui.port,
         )
         return listeners, webui
+
+    @staticmethod
+    def _is_query_log_plugin_enabled(config: AppConfig) -> bool:
+        return any(
+            plugin.enabled and plugin.module == "query_log_plugin"
+            for plugin in config.plugins
+        )
 
 
 def install_loop_policy(loop_policy: str) -> None:

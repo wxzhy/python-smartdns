@@ -8,6 +8,7 @@ from pathlib import Path
 
 import dns.message
 from httpx import ASGITransport, AsyncClient
+from starlette.requests import Request
 
 from dns_forwarder.core.runtime import RuntimeManager, main
 from dns_forwarder.webui import WEBUI_RELOAD_ENDPOINT, ManagedUvicornServer, create_webui_app
@@ -24,7 +25,8 @@ def write_config(
     upstream_port: int = 5301,
     webui_enabled: bool = False,
     doh_enabled: bool = False,
-    webui_port: int = 8080,
+    webui_port: int = 0,
+    query_log_enabled: bool = False,
 ) -> None:
     plugin_dir = str((Path(__file__).resolve().parents[1] / "plugins").resolve())
     data = {
@@ -80,7 +82,16 @@ def write_config(
                     "address": "127.0.0.1",
                     "ttl": 30,
                 },
-            }
+            },
+            {
+                "name": "query-log",
+                "module": "query_log_plugin",
+                "enabled": query_log_enabled,
+                "config": {
+                    "max_entries": 500,
+                },
+                "variables": {},
+            },
         ],
         "webui": {
             "enabled": webui_enabled,
@@ -226,3 +237,112 @@ def test_check_config_logs_instead_of_print(
     captured = capsys.readouterr()
     assert captured.out == ""
     assert "config ok:" in caplog.text
+
+
+async def test_webui_query_logs_page_and_api_require_auth_and_support_limit(tmp_path: Path) -> None:
+    config_path = tmp_path / "config.json"
+    write_config(config_path, webui_enabled=True, query_log_enabled=True)
+    manager = RuntimeManager(config_path)
+    await manager.load()
+    app = create_webui_app(manager)
+
+    for _ in range(3):
+        await manager.process_query(
+            dns.message.make_query("sample.internal", "A"),
+            ("127.0.0.1", 10000),
+            "udp",
+        )
+
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://testserver") as client:
+        unauthorized_page = await client.get("/queries")
+        unauthorized_api = await client.get("/api/query-logs")
+        unauthorized_stream = await client.get("/api/query-logs/stream")
+        page = await client.get("/queries", headers=_basic_auth_headers())
+        api = await client.get("/api/query-logs?limit=2", headers=_basic_auth_headers())
+
+    assert unauthorized_page.status_code == 401
+    assert unauthorized_api.status_code == 401
+    assert unauthorized_stream.status_code == 401
+    assert page.status_code == 200
+    assert "查询日志" in page.text
+    assert api.status_code == 200
+    payload = api.json()
+    assert len(payload) == 2
+    assert [item["id"] for item in payload] == [2, 3]
+    assert payload[0]["qname"] == "sample.internal"
+    assert payload[0]["rcode"] == "NOERROR"
+
+
+async def test_webui_query_logs_stream_replays_entries_after_id(tmp_path: Path) -> None:
+    config_path = tmp_path / "config.json"
+    write_config(config_path, webui_enabled=True, query_log_enabled=True)
+    manager = RuntimeManager(config_path)
+    await manager.load()
+    app = create_webui_app(manager)
+
+    for _ in range(3):
+        await manager.process_query(
+            dns.message.make_query("sample.internal", "A"),
+            ("127.0.0.1", 10000),
+            "udp",
+        )
+
+    route = next(
+        item for item in app.router.routes if getattr(item, "path", None) == "/api/query-logs/stream"
+    )
+
+    async def receive():
+        return {"type": "http.request", "body": b"", "more_body": False}
+
+    request = Request(
+        {
+            "type": "http",
+            "method": "GET",
+            "path": "/api/query-logs/stream",
+            "headers": [],
+            "query_string": b"after_id=1",
+            "client": ("127.0.0.1", 10000),
+            "server": ("testserver", 80),
+            "scheme": "http",
+            "http_version": "1.1",
+        },
+        receive=receive,
+    )
+
+    response = await route.endpoint(request=request, after_id=1)
+    assert response.media_type == "text/event-stream"
+    body_iterator = response.body_iterator
+    chunks: list[str] = []
+    async for chunk in body_iterator:
+        chunks.append(chunk.decode("utf-8") if isinstance(chunk, bytes) else chunk)
+        if len(chunks) == 2:
+            break
+    await body_iterator.aclose()
+
+    received = [
+        json.loads(chunk.split("data: ", 1)[1].strip())
+        for chunk in chunks
+    ]
+    assert [item["id"] for item in received] == [2, 3]
+
+
+async def test_webui_query_logs_routes_show_message_and_return_503_when_plugin_disabled(
+    tmp_path: Path,
+) -> None:
+    config_path = tmp_path / "config.json"
+    write_config(config_path, webui_enabled=True, query_log_enabled=False)
+    manager = RuntimeManager(config_path)
+    await manager.load()
+    app = create_webui_app(manager)
+
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://testserver") as client:
+        page = await client.get("/queries", headers=_basic_auth_headers())
+        api = await client.get("/api/query-logs", headers=_basic_auth_headers())
+        stream = await client.get("/api/query-logs/stream", headers=_basic_auth_headers())
+
+    assert page.status_code == 200
+    assert "查询日志插件未启用" in page.text
+    assert api.status_code == 503
+    assert stream.status_code == 503

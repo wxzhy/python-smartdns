@@ -19,12 +19,14 @@ class OrderedPlugin(Plugin):
         request_order: int = 0,
         upstream_response_order: int = 0,
         response_order: int = 0,
+        observe_order: int = 0,
     ) -> None:
         super().__init__()
         self.name = name
         self.request_order = request_order
         self.upstream_response_order = upstream_response_order
         self.response_order = response_order
+        self.observe_order = observe_order
         self._events = events
 
     async def on_request(self, context: RequestContext) -> None:
@@ -35,6 +37,9 @@ class OrderedPlugin(Plugin):
 
     async def on_response(self, context: RequestContext) -> None:
         self._events.append(f"response:{self.name}")
+
+    async def on_observe(self, context: RequestContext) -> None:
+        self._events.append(f"observe:{self.name}")
 
 
 def make_loaded_plugin(instance: Plugin) -> LoadedPlugin:
@@ -119,4 +124,25 @@ async def test_plugin_manager_sorts_upstream_and_response_hooks_independently() 
         "response:third",
         "response:first",
         "response:second",
+    ]
+
+
+async def test_plugin_manager_sorts_observe_hooks_independently() -> None:
+    events: list[str] = []
+    manager = PluginManager(
+        [
+            make_loaded_plugin(OrderedPlugin("first", events, observe_order=30)),
+            make_loaded_plugin(OrderedPlugin("second", events, observe_order=10)),
+            make_loaded_plugin(OrderedPlugin("third", events, observe_order=20)),
+        ],
+        PluginRegistry(),
+    )
+    context = make_context()
+
+    await manager.on_observe(context)
+
+    assert events == [
+        "observe:second",
+        "observe:third",
+        "observe:first",
     ]

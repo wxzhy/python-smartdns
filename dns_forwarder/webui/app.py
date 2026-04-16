@@ -1,13 +1,14 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import secrets
 from pathlib import Path
 from typing import TYPE_CHECKING, Annotated
 
 import uvicorn
-from fastapi import Depends, FastAPI, Form, HTTPException, Request, status
-from fastapi.responses import HTMLResponse, RedirectResponse
+from fastapi import Depends, FastAPI, Form, HTTPException, Query, Request, status
+from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse, StreamingResponse
 from fastapi.security import HTTPBasic, HTTPBasicCredentials
 from fastapi.templating import Jinja2Templates
 
@@ -20,12 +21,14 @@ from dns_forwarder.config import (
 from dns_forwarder.logging import get_logger
 from dns_forwarder.plugin_api import discover_available_plugins
 from dns_forwarder.server.doh import register_doh_routes
+from plugins.query_log_plugin import QueryLogStore
 
 TEMPLATES = Jinja2Templates(directory=str(Path(__file__).parent / "templates"))
 logger = get_logger("webui.app")
 JSONEDITOR_JS_URL = "https://cdn.jsdelivr.net/npm/jsoneditor@10.4.2/dist/jsoneditor.min.js"
 JSONEDITOR_CSS_URL = "https://cdn.jsdelivr.net/npm/jsoneditor@10.4.2/dist/jsoneditor.min.css"
 WEBUI_RELOAD_ENDPOINT = "/admin/reload"
+QUERY_LOG_PAGE_SIZE = 100
 
 if TYPE_CHECKING:
     from dns_forwarder.core.runtime import RuntimeManager
@@ -58,6 +61,15 @@ def create_webui_app(runtime_manager: "RuntimeManager") -> FastAPI:
 
     app = FastAPI(title="dns-forwarder http", docs_url=None, redoc_url=None)
 
+    def get_query_log_store() -> QueryLogStore | None:
+        return runtime_manager.get_query_log_store()
+
+    def get_query_log_store_or_503() -> QueryLogStore:
+        store = get_query_log_store()
+        if store is None:
+            raise HTTPException(status_code=503, detail="query log plugin is not enabled")
+        return store
+
     if runtime_manager.get_state().config.webui.enabled:
 
         @app.get("/", response_class=HTMLResponse, dependencies=[Depends(authorize_webui)])
@@ -66,6 +78,21 @@ def create_webui_app(runtime_manager: "RuntimeManager") -> FastAPI:
                 request=request,
                 name="index.html",
                 context=runtime_manager.get_status(),
+            )
+
+        @app.get("/queries", response_class=HTMLResponse, dependencies=[Depends(authorize_webui)])
+        async def query_logs_view(request: Request) -> HTMLResponse:
+            store = get_query_log_store()
+            return TEMPLATES.TemplateResponse(
+                request=request,
+                name="queries.html",
+                context=runtime_manager.get_status()
+                | {
+                    "query_log_enabled": store is not None,
+                    "query_logs_api_url": "/api/query-logs",
+                    "query_logs_stream_url": "/api/query-logs/stream",
+                    "page_size": QUERY_LOG_PAGE_SIZE,
+                },
             )
 
         @app.get("/config", response_class=HTMLResponse, dependencies=[Depends(authorize_webui)])
@@ -157,6 +184,40 @@ def create_webui_app(runtime_manager: "RuntimeManager") -> FastAPI:
                 )
             logger.info("手动 reload 完成 path=%s", runtime_manager.config_path)
             return RedirectResponse(url="/", status_code=303)
+
+        @app.get("/api/query-logs", dependencies=[Depends(authorize_webui)])
+        async def query_logs_api(
+            limit: Annotated[int, Query(ge=1)] = QUERY_LOG_PAGE_SIZE,
+        ) -> JSONResponse:
+            store = get_query_log_store_or_503()
+            items = await store.list_recent(min(limit, store.max_entries))
+            return JSONResponse([item.model_dump(mode="json") for item in items])
+
+        @app.get("/api/query-logs/stream", dependencies=[Depends(authorize_webui)])
+        async def query_logs_stream(
+            request: Request,
+            after_id: Annotated[int | None, Query(ge=0)] = None,
+        ) -> StreamingResponse:
+            store = get_query_log_store_or_503()
+
+            async def event_stream():
+                async for item in store.subscribe(after_id):
+                    if await request.is_disconnected():
+                        break
+                    if item is None:
+                        yield ": ping\n\n"
+                        continue
+                    payload = json.dumps(item.model_dump(mode="json"), ensure_ascii=False)
+                    yield f"id: {item.id}\nevent: query\ndata: {payload}\n\n"
+
+            return StreamingResponse(
+                event_stream(),
+                media_type="text/event-stream",
+                headers={
+                    "Cache-Control": "no-store",
+                    "X-Accel-Buffering": "no",
+                },
+            )
 
     if runtime_manager.get_state().config.webui.doh_enabled:
         register_doh_routes(app, runtime_manager, listener_name="doh")

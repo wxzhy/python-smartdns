@@ -63,6 +63,10 @@ class RequestContext:
     def __post_init__(self) -> None:
         self.request_id = self.request.id
 
+    @property
+    def is_nested_resolve(self) -> bool:
+        return bool(self._nested_resolve_chain)
+
     async def resolve(self, qname: str, qtype: str) -> dns.resolver.Answer:
         if self._resolve_handler is None:
             raise NestedResolveError("context.resolve 未初始化")

@@ -67,6 +67,7 @@ class Plugin:
     request_order: int = 0
     upstream_response_order: int = 0
     response_order: int = 0
+    observe_order: int = 0
     runtime_config: BaseModel = EmptyModel()
     runtime_variables: BaseModel = EmptyModel()
 
@@ -86,6 +87,9 @@ class Plugin:
         return None
 
     async def on_response(self, context: "RequestContext") -> None:
+        return None
+
+    async def on_observe(self, context: "RequestContext") -> None:
         return None
 
 
@@ -181,6 +185,10 @@ class PluginManager:
             await plugin.instance.on_response(context)
             if context.drop_request or context.stop_processing:
                 break
+
+    async def on_observe(self, context: "RequestContext") -> None:
+        for plugin in self._ordered_plugins("observe_order"):
+            await plugin.instance.on_observe(context)
 
     def describe(self) -> list[dict[str, Any]]:
         result: list[dict[str, Any]] = []

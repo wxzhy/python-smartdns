@@ -304,6 +304,7 @@ def test_parse_config_text_materializes_missing_plugins_as_disabled_defaults() -
         "speedtest_plugin",
         "tag_plugin",
         "ip_replace_plugin",
+        "query_log_plugin",
     } <= set(plugins_by_module)
     assert plugins_by_module["sample_plugin"].enabled is True
     assert plugins_by_module["cache_plugin"].enabled is False
@@ -340,6 +341,9 @@ def test_parse_config_text_materializes_missing_plugins_as_disabled_defaults() -
     assert plugins_by_module["ip_replace_plugin"].enabled is False
     assert plugins_by_module["ip_replace_plugin"].config == {"skip_tags": [], "rules": []}
     assert plugins_by_module["ip_replace_plugin"].variables == {}
+    assert plugins_by_module["query_log_plugin"].enabled is False
+    assert plugins_by_module["query_log_plugin"].config == {"max_entries": 500}
+    assert plugins_by_module["query_log_plugin"].variables == {}
 
 
 def test_build_config_json_schema_includes_available_plugin_schemas() -> None:
@@ -372,6 +376,9 @@ def test_build_config_json_schema_includes_available_plugin_schemas() -> None:
     )
     ip_replace_option = next(
         item for item in options if item["properties"]["module"]["const"] == "ip_replace_plugin"
+    )
+    query_log_option = next(
+        item for item in options if item["properties"]["module"]["const"] == "query_log_plugin"
     )
 
     assert sample_option["title"] == "Sample Plugin"
@@ -419,6 +426,8 @@ def test_build_config_json_schema_includes_available_plugin_schemas() -> None:
     assert "rules" in ip_replace_option["properties"]["config"]["properties"]
     assert "skip_tags" in ip_replace_option["properties"]["config"]["properties"]
     assert ip_replace_option["default"]["config"] == {"skip_tags": [], "rules": []}
+    assert query_log_option["title"] == "Query Log Plugin"
+    assert query_log_option["default"]["config"] == {"max_entries": 500}
 
 
 def test_discover_available_plugins_lists_installed_plugins() -> None:
@@ -433,6 +442,7 @@ def test_discover_available_plugins_lists_installed_plugins() -> None:
         "https_plugin",
         "ip_filter_plugin",
         "ip_replace_plugin",
+        "query_log_plugin",
         "sample_plugin",
         "speedtest_plugin",
         "tag_plugin",

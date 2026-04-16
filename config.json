@@ -138,7 +138,7 @@
               "ads"
             ],
             "ipv4_addresses": [
-              "10.10.0.2",
+              "192.168.8.1",
               "10.10.0.3"
             ],
             "ipv6_addresses": [
@@ -285,6 +285,15 @@
       "module": "https_plugin",
       "enabled": true,
       "config": {},
+      "variables": {}
+    },
+    {
+      "name": "query-log",
+      "module": "query_log_plugin",
+      "enabled": true,
+      "config": {
+        "max_entries": 500
+      },
       "variables": {}
     }
   ],

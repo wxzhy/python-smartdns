@@ -1,0 +1,144 @@
+{% extends "base.html" %}
+{% block head %}
+<style>
+  table { width: 100%; border-collapse: collapse; }
+  th, td { padding: 0.6rem; border-bottom: 1px solid #d1d5db; text-align: left; vertical-align: top; }
+  th { background: #f3f4f6; }
+  code { font-family: Consolas, monospace; font-size: 0.92rem; }
+</style>
+{% endblock %}
+{% block body %}
+<h1>查询日志</h1>
+
+<div class="panel">
+  <div><a href="/">返回首页</a></div>
+</div>
+
+{% if not query_log_enabled %}
+<div class="panel">
+  <div class="error">查询日志插件未启用，当前无法提供实时日志。</div>
+</div>
+{% else %}
+<div class="panel">
+  <div class="muted">页面只保留最近 {{ page_size }} 条日志，并通过 SSE 实时刷新。</div>
+  <div id="stream-status" class="muted" style="margin-top: 0.5rem;">正在加载最近查询...</div>
+</div>
+
+<div class="panel">
+  <table>
+    <thead>
+      <tr>
+        <th>时间</th>
+        <th>监听器</th>
+        <th>域名</th>
+        <th>类型</th>
+        <th>Rcode</th>
+        <th>结果</th>
+        <th>上游</th>
+        <th>耗时</th>
+      </tr>
+    </thead>
+    <tbody id="query-log-rows">
+      <tr id="query-log-empty">
+        <td colspan="8" class="muted">暂无查询日志。</td>
+      </tr>
+    </tbody>
+  </table>
+</div>
+
+<script>
+  const apiUrl = {{ query_logs_api_url | tojson }};
+  const streamUrl = {{ query_logs_stream_url | tojson }};
+  const pageSize = {{ page_size | tojson }};
+  const rows = document.getElementById("query-log-rows");
+  const emptyRow = document.getElementById("query-log-empty");
+  const streamStatus = document.getElementById("stream-status");
+  let lastId = null;
+
+  function formatTimestamp(timestampMs) {
+    const date = new Date(timestampMs);
+    const pad = (value, width = 2) => String(value).padStart(width, "0");
+    return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())} `
+      + `${pad(date.getHours())}:${pad(date.getMinutes())}:${pad(date.getSeconds())}.`
+      + `${pad(date.getMilliseconds(), 3)}`;
+  }
+
+  function formatDuration(durationMs) {
+    if (durationMs === null || durationMs === undefined) {
+      return "-";
+    }
+    return `${durationMs.toFixed(2)} ms`;
+  }
+
+  function hideEmptyRow() {
+    if (emptyRow) {
+      emptyRow.remove();
+    }
+  }
+
+  function trimRows() {
+    while (rows.children.length > pageSize) {
+      rows.removeChild(rows.firstElementChild);
+    }
+  }
+
+  function appendRow(item) {
+    hideEmptyRow();
+    lastId = item.id;
+    const row = document.createElement("tr");
+    row.dataset.entryId = item.id;
+    row.innerHTML = `
+      <td><code>${formatTimestamp(item.timestamp_ms)}</code></td>
+      <td>${item.listener}</td>
+      <td><code>${item.qname}</code></td>
+      <td>${item.qtype}</td>
+      <td>${item.rcode}</td>
+      <td>${item.result_summary}</td>
+      <td>${item.upstream ?? "-"}</td>
+      <td>${formatDuration(item.duration_ms)}</td>
+    `;
+    rows.appendChild(row);
+    trimRows();
+  }
+
+  async function loadInitialLogs() {
+    const response = await fetch(`${apiUrl}?limit=${pageSize}`);
+    if (!response.ok) {
+      throw new Error(`加载查询日志失败: ${response.status}`);
+    }
+    const items = await response.json();
+    rows.innerHTML = "";
+    if (!items.length) {
+      rows.appendChild(emptyRow);
+      return;
+    }
+    for (const item of items) {
+      appendRow(item);
+    }
+  }
+
+  function connectStream() {
+    const url = lastId === null ? streamUrl : `${streamUrl}?after_id=${lastId}`;
+    const source = new EventSource(url);
+    source.addEventListener("query", (event) => {
+      appendRow(JSON.parse(event.data));
+      streamStatus.textContent = "SSE 已连接，正在实时刷新。";
+    });
+    source.onerror = () => {
+      streamStatus.textContent = "SSE 连接中断，浏览器将自动重试。";
+    };
+  }
+
+  (async () => {
+    try {
+      await loadInitialLogs();
+      streamStatus.textContent = "最近查询已加载，正在建立 SSE 连接...";
+      connectStream();
+    } catch (error) {
+      streamStatus.textContent = error.message;
+      streamStatus.className = "error";
+    }
+  })();
+</script>
+{% endif %}
+{% endblock %}

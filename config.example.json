@@ -197,6 +197,15 @@
       "variables": {}
     },
     {
+      "name": "query-log",
+      "module": "query_log_plugin",
+      "enabled": true,
+      "config": {
+        "max_entries": 500
+      },
+      "variables": {}
+    },
+    {
       "name": "speedtest",
       "module": "speedtest_plugin",
       "enabled": false,

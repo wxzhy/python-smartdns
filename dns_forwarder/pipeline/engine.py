@@ -66,6 +66,7 @@ class PipelineEngine:
                 return None
 
             self._finalize_context(context)
+            await self._observe_context(context)
             final_result_tags = (
                 format_tags(context.upstream_results[-1].tags) if context.upstream_results else "[]"
             )
@@ -323,4 +324,14 @@ class PipelineEngine:
             sync_answer_response(context.final_answer)
             context.final_response = clone_response_for_request(
                 context.final_answer.response, context.request
+            )
+
+    async def _observe_context(self, context: RequestContext) -> None:
+        try:
+            await self._plugin_manager.on_observe(context)
+        except Exception:
+            self._logger.exception(
+                "观测阶段失败 request_id=%s listener=%s",
+                context.request_id,
+                context.listener_name,
             )

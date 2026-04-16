@@ -15,6 +15,7 @@ dependencies = [
     "py-radix>=0.10.0",
     "uvicorn>=0.35.0",
     "winuvloop>=0.2.0; sys_platform == 'win32'",
+    "pynacl>=1.6.2",
 ]
 
 [dependency-groups]

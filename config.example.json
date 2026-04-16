@@ -78,6 +78,14 @@
       "port": 853,
       "server_hostname": "unfiltered.adguard-dns.com",
       "verify": true
+    },
+    {
+      "name": "opendns-dnscrypt",
+      "protocol": "dnscrypt",
+      "address": "208.67.220.220",
+      "port": 443,
+      "provider_name": "2.dnscrypt-cert.opendns.com",
+      "provider_pk": "B735:1140:206F:225D:3E2B:D822:D7FD:691E:A1C3:3CC8:D666:8D0C:BE04:BFAB:CA43:FB79"
     }
   ],
   "upstreams": [
@@ -99,7 +107,8 @@
       "nameservers": [
         "cloudflare-doh",
         "cloudflare-doh-custom",
-        "adguard-doq"
+        "adguard-doq",
+        "opendns-dnscrypt"
       ],
       "timeout": 1.0,
       "lifetime": 3.0,

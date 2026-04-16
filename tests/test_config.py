@@ -122,6 +122,16 @@ def test_parse_config_text_accepts_all_supported_nameserver_protocols() -> None:
             "server_hostname": "unfiltered.adguard-dns.com",
             "verify": True,
         },
+        {
+            "name": "dnscrypt-ns",
+            "protocol": "dnscrypt",
+            "address": "208.67.220.220",
+            "port": 443,
+            "provider_name": "2.dnscrypt-cert.opendns.com",
+            "provider_pk": (
+                "B735:1140:206F:225D:3E2B:D822:D7FD:691E:A1C3:3CC8:D666:8D0C:BE04:BFAB:CA43:FB79"
+            ),
+        },
     ]
     config_dict["upstreams"] = [
         {
@@ -133,6 +143,7 @@ def test_parse_config_text_accepts_all_supported_nameserver_protocols() -> None:
                 "doh-custom-ns",
                 "dot-ns",
                 "doq-ns",
+                "dnscrypt-ns",
             ],
         }
     ]
@@ -140,7 +151,7 @@ def test_parse_config_text_accepts_all_supported_nameserver_protocols() -> None:
 
     config = parse_config_dict(config_dict)
 
-    assert len(config.nameservers) == 6
+    assert len(config.nameservers) == 7
     assert config.upstreams[0].nameservers == [
         "udp-ns",
         "udp-custom-ns",
@@ -148,6 +159,7 @@ def test_parse_config_text_accepts_all_supported_nameserver_protocols() -> None:
         "doh-custom-ns",
         "dot-ns",
         "doq-ns",
+        "dnscrypt-ns",
     ]
 
 

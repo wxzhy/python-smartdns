@@ -4,9 +4,17 @@ from enum import StrEnum
 from ipaddress import IPv4Network, IPv6Network, ip_network
 from typing import Annotated, Any, Literal
 
-from pydantic import BaseModel, ConfigDict, Field, RootModel, field_validator, model_validator
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    Field,
+    RootModel,
+    field_validator,
+    model_validator,
+)
 from pydantic_settings import BaseSettings, PydanticBaseSettingsSource, SettingsConfigDict
 from pydantic_settings.sources.providers.json import JsonConfigSettingsSource
+
 
 def _unique_names(items: list[Any], field_name: str) -> None:
     seen: set[str] = set()
@@ -29,6 +37,7 @@ class NameserverProtocol(StrEnum):
     DOH_CUSTOM = "doh_custom"
     DOT = "dot"
     DOQ = "doq"
+    DNSCRYPT = "dnscrypt"
 
 
 class HTTPVersionType(StrEnum):
@@ -152,13 +161,24 @@ class DoQNameserverConfig(BaseNameserverConfig):
     verify: bool | str = True
 
 
+class DNSCryptNameserverConfig(BaseNameserverConfig):
+    protocol: Literal[NameserverProtocol.DNSCRYPT] = NameserverProtocol.DNSCRYPT
+    address: str
+    provider_name: str
+    provider_pk: str
+    private_key: str | None = None
+    port: int = Field(default=53, ge=1, le=65535)
+    cert_timeout: float = Field(default=5.0, gt=0)
+
+
 NameserverConfig = Annotated[
     Do53NameserverConfig
     | Do53CustomNameserverConfig
     | DoHNameserverConfig
     | DoHCustomNameserverConfig
     | DoTNameserverConfig
-    | DoQNameserverConfig,
+    | DoQNameserverConfig
+    | DNSCryptNameserverConfig,
     Field(discriminator="protocol"),
 ]
 

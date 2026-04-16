@@ -5,6 +5,7 @@ from collections.abc import Iterable
 import dns.nameserver
 
 from dns_forwarder.config import (
+    DNSCryptNameserverConfig,
     Do53CustomNameserverConfig,
     Do53NameserverConfig,
     DoHCustomNameserverConfig,
@@ -16,6 +17,7 @@ from dns_forwarder.config import (
 
 from .do53 import build_nameserver as build_do53_nameserver
 from .do53_custom import build_nameserver as build_do53_custom_nameserver
+from .dnscrypt import build_nameserver as build_dnscrypt_nameserver
 from .doh import build_nameserver as build_doh_nameserver
 from .doh_custom import build_nameserver as build_doh_custom_nameserver
 from .doq import build_nameserver as build_doq_nameserver
@@ -35,6 +37,8 @@ def build_nameserver(config: NameserverConfig) -> dns.nameserver.Nameserver:
         return build_dot_nameserver(config)
     if isinstance(config, DoQNameserverConfig):
         return build_doq_nameserver(config)
+    if isinstance(config, DNSCryptNameserverConfig):
+        return build_dnscrypt_nameserver(config)
     raise TypeError(f"不支持的 nameserver 配置类型: {type(config).__name__}")
 
 

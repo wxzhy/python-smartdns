@@ -12,6 +12,7 @@ import dns.rrset
 import pytest
 
 from dns_forwarder.config import (
+    DNSCryptNameserverConfig,
     Do53CustomNameserverConfig,
     Do53NameserverConfig,
     DoHCustomNameserverConfig,
@@ -111,6 +112,27 @@ def test_build_nameserver_supports_doq() -> None:
     assert isinstance(nameserver, dns.nameserver.DoQNameserver)
     assert nameserver.address == "94.140.14.14"
     assert nameserver.server_hostname == "unfiltered.adguard-dns.com"
+
+
+def test_build_nameserver_supports_dnscrypt() -> None:
+    with patch("dns_forwarder.resolver.nameservers.dnscrypt.DNSCryptResolver") as resolver_cls:
+        nameserver = build_nameserver(
+            DNSCryptNameserverConfig(
+                name="opendns-dnscrypt",
+                address="208.67.220.220",
+                port=443,
+                provider_name="2.dnscrypt-cert.opendns.com",
+                provider_pk=(
+                    "B735:1140:206F:225D:3E2B:D822:D7FD:691E:"
+                    "A1C3:3CC8:D666:8D0C:BE04:BFAB:CA43:FB79"
+                ),
+            )
+        )
+
+    assert nameserver.__class__.__name__ == "DNSCryptNameserver"
+    assert nameserver.address == "208.67.220.220"
+    assert nameserver.port == 443
+    resolver_cls.assert_called_once()
 
 
 def test_build_nameserver_map_returns_named_instances() -> None:

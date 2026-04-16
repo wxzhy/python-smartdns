@@ -15,13 +15,10 @@ def normalize_network(value: str) -> str:
 
 class IPSet:
     def __init__(self, directory: str | None) -> None:
-        network_to_tags: dict[str, str] = {}
+        network_to_tags: dict[str, set[str]] = defaultdict(set)
         for tag, networks in _load_tag_files(directory, normalize_network).items():
             for network in networks:
-                existing_tag = network_to_tags.get(network)
-                if existing_tag is not None and existing_tag != tag:
-                    raise ValueError(f"network 重复归属多个 tag: {network}")
-                network_to_tags[network] = tag
+                network_to_tags[network].add(tag)
 
         self._tree: radix.Radix | None
         if not network_to_tags:
@@ -29,9 +26,9 @@ class IPSet:
             return
 
         tree = radix.Radix()
-        for network, tag in sorted(network_to_tags.items()):
+        for network, tags in sorted(network_to_tags.items()):
             node = tree.add(network)
-            node.data["tag"] = tag
+            node.data["tags"] = frozenset(tags)
         self._tree = tree
 
     def lookup(self, address: str) -> set[str]:
@@ -41,9 +38,9 @@ class IPSet:
         tags: set[str] = set()
         search_target = ip_network(address, strict=False).with_prefixlen
         for node in self._tree.search_covering(search_target):
-            tag = node.data.get("tag")
-            if isinstance(tag, str):
-                tags.add(tag)
+            node_tags = node.data.get("tags")
+            if isinstance(node_tags, (set, frozenset, list, tuple)):
+                tags.update(tag for tag in node_tags if isinstance(tag, str))
         return tags
 
 

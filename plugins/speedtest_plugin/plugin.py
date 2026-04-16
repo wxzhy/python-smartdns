@@ -83,6 +83,8 @@ class SpeedTestPlugin(Plugin):
     name = "speedtest-plugin"
     config_model = SpeedTestPluginConfig
     variables_model = EmptyModel
+    upstream_response_order = 200
+    response_order = 600
     ui_meta = {
         "title": "SpeedTest Plugin",
         "description": "在 upstream_response 阶段对响应 IP 执行 ICMP/TCP(80/443) 并发测速，并写入 speedtest.context。",

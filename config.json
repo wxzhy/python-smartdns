@@ -29,6 +29,18 @@
   ],
   "nameservers": [
     {
+      "name": "114dns",
+      "protocol": "do53",
+      "address": "114.114.114.114",
+      "port": 53
+    },
+    {
+      "name": "alidns",
+      "protocol": "do53",
+      "address": "223.5.5.5",
+      "port": 53
+    },
+    {
       "name": "cloudflare-primary",
       "protocol": "do53_custom",
       "address": "1.0.0.1",
@@ -122,7 +134,8 @@
               "google"
             ],
             "exclude_tags": [
-              "cn"
+              "cn",
+              "ads"
             ],
             "ipv4_addresses": [
               "10.10.0.2",
@@ -177,10 +190,15 @@
           "cloudflare"
         ],
         "exclude_tags": [
-          "cn"
+          "cn",
+          "ads"
         ],
         "skip_tags": [
-          "cn"
+          "cn",
+          "ads",
+          "private",
+          "ntp",
+          "google"
         ]
       },
       "variables": {}
@@ -200,7 +218,9 @@
         "skip_tags": [
           "cn",
           "ads",
-          "private"
+          "private",
+          "ntp",
+          "google"
         ],
         "rules": [
           {
@@ -244,11 +264,18 @@
           "cloudflare"
         ],
         "exclude_tags": [
-          "cn"
+          "cn",
+          "ads",
+          "private",
+          "ntp",
+          "google"
         ],
         "skip_tags": [
+          "cn",
           "ads",
-          "cn"
+          "private",
+          "ntp",
+          "google"
         ]
       },
       "variables": {}

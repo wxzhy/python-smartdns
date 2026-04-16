@@ -22,29 +22,29 @@ def reverse_domain(value: str) -> str:
 
 class DomainSet:
     def __init__(self, directory: str | None) -> None:
-        self._entries = self._build_domain_entries(directory)
-        self._trie = marisa_trie.StringTrie(self._entries) if self._entries else None
+        self._domain_to_tags = self._build_domain_entries(directory)
+        self._trie = marisa_trie.Trie(self._domain_to_tags) if self._domain_to_tags else None
 
     def lookup(self, qname: str) -> set[str]:
         if self._trie is None:
             return set()
 
         tags: set[str] = set()
-        for _, tag in self._trie.prefix_items(reverse_domain(qname)):
-            tags.add(tag)
+        for matched_domain in self._trie.prefixes(reverse_domain(qname)):
+            tags.update(self._domain_to_tags.get(matched_domain, ()))
         return tags
 
     @staticmethod
-    def _build_domain_entries(directory: str | None) -> list[tuple[str, str]]:
-        domain_to_tag: dict[str, str] = {}
+    def _build_domain_entries(directory: str | None) -> dict[str, frozenset[str]]:
+        domain_to_tags: dict[str, set[str]] = defaultdict(set)
         for tag, domains in _load_tag_files(directory, normalize_domain).items():
             for domain in domains:
                 reversed_domain = reverse_domain(domain)
-                # existing_tag = domain_to_tag.get(reversed_domain)
-                # if existing_tag is not None and existing_tag != tag:
-                #     raise ValueError(f"domain 重复归属多个 tag: {domain}")
-                domain_to_tag[reversed_domain] = tag
-        return sorted(domain_to_tag.items())
+                domain_to_tags[reversed_domain].add(tag)
+        return {
+            domain: frozenset(tags)
+            for domain, tags in sorted(domain_to_tags.items())
+        }
 
 
 def _load_tag_files(

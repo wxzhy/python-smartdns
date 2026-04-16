@@ -9,7 +9,13 @@ import dns.rrset
 import pytest
 
 from dns_forwarder.pipeline import RequestContext, UpstreamResult, build_answer_from_response
-from dns_forwarder.plugin_api import PluginManager, PluginRegistry
+from dns_forwarder.config import PluginConfig
+from dns_forwarder.plugin_api import LoadedPlugin, PluginManager, PluginRegistry
+from plugins.ip_replace_plugin import (
+    IpReplacePlugin,
+    IpReplacePluginConfig,
+    IpReplaceRuleConfig,
+)
 from plugins.speedtest_plugin import (
     SPEEDTEST_CONTEXT_KEY,
     SPEEDTEST_SERVICE_KEY,
@@ -48,6 +54,48 @@ class StubSpeedTestService:
     async def measure(self, ip: str) -> IpRttResult:
         self.calls.append(ip)
         return IpRttResult(ip=ip, ping_ms=5.0, tcp80_ms=8.0, tcp443_ms=12.0, best_ms=5.0)
+
+
+async def build_plugin_manager_with_ip_replace_and_speedtest(
+    speedtest_plugin: SpeedTestPlugin,
+    *,
+    replace_targets: list[str] | None = None,
+) -> PluginManager:
+    registry = PluginRegistry()
+
+    ip_replace_plugin = IpReplacePlugin()
+    ip_replace_plugin.bind(
+        IpReplacePluginConfig(
+            rules=[
+                IpReplaceRuleConfig(
+                    name="proxy-map",
+                    match_tags=["proxy"],
+                    ipv4_targets=replace_targets or ["10.10.0.0/24"],
+                )
+            ]
+        ),
+        ip_replace_plugin.variables_model(),
+    )
+    await ip_replace_plugin.setup(registry)
+    await speedtest_plugin.setup(registry)
+
+    return PluginManager(
+        [
+            LoadedPlugin(
+                instance=speedtest_plugin,
+                config=speedtest_plugin.runtime_config,
+                variables=speedtest_plugin.runtime_variables,
+                raw_config=PluginConfig(name="speedtest", module="speedtest_plugin"),
+            ),
+            LoadedPlugin(
+                instance=ip_replace_plugin,
+                config=ip_replace_plugin.runtime_config,
+                variables=ip_replace_plugin.runtime_variables,
+                raw_config=PluginConfig(name="ip_replace", module="ip_replace_plugin"),
+            ),
+        ],
+        registry,
+    )
 
 
 class ProbeRaceService(SpeedTestService):
@@ -161,6 +209,84 @@ async def test_speedtest_plugin_collects_unique_ip_rtts() -> None:
     assert len(speedtest_context.ip_rtt_results) == 2
     assert set(stub_service.calls) == {"203.0.113.10", "203.0.113.11"}
     assert len(stub_service.calls) == 2
+
+
+async def test_speedtest_plugin_measures_replaced_ips_after_upstream_ip_replace() -> None:
+    speedtest_plugin = SpeedTestPlugin()
+    speedtest_plugin.bind(SpeedTestPluginConfig(), speedtest_plugin.variables_model())
+    manager = await build_plugin_manager_with_ip_replace_and_speedtest(speedtest_plugin)
+
+    stub_service = StubSpeedTestService()
+    speedtest_plugin._service = stub_service
+
+    request = dns.message.make_query("example.test", "A")
+    response = dns.message.make_response(request)
+    response.answer.append(
+        dns.rrset.from_text(
+            "example.test.",
+            60,
+            "IN",
+            "A",
+            "198.51.100.10",
+        )
+    )
+    answer = build_answer_from_response(request, response)
+    context = RequestContext(
+        request=request,
+        clientaddr=("127.0.0.1", 5300),
+        listener_name="udp",
+        extensions=manager.build_context_extensions(),
+    )
+    result = UpstreamResult(
+        upstream_name="default",
+        duration_ms=1.0,
+        answer=answer,
+        tags={"proxy"},
+    )
+
+    await manager.on_upstream_response(context, result)
+
+    assert result.answer is not None
+    assert [item.address for item in result.answer.rrset] == ["10.10.0.10"]
+    assert stub_service.calls == ["10.10.0.10"]
+
+
+async def test_speedtest_plugin_measures_replaced_ips_after_response_ip_replace() -> None:
+    speedtest_plugin = SpeedTestPlugin()
+    speedtest_plugin.bind(SpeedTestPluginConfig(), speedtest_plugin.variables_model())
+    manager = await build_plugin_manager_with_ip_replace_and_speedtest(speedtest_plugin)
+
+    stub_service = StubSpeedTestService()
+    speedtest_plugin._service = stub_service
+
+    request = dns.message.make_query("example.test", "A")
+    response = dns.message.make_response(request)
+    response.answer.append(
+        dns.rrset.from_text(
+            "example.test.",
+            60,
+            "IN",
+            "A",
+            "198.51.100.20",
+        )
+    )
+    answer = build_answer_from_response(request, response)
+    context = RequestContext(
+        request=request,
+        clientaddr=("127.0.0.1", 5300),
+        listener_name="udp",
+        extensions=manager.build_context_extensions(),
+        final_answer=answer,
+        upstream_results=[
+            UpstreamResult(upstream_name="default", duration_ms=1.0, tags={"proxy"})
+        ],
+    )
+
+    await manager.on_response(context)
+
+    assert context.final_answer is not None
+    assert [item.address for item in context.final_answer.rrset] == ["10.10.0.20"]
+    assert stub_service.calls == ["10.10.0.20"]
 
 
 async def test_speedtest_plugin_skips_measurement_for_global_skip_tags() -> None:

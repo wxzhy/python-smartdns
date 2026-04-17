@@ -33,6 +33,8 @@ class UpstreamResolver(BaseUpstreamResolver):
         self.resolver.search = []
         self.resolver.nameservers = list(nameservers)
         self.resolver.rotate = len(self.resolver.nameservers) > 1
+        self.resolver.retry_servfail = True
+        self.resolver.rotate = True
         self.resolver.edns = True
         self.resolver.payload = 1232
         if config.ecs is not None:

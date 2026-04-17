@@ -177,21 +177,22 @@ class SpeedTestPlugin(Plugin):
         ):
             speedtest_context = get_speedtest_context(context)
             current_ips = self._extract_unique_ips(answer)
-            if current_ips:
+            candidate_ips = self._collect_candidate_ips(context, answer)
+            if candidate_ips:
                 await self._measure_new_ips(
                     context.request_id,
                     speedtest_context,
-                    current_ips,
+                    candidate_ips,
                     phase="response",
                 )
 
             measured_results = {
                 item.ip: item
                 for item in speedtest_context.ip_rtt_results
-                if item.best_ms is not None and item.ip in current_ips
+                if item.best_ms is not None and item.ip in candidate_ips
             }
             if measured_results:
-                original_order = {ip: index for index, ip in enumerate(current_ips)}
+                original_order = {ip: index for index, ip in enumerate(candidate_ips)}
                 sorted_ips = [
                     item.ip
                     for item in sorted(
@@ -206,10 +207,11 @@ class SpeedTestPlugin(Plugin):
                 if sorted_ips != current_ips:
                     self._replace_answer_ips(answer, sorted_ips)
                     logger.debug(
-                        "测速结果已应用 request_id=%s qtype=%s original_ips=%s selected_ips=%s",
+                        "测速结果已应用 request_id=%s qtype=%s current_ips=%s candidate_ips=%s selected_ips=%s",
                         context.request_id,
                         dns.rdatatype.to_text(answer.rdtype),
                         current_ips,
+                        candidate_ips,
                         sorted_ips,
                     )
             else:
@@ -297,6 +299,34 @@ class SpeedTestPlugin(Plugin):
             if ips:
                 return ips
         return []
+
+    def _collect_candidate_ips(
+        self,
+        context: RequestContext,
+        answer: dns.resolver.Answer,
+    ) -> list[str]:
+        candidates: list[str] = []
+        seen: set[str] = set()
+
+        def add_answer_ips(item: dns.resolver.Answer | None) -> None:
+            for ip in self._extract_unique_ips(item) if item is not None else []:
+                if ip in seen:
+                    continue
+                seen.add(ip)
+                candidates.append(ip)
+
+        add_answer_ips(answer)
+        if not context.upstream_results:
+            return candidates
+
+        final_result = context.upstream_results[-1]
+        collected_results = sorted(
+            final_result.collected_results,
+            key=lambda item: (item.duration_ms, item.upstream_name),
+        )
+        for result in collected_results:
+            add_answer_ips(result.answer)
+        return candidates
 
     @staticmethod
     def _has_any_tag(current_tags: set[str], configured_tags: list[str]) -> bool:

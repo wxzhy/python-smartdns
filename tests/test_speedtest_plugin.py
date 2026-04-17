@@ -59,6 +59,17 @@ class StubSpeedTestService:
         return IpRttResult(ip=ip, ping_ms=5.0, tcp80_ms=8.0, tcp443_ms=12.0, best_ms=5.0)
 
 
+class MappedSpeedTestService:
+    def __init__(self, results_by_ip: dict[str, float | None]) -> None:
+        self._results_by_ip = results_by_ip
+        self.calls: list[str] = []
+
+    async def measure(self, ip: str) -> IpRttResult:
+        self.calls.append(ip)
+        best_ms = self._results_by_ip[ip]
+        return IpRttResult(ip=ip, best_ms=best_ms)
+
+
 async def build_plugin_manager_with_ip_replace_and_speedtest(
     speedtest_plugin: SpeedTestPlugin,
     *,
@@ -470,6 +481,73 @@ async def test_speedtest_plugin_measures_replaced_ips_after_response_ip_replace(
     assert context.final_answer is not None
     assert [item.address for item in context.final_answer.rrset] == ["10.10.0.20"]
     assert stub_service.calls == ["10.10.0.20"]
+
+
+async def test_speedtest_plugin_on_response_prefers_replaced_ip_from_other_wait_all_result() -> None:
+    config = build_wait_all_config()
+    speedtest_plugin = SpeedTestPlugin()
+    speedtest_plugin.bind(
+        SpeedTestPluginConfig(response_ip_limit=1),
+        speedtest_plugin.variables_model(),
+    )
+    manager = await build_plugin_manager_with_ip_replace_and_speedtest(speedtest_plugin)
+    speedtest_plugin._service = MappedSpeedTestService(
+        {
+            "203.0.113.10": 50.0,
+            "10.10.0.20": 5.0,
+        }
+    )
+
+    async def resolve_a(context: RequestContext) -> UpstreamResult:
+        await asyncio.sleep(0.01)
+        request = context.request
+        response = dns.message.make_response(request)
+        response.answer.append(
+            dns.rrset.from_text("example.test.", 60, "IN", "A", "203.0.113.10")
+        )
+        return UpstreamResult(
+            upstream_name="resolver-a",
+            duration_ms=5.0,
+            answer=build_answer_from_response(request, response),
+            tags=set(),
+        )
+
+    async def resolve_b(context: RequestContext) -> UpstreamResult:
+        await asyncio.sleep(0.02)
+        request = context.request
+        response = dns.message.make_response(request)
+        response.answer.append(
+            dns.rrset.from_text("example.test.", 60, "IN", "A", "198.51.100.20")
+        )
+        return UpstreamResult(
+            upstream_name="resolver-b",
+            duration_ms=10.0,
+            answer=build_answer_from_response(request, response),
+            tags={"proxy"},
+        )
+
+    engine = PipelineEngine(
+        config,
+        StaticResolverManager(
+            config,
+            {
+                "resolver-a": resolve_a,
+                "resolver-b": resolve_b,
+            },
+        ),
+        DispatcherRegistry(),
+        manager,
+    )
+
+    response = await engine.handle_message(
+        dns.message.make_query("example.test", "A"),
+        ("127.0.0.1", 5300),
+        "udp",
+    )
+
+    assert response is not None
+    assert [item.address for item in response.answer[0]] == ["10.10.0.20"]
+    assert speedtest_plugin._service.calls == ["203.0.113.10", "10.10.0.20"]
 
 
 async def test_speedtest_plugin_skips_measurement_for_global_skip_tags() -> None:

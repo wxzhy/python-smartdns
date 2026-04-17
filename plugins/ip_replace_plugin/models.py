@@ -19,17 +19,7 @@ class IpReplaceRuleConfig(StrictPluginModel):
     @field_validator("match_tags", "exclude_tags", mode="before")
     @classmethod
     def normalize_tags(cls, value: list[str] | None) -> list[str]:
-        if value is None:
-            return []
-        seen: set[str] = set()
-        normalized: list[str] = []
-        for item in value:
-            tag = str(item).strip()
-            if not tag or tag in seen:
-                continue
-            seen.add(tag)
-            normalized.append(tag)
-        return normalized
+        return _normalize_tags(value)
 
     @field_validator("ipv4_targets", mode="before")
     @classmethod
@@ -52,9 +42,10 @@ class IpReplacePluginConfig(StrictPluginModel):
     skip_tags: list[str] = Field(default_factory=list)
     rules: list[IpReplaceRuleConfig] = Field(default_factory=list)
 
-    _normalize_skip_tags = field_validator("skip_tags", mode="before")(
-        IpReplaceRuleConfig.normalize_tags
-    )
+    @field_validator("skip_tags", mode="before")
+    @classmethod
+    def normalize_skip_tags(cls, value: list[str] | None) -> list[str]:
+        return _normalize_tags(value)
 
 
 def _normalize_networks(value: list[str] | None, *, version: int) -> list[str]:
@@ -72,4 +63,18 @@ def _normalize_networks(value: list[str] | None, *, version: int) -> list[str]:
             continue
         seen.add(text)
         normalized.append(text)
+    return normalized
+
+
+def _normalize_tags(value: list[str] | None) -> list[str]:
+    if value is None:
+        return []
+    seen: set[str] = set()
+    normalized: list[str] = []
+    for item in value:
+        tag = str(item).strip()
+        if not tag or tag in seen:
+            continue
+        seen.add(tag)
+        normalized.append(tag)
     return normalized

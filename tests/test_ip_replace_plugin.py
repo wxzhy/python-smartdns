@@ -214,6 +214,12 @@ def test_ip_replace_rule_config_rejects_legacy_enabled_field() -> None:
         )
 
 
+def test_ip_replace_plugin_config_normalizes_skip_tags() -> None:
+    config = IpReplacePluginConfig(skip_tags=["direct", " direct ", "", "local", "direct"])
+
+    assert config.skip_tags == ["direct", "local"]
+
+
 def test_ip_replace_service_expands_ipv4_targets_and_deduplicates_stably() -> None:
     service = IpReplaceService(
         [

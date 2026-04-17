@@ -152,9 +152,14 @@
       "url": "https://103.2.57.6/dns-query"
     },
     {
-      "name": "stub",
-      "protocol": "do53",
-      "address": "1.1.1.1"
+      "name": "opennic-a",
+      "protocol": "do53_custom",
+      "address": "2400:8905::f03c:95ff:fe0b:9ffe"
+    },
+    {
+      "name": "opennic-b",
+      "protocol": "do53_custom",
+      "address": "172.233.66.93"
     }
   ],
   "upstreams": [
@@ -235,9 +240,10 @@
       ]
     },
     {
-      "name": "stub",
+      "name": "opennic",
       "nameservers": [
-        "stub"
+        "opennic-a",
+        "opennic-b"
       ]
     }
   ],
@@ -254,8 +260,7 @@
         "v-opt",
         "v-ecs",
         "hinet",
-        "iij",
-        "stub"
+        "iij"
       ]
     },
     {
@@ -275,8 +280,13 @@
         "v-opt",
         "v-ecs",
         "hinet",
-        "iij",
-        "stub"
+        "iij"
+      ]
+    },
+    {
+      "name": "open",
+      "upstreams": [
+        "opennic"
       ]
     }
   ],
@@ -314,6 +324,20 @@
       }
     },
     {
+      "name": "opennic",
+      "enabled": true,
+      "match": {
+        "match_tags": [
+          "opennic"
+        ],
+        "exclude_tags": []
+      },
+      "action": {
+        "upstream_group": "open",
+        "dispatcher": "wait_all"
+      }
+    },
+    {
       "name": "all",
       "enabled": true,
       "match": {
@@ -329,21 +353,6 @@
     }
   ],
   "plugins": [
-    {
-      "name": "sample",
-      "module": "sample_plugin",
-      "enabled": false,
-      "config": {
-        "domains": [
-          "sample.internal"
-        ],
-        "answer_name": "sample.static_a"
-      },
-      "variables": {
-        "address": "127.0.0.1",
-        "ttl": 30
-      }
-    },
     {
       "name": "cache_plugin",
       "module": "cache_plugin",
@@ -374,7 +383,8 @@
             ],
             "exclude_tags": [
               "cn",
-              "ads"
+              "ads",
+              "noredir"
             ],
             "ipv4_addresses": [
               "9.0.0.0"
@@ -403,6 +413,24 @@
             ],
             "ipv6_addresses": [
               "::1"
+            ],
+            "block_other": false,
+            "response_ttl_seconds": 86400
+          },
+          {
+            "match_tags": [
+              "ai"
+            ],
+            "exclude_tags": [
+              "cn",
+              "ads",
+              "noredir"
+            ],
+            "ipv4_addresses": [
+              "9.0.0.1"
+            ],
+            "ipv6_addresses": [
+              "2620::1"
             ],
             "block_other": false,
             "response_ttl_seconds": 86400
@@ -457,7 +485,8 @@
           "ads",
           "private",
           "ntp",
-          "google"
+          "google",
+          "noredir"
         ],
         "rules": [
           {
@@ -505,14 +534,16 @@
           "ads",
           "private",
           "ntp",
-          "google"
+          "google",
+          "noredir"
         ],
         "skip_tags": [
           "cn",
           "ads",
           "private",
           "ntp",
-          "google"
+          "google",
+          "noredir"
         ]
       },
       "variables": {}

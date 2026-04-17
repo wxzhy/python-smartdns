@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+from collections.abc import Callable
 from typing import TYPE_CHECKING
 
 import dns.resolver
@@ -29,6 +30,7 @@ class RaceDispatchStrategy(DispatchStrategy):
         group: UpstreamGroupConfig,
         resolver_manager: "ResolverManager",
         registry: "DispatcherRegistry",
+        on_result: Callable[[UpstreamResult], None] | None = None,
     ) -> UpstreamResult:
         tasks = [
             asyncio.create_task(
@@ -37,6 +39,7 @@ class RaceDispatchStrategy(DispatchStrategy):
                     target_name,
                     self.strategy_type,
                     resolver_manager,
+                    on_result=on_result,
                 )
             )
             for target_name in group.upstreams

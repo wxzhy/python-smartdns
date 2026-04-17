@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 from abc import ABC, abstractmethod
+from collections.abc import Callable
 from typing import TYPE_CHECKING, ClassVar
 
 import dns.resolver
@@ -25,6 +26,7 @@ class DispatchStrategy(ABC):
         group: UpstreamGroupConfig,
         resolver_manager: "ResolverManager",
         registry: "DispatcherRegistry",
+        on_result: Callable[[UpstreamResult], None] | None = None,
     ) -> UpstreamResult:
         raise NotImplementedError
 

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+from collections.abc import Callable
 from typing import TYPE_CHECKING
 
 import dns.resolver
@@ -29,6 +30,7 @@ class WaitAllDispatchStrategy(DispatchStrategy):
         group: UpstreamGroupConfig,
         resolver_manager: "ResolverManager",
         registry: "DispatcherRegistry",
+        on_result: Callable[[UpstreamResult], None] | None = None,
     ) -> UpstreamResult:
         tasks = [
             asyncio.create_task(
@@ -37,19 +39,22 @@ class WaitAllDispatchStrategy(DispatchStrategy):
                     target_name,
                     self.strategy_type,
                     resolver_manager,
+                    on_result=on_result,
                 )
             )
             for target_name in group.upstreams
         ]
-
+        results: list[UpstreamResult] = []
         try:
-            results = await asyncio.gather(*tasks)
+            for task in asyncio.as_completed(tasks):
+                results.append(await task)
         finally:
             await self._cancel_pending_tasks(tasks)
 
         successes = [result for result in results if result.answer is not None]
         if successes:
             fastest = min(successes, key=lambda item: item.duration_ms)
+            fastest.collected_results = tuple(results)
             logger.debug(
                 "等待全部调度完成 request_id=%s group=%s fastest_upstream=%s duration_ms=%.2f success_count=%s tags=%s",
                 context.request_id,
@@ -62,6 +67,7 @@ class WaitAllDispatchStrategy(DispatchStrategy):
             return fastest
 
         fallback = self.pick_failure_result(results, "所有上游均失败")
+        fallback.collected_results = tuple(results)
         if isinstance(fallback.error, dns.resolver.NXDOMAIN):
             logger.debug(
                 "等待全部调度未命中成功结果，返回 NXDOMAIN request_id=%s group=%s",

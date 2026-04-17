@@ -144,6 +144,46 @@ def test_rule_engine_matches_tags_with_any_of_semantics() -> None:
     assert selection.dispatcher is DispatchStrategyType.WAIT_ALL
 
 
+def test_rule_engine_matches_qtype_list() -> None:
+    rule = RuleConfig.model_validate(
+        {
+            "name": "https-only",
+            "match": {
+                "qtypes": ["https", "HTTPS"],
+            },
+            "action": {
+                "dispatcher": "wait_all",
+            },
+        }
+    )
+    engine = RuleEngine([rule], "default")
+
+    selection = engine.select(_build_context("www.example.org", "HTTPS"))
+
+    assert selection.rule_name == "https-only"
+    assert selection.dispatcher is DispatchStrategyType.WAIT_ALL
+
+
+def test_rule_engine_skips_non_matching_qtype() -> None:
+    rule = RuleConfig.model_validate(
+        {
+            "name": "address-only",
+            "match": {
+                "qtypes": ["A", "AAAA"],
+            },
+            "action": {
+                "dispatcher": "wait_all",
+            },
+        }
+    )
+    engine = RuleEngine([rule], "default")
+
+    selection = engine.select(_build_context("www.example.org", "TXT"))
+
+    assert selection.rule_name is None
+    assert selection.dispatcher is None
+
+
 def test_rule_engine_ignores_ip_only_tags_not_present_on_request_context() -> None:
     rule = RuleConfig.model_validate(
         {
@@ -258,4 +298,68 @@ async def test_pipeline_uses_dispatcher_override_from_matched_rule() -> None:
     assert plugin_manager.last_context is not None
     assert plugin_manager.last_context.selected_rule == "wait-a-records"
     assert plugin_manager.last_context.selected_group == "default"
+    assert plugin_manager.last_context.selected_dispatcher == "wait_all"
+
+
+async def test_pipeline_uses_runtime_default_upstream_policy_when_rule_has_no_dispatcher() -> None:
+    config = AppConfig.model_validate(
+        {
+            "runtime": {
+                "plugin_dirs": ["plugins"],
+                "default_upstream_group": "default",
+                "default_upstream_policy": "wait_all",
+                "loop_policy": "asyncio",
+                "log_level": "DEBUG",
+            },
+            "listeners": [
+                {"name": "udp", "protocol": "udp", "host": "127.0.0.1", "port": 0, "enabled": True},
+            ],
+            "nameservers": [
+                {"name": "ns-slow", "protocol": "do53", "address": "127.0.0.1", "port": 53},
+                {"name": "ns-fast", "protocol": "do53", "address": "127.0.0.1", "port": 54},
+            ],
+            "upstreams": [
+                {"name": "slow-finish-fast-rtt", "nameservers": ["ns-slow"]},
+                {"name": "fast-finish-slow-rtt", "nameservers": ["ns-fast"]},
+            ],
+            "groups": [
+                {
+                    "name": "default",
+                    "upstreams": ["slow-finish-fast-rtt", "fast-finish-slow-rtt"],
+                },
+            ],
+            "rules": [],
+            "plugins": [],
+            "webui": {"enabled": False},
+        }
+    )
+    resolver_manager = StubResolverManager(
+        config,
+        {
+            "slow-finish-fast-rtt": _success(
+                "slow-finish-fast-rtt",
+                "203.0.113.10",
+                delay=0.05,
+                duration_ms=5.0,
+            ),
+            "fast-finish-slow-rtt": _success(
+                "fast-finish-slow-rtt",
+                "203.0.113.20",
+                delay=0.01,
+                duration_ms=20.0,
+            ),
+        },
+    )
+    plugin_manager = NullPluginManager()
+    engine = PipelineEngine(config, resolver_manager, DispatcherRegistry(), plugin_manager)
+
+    response = await engine.handle_message(
+        dns.message.make_query("www.example.org", "A"),
+        ("127.0.0.1", 5300),
+        "udp",
+    )
+
+    assert response is not None
+    assert response.answer[0][0].address == "203.0.113.10"
+    assert plugin_manager.last_context is not None
     assert plugin_manager.last_context.selected_dispatcher == "wait_all"

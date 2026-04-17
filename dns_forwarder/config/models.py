@@ -4,6 +4,7 @@ from enum import StrEnum
 from ipaddress import IPv4Network, IPv6Network, ip_network
 from typing import Annotated, Any, Literal
 
+import dns.rdatatype
 from pydantic import (
     BaseModel,
     ConfigDict,
@@ -60,6 +61,7 @@ class RuntimeConfig(StrictConfigModel):
     plugin_dirs: list[str] = Field(default_factory=lambda: ["plugins"])
     loop_policy: str = "auto"
     default_upstream_group: str = "default"
+    default_upstream_policy: DispatchStrategyType = DispatchStrategyType.RACE
     log_level: str = "INFO"
 
     @field_validator("plugin_dirs")
@@ -140,7 +142,7 @@ class DoHCustomNameserverConfig(BaseNameserverConfig):
     protocol: Literal[NameserverProtocol.DOH_CUSTOM] = NameserverProtocol.DOH_CUSTOM
     url: str
     bootstrap_address: str | None = None
-    verify: bool | str = True
+    verify: bool | str = False
     want_get: bool = False
     http_version: HTTPVersionType = HTTPVersionType.DEFAULT
 
@@ -186,8 +188,8 @@ NameserverConfig = Annotated[
 class UpstreamConfig(StrictConfigModel):
     name: str
     nameservers: list[str] = Field(min_length=1)
-    timeout: float = Field(default=1.0, gt=0)
-    lifetime: float = Field(default=3.0, gt=0)
+    timeout: float = Field(default=0.5, gt=0)
+    lifetime: float = Field(default=1, gt=0)
     use_tcp: bool = False
     ecs: ECSConfig | None = None
 
@@ -200,6 +202,7 @@ class UpstreamGroupConfig(StrictConfigModel):
 class RuleMatchConfig(StrictConfigModel):
     match_tags: list[str] = Field(default_factory=list)
     exclude_tags: list[str] = Field(default_factory=list)
+    qtypes: list[str] = Field(default_factory=list)
 
     @field_validator("match_tags", "exclude_tags", mode="before")
     @classmethod
@@ -214,6 +217,24 @@ class RuleMatchConfig(StrictConfigModel):
                 continue
             seen.add(tag)
             normalized.append(tag)
+        return normalized
+
+    @field_validator("qtypes", mode="before")
+    @classmethod
+    def normalize_qtypes(cls, value: list[str] | None) -> list[str]:
+        if value is None:
+            return []
+        seen: set[str] = set()
+        normalized: list[str] = []
+        for item in value:
+            raw = str(item).strip()
+            if not raw:
+                continue
+            qtype = dns.rdatatype.to_text(dns.rdatatype.from_text(raw)).upper()
+            if qtype in seen:
+                continue
+            seen.add(qtype)
+            normalized.append(qtype)
         return normalized
 
 

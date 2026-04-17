@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+from collections.abc import Callable
 from collections.abc import Iterable
 
 from dns_forwarder.config import DispatchStrategyType, UpstreamGroupConfig
@@ -35,8 +36,15 @@ class DispatcherRegistry:
         group: UpstreamGroupConfig,
         strategy: DispatchStrategyType,
         resolver_manager,
+        on_result: Callable[[UpstreamResult], None] | None = None,
     ) -> UpstreamResult:
-        return await self.get(strategy).dispatch(context, group, resolver_manager, self)
+        return await self.get(strategy).dispatch(
+            context,
+            group,
+            resolver_manager,
+            self,
+            on_result=on_result,
+        )
 
     async def dispatch_with_strategy(
         self,
@@ -44,8 +52,15 @@ class DispatcherRegistry:
         group: UpstreamGroupConfig,
         strategy: DispatchStrategyType,
         resolver_manager,
+        on_result: Callable[[UpstreamResult], None] | None = None,
     ) -> UpstreamResult:
-        return await self.dispatch_group(context, group, strategy, resolver_manager)
+        return await self.dispatch_group(
+            context,
+            group,
+            strategy,
+            resolver_manager,
+            on_result=on_result,
+        )
 
     async def dispatch_group_name(
         self,
@@ -53,9 +68,14 @@ class DispatcherRegistry:
         group_name: str,
         strategy: DispatchStrategyType,
         resolver_manager,
+        on_result: Callable[[UpstreamResult], None] | None = None,
     ) -> UpstreamResult:
         return await self.dispatch_group(
-            context, resolver_manager.get_group(group_name), strategy, resolver_manager
+            context,
+            resolver_manager.get_group(group_name),
+            strategy,
+            resolver_manager,
+            on_result=on_result,
         )
 
     async def dispatch_target(
@@ -64,18 +84,22 @@ class DispatcherRegistry:
         target_name: str,
         strategy: DispatchStrategyType,
         resolver_manager,
+        on_result: Callable[[UpstreamResult], None] | None = None,
     ) -> UpstreamResult:
         try:
             if resolver_manager.has_group(target_name):
-                result = await self.dispatch_group_name(
+                return await self.dispatch_group_name(
                     context,
                     target_name,
                     strategy,
                     resolver_manager,
+                    on_result=on_result,
                 )
-            else:
-                result = await resolver_manager.resolve(target_name, context)
-            return inherit_request_tags(result, context.tags)
+            result = await resolver_manager.resolve(target_name, context)
+            result = inherit_request_tags(result, context.tags)
+            if on_result is not None:
+                on_result(result)
+            return result
         except asyncio.CancelledError:
             raise
         except Exception as exc:
@@ -85,9 +109,12 @@ class DispatcherRegistry:
                 target_name,
                 type(exc).__name__,
             )
-            return UpstreamResult(
+            result = UpstreamResult(
                 upstream_name=target_name,
                 duration_ms=0.0,
                 error=exc,
                 tags=context.tags.copy(),
             )
+            if on_result is not None:
+                on_result(result)
+            return result

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 from typing import Awaitable, Callable
 
 import dns.message
@@ -722,6 +723,160 @@ async def test_pipeline_debug_logs_include_request_and_result_tags(
     assert "请求处理完成" in caplog.text
     assert "request_tags=[domain-tag]" in caplog.text
     assert "result_tags=[domain-tag,ip-tag]" in caplog.text
+
+
+async def test_pipeline_wait_all_calls_on_upstream_response_for_each_collected_result() -> None:
+    config = AppConfig.model_validate(
+        {
+            "runtime": {
+                "plugin_dirs": ["plugins"],
+                "default_upstream_group": "default",
+                "loop_policy": "asyncio",
+                "log_level": "DEBUG",
+            },
+            "listeners": [
+                {"name": "udp", "protocol": "udp", "host": "127.0.0.1", "port": 0, "enabled": True},
+            ],
+            "nameservers": [
+                {"name": "ns-a", "protocol": "do53", "address": "127.0.0.1", "port": 53},
+                {"name": "ns-b", "protocol": "do53", "address": "127.0.0.1", "port": 54},
+            ],
+            "upstreams": [
+                {"name": "upstream-a", "nameservers": ["ns-a"]},
+                {"name": "upstream-b", "nameservers": ["ns-b"]},
+            ],
+            "groups": [
+                {"name": "default", "upstreams": ["upstream-a", "upstream-b"]},
+            ],
+            "rules": [
+                {
+                    "name": "wait-all",
+                    "enabled": True,
+                    "match": {"match_tags": [], "exclude_tags": []},
+                    "action": {"dispatcher": "wait_all"},
+                }
+            ],
+            "plugins": [],
+            "webui": {"enabled": False},
+        }
+    )
+    request = dns.message.make_query("example.test", "A")
+    response_calls: list[str] = []
+
+    async def plugin_on_upstream_response(context: RequestContext, result: UpstreamResult) -> None:
+        response_calls.append(result.upstream_name)
+
+    async def resolve_upstream_a(context: RequestContext) -> UpstreamResult:
+        await asyncio.sleep(0.02)
+        return UpstreamResult(
+            upstream_name="upstream-a",
+            duration_ms=20.0,
+            answer=make_a_answer(context.request, "203.0.113.10"),
+        )
+
+    async def resolve_upstream_b(context: RequestContext) -> UpstreamResult:
+        await asyncio.sleep(0.01)
+        return UpstreamResult(
+            upstream_name="upstream-b",
+            duration_ms=5.0,
+            answer=make_a_answer(context.request, "203.0.113.20"),
+        )
+
+    plugin_manager = RecordingPluginManager(on_upstream_response=plugin_on_upstream_response)
+    resolver_manager = StaticResolverManager(
+        config,
+        handlers={
+            "upstream-a": resolve_upstream_a,
+            "upstream-b": resolve_upstream_b,
+        },
+    )
+    engine = PipelineEngine(config, resolver_manager, DispatcherRegistry(), plugin_manager)
+
+    final_response = await engine.handle_message(request, ("127.0.0.1", 20000), "udp")
+
+    assert final_response is not None
+    assert final_response.answer[0][0].address == "203.0.113.20"
+    assert response_calls == ["upstream-b", "upstream-a"]
+    assert plugin_manager.last_context is not None
+    assert plugin_manager.last_context.upstream_results[0].upstream_name == "upstream-b"
+
+
+async def test_pipeline_wait_all_starts_later_upstream_hooks_without_waiting_for_earlier_hook() -> None:
+    config = AppConfig.model_validate(
+        {
+            "runtime": {
+                "plugin_dirs": ["plugins"],
+                "default_upstream_group": "default",
+                "loop_policy": "asyncio",
+                "log_level": "DEBUG",
+            },
+            "listeners": [
+                {"name": "udp", "protocol": "udp", "host": "127.0.0.1", "port": 0, "enabled": True},
+            ],
+            "nameservers": [
+                {"name": "ns-a", "protocol": "do53", "address": "127.0.0.1", "port": 53},
+                {"name": "ns-b", "protocol": "do53", "address": "127.0.0.1", "port": 54},
+            ],
+            "upstreams": [
+                {"name": "upstream-a", "nameservers": ["ns-a"]},
+                {"name": "upstream-b", "nameservers": ["ns-b"]},
+            ],
+            "groups": [
+                {"name": "default", "upstreams": ["upstream-a", "upstream-b"]},
+            ],
+            "rules": [
+                {
+                    "name": "wait-all",
+                    "enabled": True,
+                    "match": {"match_tags": [], "exclude_tags": []},
+                    "action": {"dispatcher": "wait_all"},
+                }
+            ],
+            "plugins": [],
+            "webui": {"enabled": False},
+        }
+    )
+    request = dns.message.make_query("example.test", "A")
+    response_calls: list[str] = []
+
+    async def plugin_on_upstream_response(context: RequestContext, result: UpstreamResult) -> None:
+        response_calls.append(f"start:{result.upstream_name}")
+        if result.upstream_name == "upstream-a":
+            await asyncio.sleep(0.05)
+        response_calls.append(f"end:{result.upstream_name}")
+
+    async def resolve_upstream_a(context: RequestContext) -> UpstreamResult:
+        await asyncio.sleep(0.01)
+        return UpstreamResult(
+            upstream_name="upstream-a",
+            duration_ms=20.0,
+            answer=make_a_answer(context.request, "203.0.113.10"),
+        )
+
+    async def resolve_upstream_b(context: RequestContext) -> UpstreamResult:
+        await asyncio.sleep(0.02)
+        return UpstreamResult(
+            upstream_name="upstream-b",
+            duration_ms=5.0,
+            answer=make_a_answer(context.request, "203.0.113.20"),
+        )
+
+    plugin_manager = RecordingPluginManager(on_upstream_response=plugin_on_upstream_response)
+    resolver_manager = StaticResolverManager(
+        config,
+        handlers={
+            "upstream-a": resolve_upstream_a,
+            "upstream-b": resolve_upstream_b,
+        },
+    )
+    engine = PipelineEngine(config, resolver_manager, DispatcherRegistry(), plugin_manager)
+
+    final_response = await engine.handle_message(request, ("127.0.0.1", 20000), "udp")
+
+    assert final_response is not None
+    assert response_calls.index("start:upstream-b") < response_calls.index("end:upstream-a")
+    assert plugin_manager.last_context is not None
+    assert plugin_manager.last_context.upstream_results[0].upstream_name == "upstream-b"
 
 
 async def test_pipeline_rejects_request_without_question() -> None:

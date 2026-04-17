@@ -3,6 +3,8 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Iterable
 
+import dns.rdatatype
+
 from dns_forwarder.config import DispatchStrategyType, RuleConfig
 from dns_forwarder.pipeline.context import RequestContext
 
@@ -24,10 +26,11 @@ class RuleEngine:
         self._default_upstream_group = default_upstream_group
 
     def select(self, context: RequestContext) -> RuleSelection:
+        qtype = dns.rdatatype.to_text(context.request.question[0].rdtype).upper()
         for rule in self._rules:
             if not rule.enabled:
                 continue
-            if not self._matches(rule, context.tags):
+            if not self._matches(rule, context.tags, qtype):
                 continue
             return RuleSelection(
                 upstream_group=rule.action.upstream_group or self._default_upstream_group,
@@ -38,11 +41,13 @@ class RuleEngine:
         return RuleSelection(upstream_group=self._default_upstream_group)
 
     @staticmethod
-    def _matches(rule: RuleConfig, tags: set[str]) -> bool:
+    def _matches(rule: RuleConfig, tags: set[str], qtype: str) -> bool:
         match = rule.match
 
         if match.exclude_tags and any(tag in tags for tag in match.exclude_tags):
             return False
         if match.match_tags and not any(tag in tags for tag in match.match_tags):
+            return False
+        if match.qtypes and qtype not in match.qtypes:
             return False
         return True

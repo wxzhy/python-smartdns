@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import asyncio
+from collections.abc import Callable
 from typing import Any
 
 import dns.message
@@ -9,7 +11,7 @@ import dns.rdataclass
 import dns.rdatatype
 import dns.resolver
 
-from dns_forwarder.config import AppConfig, DispatchStrategyType
+from dns_forwarder.config import AppConfig
 from dns_forwarder.dispatcher import DispatcherRegistry
 from dns_forwarder.logging import format_tags, get_logger
 from dns_forwarder.pipeline.context import (
@@ -40,6 +42,7 @@ class PipelineEngine:
         self._dispatcher_registry = dispatcher_registry
         self._plugin_manager = plugin_manager
         self._rule_engine = RuleEngine(config.rules, config.runtime.default_upstream_group)
+        self._default_dispatcher = config.runtime.default_upstream_policy
         self._logger = get_logger("pipeline.engine")
 
     async def handle_message(
@@ -160,7 +163,14 @@ class PipelineEngine:
         if context.final_answer is not None or context.final_response is not None:
             return False
 
-        result = await self._dispatch_context(context)
+        upstream_hook_tasks: list[asyncio.Task[None]] = []
+        result = await self._dispatch_context(
+            context,
+            on_result=lambda item: upstream_hook_tasks.append(
+                asyncio.create_task(self._plugin_manager.on_upstream_response(context, item))
+            ),
+        )
+        await self._wait_upstream_hook_tasks(upstream_hook_tasks)
         self._logger.debug(
             "dispatcher 返回 request_id=%s upstream=%s success=%s error=%s tags=%s",
             context.request_id,
@@ -169,7 +179,6 @@ class PipelineEngine:
             type(result.error).__name__ if result.error is not None else "",
             format_tags(result.tags),
         )
-        await self._plugin_manager.on_upstream_response(context, result)
         if context.final_answer is None and context.final_response is None:
             if result.answer is not None:
                 context.final_answer = result.answer
@@ -222,11 +231,15 @@ class PipelineEngine:
             _nested_resolve_max_depth=self.MAX_NESTED_RESOLVE_DEPTH,
         )
 
-    async def _dispatch_context(self, context: RequestContext) -> UpstreamResult:
+    async def _dispatch_context(
+        self,
+        context: RequestContext,
+        on_result: Callable[[UpstreamResult], None] | None = None,
+    ) -> UpstreamResult:
         selection = self._rule_engine.select(context)
         context.selected_rule = selection.rule_name
         context.selected_group = selection.upstream_group
-        selected_dispatcher = selection.dispatcher or DispatchStrategyType.RACE
+        selected_dispatcher = selection.dispatcher or self._default_dispatcher
         self._logger.debug(
             "选择上游组 request_id=%s rule=%s group=%s dispatcher=%s tags=%s",
             context.request_id,
@@ -242,9 +255,19 @@ class PipelineEngine:
             group,
             selected_dispatcher,
             self._resolver_manager,
+            on_result=on_result,
         )
         context.upstream_results.append(result)
         return result
+
+    @staticmethod
+    async def _wait_upstream_hook_tasks(tasks: list[asyncio.Task[None]]) -> None:
+        if not tasks:
+            return
+        results = await asyncio.gather(*tasks, return_exceptions=True)
+        for item in results:
+            if isinstance(item, BaseException):
+                raise item
 
     async def _resolve_nested(
         self,

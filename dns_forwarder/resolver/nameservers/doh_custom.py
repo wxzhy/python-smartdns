@@ -29,10 +29,11 @@ def _get_shared_client() -> Any:
         _SHARED_CLIENT = httpx.AsyncClient(
             http2=True,
             limits=httpx.Limits(
-                max_connections=100,
-                max_keepalive_connections=20,
+                max_connections=500,
+                max_keepalive_connections=50,
                 keepalive_expiry=30,
             ),
+            verify=False,
         )
     return _SHARED_CLIENT
 
@@ -42,7 +43,7 @@ class DoHCustomNameserver(dns.nameserver.DoHNameserver):
         return (
             httpx is not None
             and self.bootstrap_address is None
-            and self.verify is True
+            and self.verify is False
             and self.http_version
             in {
                 dns.query.HTTPVersion.DEFAULT,

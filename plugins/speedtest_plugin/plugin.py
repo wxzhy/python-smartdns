@@ -126,11 +126,18 @@ class SpeedTestPlugin(Plugin):
             )
             return
 
+        response_ips = self._extract_unique_ips(result.answer)
+        logger.debug(
+            "测速收到响应 request_id=%s resolver=%s response_ips=%s",
+            context.request_id,
+            result.upstream_name,
+            response_ips,
+        )
         speedtest_context = get_speedtest_context(context)
         await self._measure_new_ips(
             context.request_id,
             speedtest_context,
-            self._extract_unique_ips(result.answer),
+            response_ips,
             phase="upstream_response",
         )
 

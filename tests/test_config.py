@@ -70,6 +70,7 @@ def test_parse_config_text_success() -> None:
 
     assert isinstance(config, AppConfig)
     assert config.runtime.default_upstream_group == "default"
+    assert config.runtime.default_upstream_policy is DispatchStrategyType.RACE
     assert config.listeners[0].protocol.value == "udp"
     assert config.upstreams[0].nameservers == ["local-ns"]
 
@@ -262,6 +263,15 @@ def test_parse_config_text_rejects_sequential_dispatcher() -> None:
 
     with pytest.raises(ValueError):
         parse_config_dict(config_dict)
+
+
+def test_parse_config_text_accepts_default_upstream_policy_override() -> None:
+    config_dict = build_config_dict()
+    config_dict["runtime"]["default_upstream_policy"] = "wait_all"
+
+    config = parse_config_dict(config_dict)
+
+    assert config.runtime.default_upstream_policy is DispatchStrategyType.WAIT_ALL
 
 
 def test_dump_config_text_outputs_roundtrippable_json() -> None:
@@ -483,10 +493,12 @@ def test_config_example_json_is_valid() -> None:
 
     assert isinstance(config, AppConfig)
     assert config.runtime.default_upstream_group == "default"
+    assert config.runtime.default_upstream_policy is DispatchStrategyType.RACE
     assert len(config.nameservers) >= 4
     assert config.webui.doh_enabled is True
     assert any(group.name == "default" for group in config.groups)
     assert any(rule.action.dispatcher is DispatchStrategyType.WAIT_ALL for rule in config.rules)
+    assert any(rule.match.qtypes for rule in config.rules)
 
 
 def test_parse_config_text_accepts_nested_groups_and_new_dispatchers() -> None:
@@ -560,7 +572,7 @@ def test_parse_config_text_accepts_rule_dispatcher_override_without_group_overri
     assert config.rules[0].action.dispatcher is DispatchStrategyType.WAIT_ALL
 
 
-def test_parse_config_text_accepts_rule_tag_matcher() -> None:
+def test_parse_config_text_accepts_rule_tag_and_qtype_matcher() -> None:
     config_dict = build_config_dict()
     config_dict["rules"] = [
         {
@@ -569,6 +581,7 @@ def test_parse_config_text_accepts_rule_tag_matcher() -> None:
             "match": {
                 "match_tags": ["proxy", "proxy", "domestic"],
                 "exclude_tags": ["direct", "direct"],
+                "qtypes": ["a", "HTTPS", "A"],
             },
             "action": {
                 "dispatcher": "wait_all",
@@ -580,6 +593,7 @@ def test_parse_config_text_accepts_rule_tag_matcher() -> None:
 
     assert config.rules[0].match.match_tags == ["proxy", "domestic"]
     assert config.rules[0].match.exclude_tags == ["direct"]
+    assert config.rules[0].match.qtypes == ["A", "HTTPS"]
 
 
 def test_parse_config_text_accepts_tree_root_config() -> None:

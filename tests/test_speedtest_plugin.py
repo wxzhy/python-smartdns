@@ -11,6 +11,9 @@ import pytest
 from dns_forwarder.pipeline import RequestContext, UpstreamResult, build_answer_from_response
 from dns_forwarder.config import PluginConfig
 from dns_forwarder.plugin_api import LoadedPlugin, PluginManager, PluginRegistry
+from dns_forwarder.config import AppConfig
+from dns_forwarder.dispatcher import DispatcherRegistry
+from dns_forwarder.pipeline.engine import PipelineEngine
 from plugins.ip_replace_plugin import (
     IpReplacePlugin,
     IpReplacePluginConfig,
@@ -125,6 +128,65 @@ class ProbeRaceService(SpeedTestService):
         return 200.0
 
 
+class StaticResolverManager:
+    def __init__(self, config: AppConfig, handlers: dict[str, object]) -> None:
+        self._groups = {group.name: group for group in config.groups}
+        self._handlers = handlers
+
+    def get_group(self, group_name: str):
+        return self._groups[group_name]
+
+    def has_group(self, group_name: str) -> bool:
+        return group_name in self._groups
+
+    async def resolve(self, upstream_name: str, context: RequestContext) -> UpstreamResult:
+        handler = self._handlers[upstream_name]
+        if callable(handler):
+            return await handler(context)
+        return handler
+
+
+def build_wait_all_config() -> AppConfig:
+    return AppConfig.model_validate(
+        {
+            "runtime": {
+                "plugin_dirs": ["plugins"],
+                "default_upstream_group": "default",
+                "loop_policy": "asyncio",
+                "log_level": "DEBUG",
+            },
+            "tree_root": {
+                "domain_dir": None,
+                "ip_dir": None,
+            },
+            "listeners": [
+                {"name": "udp", "protocol": "udp", "host": "127.0.0.1", "port": 0, "enabled": True},
+            ],
+            "nameservers": [
+                {"name": "ns-a", "protocol": "do53", "address": "127.0.0.1", "port": 53},
+                {"name": "ns-b", "protocol": "do53", "address": "127.0.0.1", "port": 54},
+            ],
+            "upstreams": [
+                {"name": "resolver-a", "nameservers": ["ns-a"]},
+                {"name": "resolver-b", "nameservers": ["ns-b"]},
+            ],
+            "groups": [
+                {"name": "default", "upstreams": ["resolver-a", "resolver-b"]},
+            ],
+            "rules": [
+                {
+                    "name": "wait-all",
+                    "enabled": True,
+                    "match": {"match_tags": [], "exclude_tags": []},
+                    "action": {"dispatcher": "wait_all"},
+                }
+            ],
+            "plugins": [],
+            "webui": {"enabled": False},
+        }
+    )
+
+
 async def test_speedtest_service_deduplicates_inflight_requests() -> None:
     service = CountingSpeedTestService()
 
@@ -209,6 +271,127 @@ async def test_speedtest_plugin_collects_unique_ip_rtts() -> None:
     assert len(speedtest_context.ip_rtt_results) == 2
     assert set(stub_service.calls) == {"203.0.113.10", "203.0.113.11"}
     assert len(stub_service.calls) == 2
+
+
+async def test_speedtest_plugin_logs_resolver_and_response_ips_on_upstream_response(
+    capture_dns_logs,
+    caplog,
+) -> None:
+    capture_dns_logs("DEBUG")
+    plugin = SpeedTestPlugin()
+    plugin.bind(SpeedTestPluginConfig(), plugin.variables_model())
+    registry = PluginRegistry()
+    await plugin.setup(registry)
+    manager = PluginManager([], registry)
+
+    stub_service = StubSpeedTestService()
+    plugin._service = stub_service
+
+    request = dns.message.make_query("example.test", "A")
+    response = dns.message.make_response(request)
+    response.answer.append(
+        dns.rrset.from_text(
+            "example.test.",
+            60,
+            "IN",
+            "A",
+            "203.0.113.10",
+            "203.0.113.11",
+        )
+    )
+    answer = build_answer_from_response(request, response)
+    context = RequestContext(
+        request=request,
+        clientaddr=("127.0.0.1", 5300),
+        listener_name="udp",
+        extensions=manager.build_context_extensions(),
+    )
+    result = UpstreamResult(upstream_name="resolver-a", duration_ms=1.0, answer=answer)
+
+    await plugin.on_upstream_response(context, result)
+
+    assert "测速收到响应" in caplog.text
+    assert "resolver=resolver-a" in caplog.text
+    assert "response_ips=" in caplog.text
+    assert "203.0.113.10" in caplog.text
+    assert "203.0.113.11" in caplog.text
+
+
+async def test_speedtest_plugin_logs_each_wait_all_upstream_response(
+    capture_dns_logs,
+    caplog,
+) -> None:
+    capture_dns_logs("DEBUG")
+    config = build_wait_all_config()
+    plugin = SpeedTestPlugin()
+    plugin.bind(SpeedTestPluginConfig(), plugin.variables_model())
+    registry = PluginRegistry()
+    await plugin.setup(registry)
+    manager = PluginManager(
+        [
+            LoadedPlugin(
+                instance=plugin,
+                config=plugin.runtime_config,
+                variables=plugin.runtime_variables,
+                raw_config=PluginConfig(name="speedtest", module="speedtest_plugin"),
+            )
+        ],
+        registry,
+    )
+
+    stub_service = StubSpeedTestService()
+    plugin._service = stub_service
+
+    async def resolve_a(context: RequestContext) -> UpstreamResult:
+        await asyncio.sleep(0.02)
+        request = context.request
+        response = dns.message.make_response(request)
+        response.answer.append(
+            dns.rrset.from_text("example.test.", 60, "IN", "A", "203.0.113.10")
+        )
+        return UpstreamResult(
+            upstream_name="resolver-a",
+            duration_ms=15.0,
+            answer=build_answer_from_response(request, response),
+        )
+
+    async def resolve_b(context: RequestContext) -> UpstreamResult:
+        await asyncio.sleep(0.01)
+        request = context.request
+        response = dns.message.make_response(request)
+        response.answer.append(
+            dns.rrset.from_text("example.test.", 60, "IN", "A", "203.0.113.20")
+        )
+        return UpstreamResult(
+            upstream_name="resolver-b",
+            duration_ms=5.0,
+            answer=build_answer_from_response(request, response),
+        )
+
+    engine = PipelineEngine(
+        config,
+        StaticResolverManager(
+            config,
+            {
+                "resolver-a": resolve_a,
+                "resolver-b": resolve_b,
+            },
+        ),
+        DispatcherRegistry(),
+        manager,
+    )
+
+    response = await engine.handle_message(
+        dns.message.make_query("example.test", "A"),
+        ("127.0.0.1", 5300),
+        "udp",
+    )
+
+    assert response is not None
+    assert stub_service.calls == ["203.0.113.20", "203.0.113.10"]
+    assert caplog.text.count("测速收到响应") == 2
+    assert "resolver=resolver-a" in caplog.text
+    assert "resolver=resolver-b" in caplog.text
 
 
 async def test_speedtest_plugin_measures_replaced_ips_after_upstream_ip_replace() -> None:

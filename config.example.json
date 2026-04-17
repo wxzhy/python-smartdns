@@ -5,6 +5,7 @@
     ],
     "loop_policy": "auto",
     "default_upstream_group": "default",
+    "default_upstream_policy": "race",
     "log_level": "INFO"
   },
   "tree_root": {
@@ -140,7 +141,11 @@
         "match_tags": [
           "example-org"
         ],
-        "exclude_tags": []
+        "exclude_tags": [],
+        "qtypes": [
+          "A",
+          "AAAA"
+        ]
       },
       "action": {
         "upstream_group": "default",
@@ -156,6 +161,9 @@
         ],
         "exclude_tags": [
           "direct"
+        ],
+        "qtypes": [
+          "HTTPS"
         ]
       },
       "action": {
@@ -172,6 +180,10 @@
         ],
         "exclude_tags": [
           "direct"
+        ],
+        "qtypes": [
+          "A",
+          "AAAA"
         ]
       },
       "action": {

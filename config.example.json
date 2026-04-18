@@ -209,6 +209,17 @@
       }
     },
     {
+      "name": "redirect",
+      "module": "redirect_plugin",
+      "enabled": false,
+      "config": {
+        "redirects": {
+          "www.example.com": "edge.example.net"
+        }
+      },
+      "variables": {}
+    },
+    {
       "name": "cache",
       "module": "cache_plugin",
       "enabled": true,

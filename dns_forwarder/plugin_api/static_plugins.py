@@ -11,6 +11,7 @@ STATIC_PLUGIN_MODULE_NAMES = (
     "ip_filter_plugin",
     "ip_replace_plugin",
     "query_log_plugin",
+    "redirect_plugin",
     "sample_plugin",
     "speedtest_plugin",
     "tag_plugin",
@@ -32,6 +33,7 @@ def _load_all_static_plugin_modules() -> dict[str, ModuleType]:
     import plugins.ip_filter_plugin as ip_filter_plugin
     import plugins.ip_replace_plugin as ip_replace_plugin
     import plugins.query_log_plugin as query_log_plugin
+    import plugins.redirect_plugin as redirect_plugin
     import plugins.sample_plugin as sample_plugin
     import plugins.speedtest_plugin as speedtest_plugin
     import plugins.tag_plugin as tag_plugin
@@ -44,6 +46,7 @@ def _load_all_static_plugin_modules() -> dict[str, ModuleType]:
         "ip_filter_plugin": ip_filter_plugin,
         "ip_replace_plugin": ip_replace_plugin,
         "query_log_plugin": query_log_plugin,
+        "redirect_plugin": redirect_plugin,
         "sample_plugin": sample_plugin,
         "speedtest_plugin": speedtest_plugin,
         "tag_plugin": tag_plugin,

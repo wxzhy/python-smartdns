@@ -323,6 +323,7 @@ def test_parse_config_text_materializes_missing_plugins_as_disabled_defaults() -
         "cloudflare_ech_plugin",
         "https_plugin",
         "ip_filter_plugin",
+        "redirect_plugin",
         "speedtest_plugin",
         "tag_plugin",
         "ip_replace_plugin",
@@ -366,6 +367,9 @@ def test_parse_config_text_materializes_missing_plugins_as_disabled_defaults() -
     assert plugins_by_module["query_log_plugin"].enabled is False
     assert plugins_by_module["query_log_plugin"].config == {"max_entries": 500}
     assert plugins_by_module["query_log_plugin"].variables == {}
+    assert plugins_by_module["redirect_plugin"].enabled is False
+    assert plugins_by_module["redirect_plugin"].config == {"redirects": {}}
+    assert plugins_by_module["redirect_plugin"].variables == {}
 
 
 def test_build_config_json_schema_includes_available_plugin_schemas() -> None:
@@ -401,6 +405,9 @@ def test_build_config_json_schema_includes_available_plugin_schemas() -> None:
     )
     query_log_option = next(
         item for item in options if item["properties"]["module"]["const"] == "query_log_plugin"
+    )
+    redirect_option = next(
+        item for item in options if item["properties"]["module"]["const"] == "redirect_plugin"
     )
 
     assert sample_option["title"] == "Sample Plugin"
@@ -450,6 +457,9 @@ def test_build_config_json_schema_includes_available_plugin_schemas() -> None:
     assert ip_replace_option["default"]["config"] == {"skip_tags": [], "rules": []}
     assert query_log_option["title"] == "Query Log Plugin"
     assert query_log_option["default"]["config"] == {"max_entries": 500}
+    assert redirect_option["title"] == "Redirect Plugin"
+    assert "redirects" in redirect_option["properties"]["config"]["properties"]
+    assert redirect_option["default"]["config"] == {"redirects": {}}
 
 
 def test_discover_available_plugins_lists_installed_plugins() -> None:
@@ -465,6 +475,7 @@ def test_discover_available_plugins_lists_installed_plugins() -> None:
         "ip_filter_plugin",
         "ip_replace_plugin",
         "query_log_plugin",
+        "redirect_plugin",
         "sample_plugin",
         "speedtest_plugin",
         "tag_plugin",

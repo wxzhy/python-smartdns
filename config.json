@@ -210,6 +210,18 @@
       "use_tcp": true
     },
     {
+      "name": "google-cn",
+      "nameservers": [
+        "google-a",
+        "google-b",
+        "google-c",
+        "google-d",
+        "google-e"
+      ],
+      "use_tcp": true,
+      "ecs": "2409:8020:2000::/48"
+    },
+    {
       "name": "v-opt",
       "nameservers": [
         "v-opt"
@@ -244,7 +256,8 @@
       "nameservers": [
         "opennic-a",
         "opennic-b"
-      ]
+      ],
+      "use_tcp": true
     }
   ],
   "groups": [
@@ -288,9 +301,29 @@
       "upstreams": [
         "opennic"
       ]
+    },
+    {
+      "name": "gws",
+      "upstreams": [
+        "google-cn"
+      ]
     }
   ],
   "rules": [
+    {
+      "name": "google-cn",
+      "enabled": true,
+      "match": {
+        "match_tags": [
+          "google-cn"
+        ],
+        "exclude_tags": []
+      },
+      "action": {
+        "upstream_group": "gws",
+        "dispatcher": "wait_all"
+      }
+    },
     {
       "name": "cn",
       "enabled": true,
@@ -350,6 +383,19 @@
         "upstream_group": "default",
         "dispatcher": "wait_all"
       }
+    },
+    {
+      "name": "https",
+      "enabled": true,
+      "match": {
+        "qtypes": [
+          "HTTPS"
+        ]
+      },
+      "action": {
+        "upstream_group": "global",
+        "dispatcher": "race"
+      }
     }
   ],
   "plugins": [
@@ -372,7 +418,7 @@
         "max_concurrency": 64,
         "probe_timeout": 0.5,
         "ping_count": 1,
-        "ping_privileged": false,
+        "ping_privileged": true,
         "response_ip_limit": 2,
         "response_ttl_seconds": 300,
         "skip_tags": [],

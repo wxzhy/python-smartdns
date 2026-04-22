@@ -71,6 +71,7 @@ def test_parse_config_text_success() -> None:
     assert isinstance(config, AppConfig)
     assert config.runtime.default_upstream_group == "default"
     assert config.runtime.default_upstream_policy is DispatchStrategyType.RACE
+    assert config.runtime.bootstrap_resolver == []
     assert config.listeners[0].protocol.value == "udp"
     assert config.upstreams[0].nameservers == ["local-ns"]
 
@@ -108,6 +109,36 @@ def test_parse_config_text_accepts_all_supported_nameserver_protocols() -> None:
             "http_version": "h2",
         },
         {
+            "name": "doh-httpx-ns",
+            "protocol": "doh_httpx",
+            "url": "https://cloudflare-dns.com/dns-query",
+            "verify": True,
+            "want_get": False,
+            "http_version": "h2",
+            "http_host": "cloudflare-dns.com",
+            "server_hostname": "cloudflare-dns.com",
+        },
+        {
+            "name": "doh-aiohttp-ns",
+            "protocol": "doh_aiohttp",
+            "url": "https://1.1.1.1/dns-query",
+            "verify": True,
+            "want_get": False,
+            "http_version": "h1",
+            "http_host": "cloudflare-dns.com",
+            "server_hostname": "cloudflare-dns.com",
+        },
+        {
+            "name": "doh-curl-cffi-ns",
+            "protocol": "doh_curl_cffi",
+            "url": "https://1.1.1.1/dns-query",
+            "verify": True,
+            "want_get": True,
+            "http_version": "h3",
+            "http_host": "cloudflare-dns.com",
+            "server_hostname": "cloudflare-dns.com",
+        },
+        {
             "name": "dot-ns",
             "protocol": "dot",
             "address": "9.9.9.9",
@@ -142,6 +173,9 @@ def test_parse_config_text_accepts_all_supported_nameserver_protocols() -> None:
                 "udp-custom-ns",
                 "doh-ns",
                 "doh-custom-ns",
+                "doh-httpx-ns",
+                "doh-aiohttp-ns",
+                "doh-curl-cffi-ns",
                 "dot-ns",
                 "doq-ns",
                 "dnscrypt-ns",
@@ -152,16 +186,60 @@ def test_parse_config_text_accepts_all_supported_nameserver_protocols() -> None:
 
     config = parse_config_dict(config_dict)
 
-    assert len(config.nameservers) == 7
+    assert len(config.nameservers) == 10
     assert config.upstreams[0].nameservers == [
         "udp-ns",
         "udp-custom-ns",
         "doh-ns",
         "doh-custom-ns",
+        "doh-httpx-ns",
+        "doh-aiohttp-ns",
+        "doh-curl-cffi-ns",
         "dot-ns",
         "doq-ns",
         "dnscrypt-ns",
     ]
+
+
+def test_parse_config_text_normalizes_bootstrap_resolver() -> None:
+    config_dict = build_config_dict()
+    config_dict["runtime"]["bootstrap_resolver"] = [
+        " 1.1.1.1 ",
+        "8.8.8.8",
+        "1.1.1.1",
+        "",
+    ]
+
+    config = parse_config_dict(config_dict)
+
+    assert config.runtime.bootstrap_resolver == ["1.1.1.1", "8.8.8.8"]
+
+
+def test_parse_config_text_rejects_unsupported_doh_client_http_versions() -> None:
+    config_dict = build_config_dict()
+    config_dict["nameservers"] = [
+        {
+            "name": "bad-aiohttp",
+            "protocol": "doh_aiohttp",
+            "url": "https://dns.example/dns-query",
+            "http_version": "h2",
+        }
+    ]
+    config_dict["upstreams"][0]["nameservers"] = ["bad-aiohttp"]
+
+    with pytest.raises(ValueError, match="doh_aiohttp"):
+        parse_config_dict(config_dict)
+
+    config_dict["nameservers"][0] = {
+        "name": "bad-httpx",
+        "protocol": "doh_httpx",
+        "url": "https://dns.example/dns-query",
+        "http_version": "h3",
+    }
+    config_dict["upstreams"][0]["nameservers"] = ["bad-httpx"]
+
+    with pytest.raises(ValueError, match="doh_httpx"):
+        parse_config_dict(config_dict)
 
 
 def test_parse_config_text_allows_doh_without_udp_tcp_listeners() -> None:

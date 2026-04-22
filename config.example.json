@@ -6,6 +6,10 @@
     "loop_policy": "auto",
     "default_upstream_group": "default",
     "default_upstream_policy": "race",
+    "bootstrap_resolver": [
+      "1.1.1.1",
+      "8.8.8.8"
+    ],
     "log_level": "INFO"
   },
   "tree_root": {
@@ -71,6 +75,36 @@
       "verify": true,
       "want_get": false,
       "http_version": "h2"
+    },
+    {
+      "name": "cloudflare-doh-httpx-example",
+      "protocol": "doh_httpx",
+      "url": "https://cloudflare-dns.com/dns-query",
+      "verify": true,
+      "want_get": false,
+      "http_version": "h2",
+      "http_host": null,
+      "server_hostname": null
+    },
+    {
+      "name": "cloudflare-doh-aiohttp-example",
+      "protocol": "doh_aiohttp",
+      "url": "https://1.1.1.1/dns-query",
+      "verify": true,
+      "want_get": false,
+      "http_version": "h1",
+      "http_host": "cloudflare-dns.com",
+      "server_hostname": "cloudflare-dns.com"
+    },
+    {
+      "name": "cloudflare-doh-curl-cffi-example",
+      "protocol": "doh_curl_cffi",
+      "url": "https://1.1.1.1/dns-query",
+      "verify": true,
+      "want_get": true,
+      "http_version": "h3",
+      "http_host": "cloudflare-dns.com",
+      "server_hostname": "cloudflare-dns.com"
     },
     {
       "name": "adguard-doq",

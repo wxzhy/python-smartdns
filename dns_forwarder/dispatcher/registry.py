@@ -1,8 +1,7 @@
 from __future__ import annotations
 
 import asyncio
-from collections.abc import Callable
-from collections.abc import Iterable
+from collections.abc import Callable, Iterable
 
 from dns_forwarder.config import DispatchStrategyType, UpstreamGroupConfig
 from dns_forwarder.logging import get_logger

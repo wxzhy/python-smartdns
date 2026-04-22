@@ -81,6 +81,13 @@ def _pad_query(message: bytes) -> bytes:
     return message + b"\x80" + (b"\x00" * (padding_size - 1))
 
 
+def _is_multicast(address: str) -> bool:
+    try:
+        return ipaddress.ip_address(address).is_multicast
+    except ValueError:
+        return False
+
+
 class DNSCryptResolver:
     def __init__(
         self,
@@ -332,7 +339,7 @@ class DNSCryptResolver:
                 dns.query._wait_for_readable(sock, expiration)
                 response_wire, from_address = sock.recvfrom(65535)
                 if dns.query._addresses_equal(af, from_address, destination) or (
-                    is_multicast(self.address) and from_address[1:] == destination[1:]
+                    _is_multicast(self.address) and from_address[1:] == destination[1:]
                 ):
                     break
                 if not ignore_unexpected:

@@ -8,12 +8,11 @@ import dns.message
 import dns.rrset
 import pytest
 
-from dns_forwarder.pipeline import RequestContext, UpstreamResult, build_answer_from_response
-from dns_forwarder.config import PluginConfig
-from dns_forwarder.plugin_api import LoadedPlugin, PluginManager, PluginRegistry
-from dns_forwarder.config import AppConfig
+from dns_forwarder.config import AppConfig, PluginConfig
 from dns_forwarder.dispatcher import DispatcherRegistry
+from dns_forwarder.pipeline import RequestContext, UpstreamResult, build_answer_from_response
 from dns_forwarder.pipeline.engine import PipelineEngine
+from dns_forwarder.plugin_api import LoadedPlugin, PluginManager, PluginRegistry
 from plugins.ip_replace_plugin import (
     IpReplacePlugin,
     IpReplacePluginConfig,

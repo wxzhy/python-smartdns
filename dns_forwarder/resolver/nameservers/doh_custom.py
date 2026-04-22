@@ -18,24 +18,32 @@ except ImportError:  # pragma: no cover
     httpx = None  # type: ignore[assignment]
 
 
-_SHARED_CLIENT: Any | None = None
+_SHARED_CLIENTS: dict[bool, Any] = {}
 
 
-def _get_shared_client() -> Any:
-    global _SHARED_CLIENT
-    if _SHARED_CLIENT is None:
+def _get_shared_client(verify: bool = True) -> Any:
+    client = _SHARED_CLIENTS.get(verify)
+    if client is None:
         if httpx is None:  # pragma: no cover
             raise RuntimeError("httpx is required for doh_custom shared client")
-        _SHARED_CLIENT = httpx.AsyncClient(
+        client = httpx.AsyncClient(
             http2=True,
             limits=httpx.Limits(
                 max_connections=500,
                 max_keepalive_connections=50,
                 keepalive_expiry=30,
             ),
-            verify=False,
+            verify=verify,
         )
-    return _SHARED_CLIENT
+        _SHARED_CLIENTS[verify] = client
+    return client
+
+
+async def close_shared_sessions() -> None:
+    clients = list(_SHARED_CLIENTS.values())
+    _SHARED_CLIENTS.clear()
+    for client in clients:
+        await client.aclose()
 
 
 class DoHCustomNameserver(dns.nameserver.DoHNameserver):
@@ -43,7 +51,7 @@ class DoHCustomNameserver(dns.nameserver.DoHNameserver):
         return (
             httpx is not None
             and self.bootstrap_address is None
-            and self.verify is False
+            and isinstance(self.verify, bool)
             and self.http_version
             in {
                 dns.query.HTTPVersion.DEFAULT,
@@ -80,7 +88,7 @@ class DoHCustomNameserver(dns.nameserver.DoHNameserver):
             return await dns.asyncquery.https(
                 request,
                 self.url,
-                client=_get_shared_client(),
+                client=_get_shared_client(self.verify),
                 **kwargs,
             )
         return await dns.asyncquery.https(

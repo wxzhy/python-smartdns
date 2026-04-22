@@ -22,7 +22,10 @@ class ResolverManager:
     ) -> None:
         self._groups = {group.name: group for group in config.groups}
         self._plugin_registry = plugin_registry
-        self._nameservers = build_nameserver_map(config.nameservers)
+        self._nameservers = build_nameserver_map(
+            config.nameservers,
+            config.runtime.bootstrap_resolver,
+        )
         self._resolvers = {
             upstream.name: self._build_resolver(upstream) for upstream in config.upstreams
         }

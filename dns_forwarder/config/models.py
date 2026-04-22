@@ -36,6 +36,9 @@ class NameserverProtocol(StrEnum):
     DO53_CUSTOM = "do53_custom"
     DOH = "doh"
     DOH_CUSTOM = "doh_custom"
+    DOH_HTTPX = "doh_httpx"
+    DOH_AIOHTTP = "doh_aiohttp"
+    DOH_CURL_CFFI = "doh_curl_cffi"
     DOT = "dot"
     DOQ = "doq"
     DNSCRYPT = "dnscrypt"
@@ -62,6 +65,7 @@ class RuntimeConfig(StrictConfigModel):
     loop_policy: str = "auto"
     default_upstream_group: str = "default"
     default_upstream_policy: DispatchStrategyType = DispatchStrategyType.RACE
+    bootstrap_resolver: list[str] = Field(default_factory=list)
     log_level: str = "INFO"
 
     @field_validator("plugin_dirs")
@@ -70,6 +74,21 @@ class RuntimeConfig(StrictConfigModel):
         if not value:
             raise ValueError("至少需要一个插件目录")
         return value
+
+    @field_validator("bootstrap_resolver", mode="before")
+    @classmethod
+    def normalize_bootstrap_resolver(cls, value: list[str] | None) -> list[str]:
+        if value is None:
+            return []
+        seen: set[str] = set()
+        normalized: list[str] = []
+        for item in value:
+            address = str(item).strip()
+            if not address or address in seen:
+                continue
+            seen.add(address)
+            normalized.append(address)
+        return normalized
 
     @field_validator("log_level")
     @classmethod
@@ -147,6 +166,39 @@ class DoHCustomNameserverConfig(BaseNameserverConfig):
     http_version: HTTPVersionType = HTTPVersionType.DEFAULT
 
 
+class BaseHTTPClientDoHNameserverConfig(BaseNameserverConfig):
+    url: str
+    verify: bool | str = True
+    want_get: bool = False
+    http_version: HTTPVersionType = HTTPVersionType.DEFAULT
+    http_host: str | None = None
+    server_hostname: str | None = None
+
+
+class DoHHttpxNameserverConfig(BaseHTTPClientDoHNameserverConfig):
+    protocol: Literal[NameserverProtocol.DOH_HTTPX] = NameserverProtocol.DOH_HTTPX
+
+    @model_validator(mode="after")
+    def validate_http_version(self) -> "DoHHttpxNameserverConfig":
+        if self.http_version is HTTPVersionType.H3:
+            raise ValueError("doh_httpx 不支持 HTTP/3")
+        return self
+
+
+class DoHAiohttpNameserverConfig(BaseHTTPClientDoHNameserverConfig):
+    protocol: Literal[NameserverProtocol.DOH_AIOHTTP] = NameserverProtocol.DOH_AIOHTTP
+
+    @model_validator(mode="after")
+    def validate_http_version(self) -> "DoHAiohttpNameserverConfig":
+        if self.http_version in {HTTPVersionType.H2, HTTPVersionType.H3}:
+            raise ValueError("doh_aiohttp 仅支持 default / h1")
+        return self
+
+
+class DoHCurlCffiNameserverConfig(BaseHTTPClientDoHNameserverConfig):
+    protocol: Literal[NameserverProtocol.DOH_CURL_CFFI] = NameserverProtocol.DOH_CURL_CFFI
+
+
 class DoTNameserverConfig(BaseNameserverConfig):
     protocol: Literal[NameserverProtocol.DOT] = NameserverProtocol.DOT
     address: str
@@ -178,6 +230,9 @@ NameserverConfig = Annotated[
     | Do53CustomNameserverConfig
     | DoHNameserverConfig
     | DoHCustomNameserverConfig
+    | DoHHttpxNameserverConfig
+    | DoHAiohttpNameserverConfig
+    | DoHCurlCffiNameserverConfig
     | DoTNameserverConfig
     | DoQNameserverConfig
     | DNSCryptNameserverConfig,

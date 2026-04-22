@@ -5,22 +5,25 @@ description = "Async dns-forwarder skeleton built with dnspython and FastAPI"
 readme = "README.md"
 requires-python = ">=3.14"
 dependencies = [
+    "aiodns>=4.0.0",
     "async-lru>=2.0.5",
     "dnspython[doh,doq,idna]>=2.8.0",
     "fastapi[all]>=0.135.2",
+    "httpx>=0.28.1",
     "icmplib>=3.0.4",
     "marisa-trie>=1.4.0",
     "pydantic>=2.11.0",
     "pydantic-settings>=2.10.0",
     "py-radix>=0.10.0",
     "uvicorn>=0.35.0",
-    "winuvloop>=0.2.0; sys_platform == 'win32'",
+    "winuvloop>=0.2.0",
     "pynacl>=1.6.2",
+    "aiohttp[speedups]>=3.13.5",
+    "curl-cffi>=0.15.0",
 ]
 
 [dependency-groups]
 dev = [
-    "httpx>=0.28.1",
     "pytest>=8.4.1",
     "pytest-asyncio>=1.2.0",
     "ruff>=0.14.0",

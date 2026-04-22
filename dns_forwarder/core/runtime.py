@@ -12,6 +12,7 @@ from dns_forwarder.logging import configure_logging, get_logger
 from dns_forwarder.pipeline.engine import PipelineEngine
 from dns_forwarder.plugin_api import PluginManager
 from dns_forwarder.resolver import ResolverManager
+from dns_forwarder.resolver.nameservers import close_shared_sessions as close_nameserver_sessions
 from dns_forwarder.server import TcpDnsServer, UdpDnsServer
 from dns_forwarder.webui import WEBUI_RELOAD_ENDPOINT, ManagedUvicornServer, create_webui_app
 from plugins.query_log_plugin import QUERY_LOG_STORE_KEY, QueryLogStore
@@ -68,6 +69,7 @@ class RuntimeManager:
             for listener in self._listeners:
                 await listener.stop()
             self._listeners.clear()
+            await close_nameserver_sessions()
 
     async def reload(self) -> RuntimeState:
         async with self._lock:

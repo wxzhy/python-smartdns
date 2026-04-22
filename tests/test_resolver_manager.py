@@ -86,23 +86,21 @@ def test_build_nameserver_supports_doh_custom() -> None:
 
 
 def test_build_nameserver_supports_doh_httpx() -> None:
-    with patch("dns_forwarder.resolver.nameservers.doh_httpx._get_shared_client") as client:
-        nameserver = build_nameserver(
-            DoHHttpxNameserverConfig(
-                name="cloudflare-httpx",
-                url="https://1.1.1.1/dns-query",
-                want_get=True,
-                http_version=HTTPVersionType.H2,
-                http_host="cloudflare-dns.com",
-                server_hostname="cloudflare-dns.com",
-            )
+    nameserver = build_nameserver(
+        DoHHttpxNameserverConfig(
+            name="cloudflare-httpx",
+            url="https://1.1.1.1/dns-query",
+            want_get=True,
+            http_version=HTTPVersionType.H2,
+            http_host="cloudflare-dns.com",
+            server_hostname="cloudflare-dns.com",
         )
+    )
 
     assert nameserver.__class__.__name__ == "DoHHttpxNameserver"
     assert nameserver.url == "https://1.1.1.1/dns-query"
-    assert nameserver.effective_url == "https://cloudflare-dns.com/dns-query"
     assert nameserver.http_host == "cloudflare-dns.com"
-    client.assert_called_once_with(True, True)
+    assert nameserver.server_hostname == "cloudflare-dns.com"
 
 
 def test_build_nameserver_supports_doh_aiohttp() -> None:
@@ -124,24 +122,19 @@ def test_build_nameserver_supports_doh_aiohttp() -> None:
 
 
 def test_build_nameserver_supports_doh_curl_cffi() -> None:
-    with patch("dns_forwarder.resolver.nameservers.doh_curl_cffi._get_shared_session") as session:
-        nameserver = build_nameserver(
-            DoHCurlCffiNameserverConfig(
-                name="cloudflare-curl",
-                url="https://1.1.1.1/dns-query",
-                want_get=True,
-                http_version=HTTPVersionType.H3,
-                http_host="cloudflare-dns.com",
-                server_hostname="cloudflare-dns.com",
-            ),
-            bootstrap_resolver=["1.1.1.1", "8.8.8.8"],
-        )
+    nameserver = build_nameserver(
+        DoHCurlCffiNameserverConfig(
+            name="cloudflare-curl",
+            url="https://cloudflare-dns.com/dns-query",
+            want_get=True,
+            http_version=HTTPVersionType.H3,
+            http_host="cloudflare-dns.com",
+        ),
+        bootstrap_resolver=["1.1.1.1", "8.8.8.8"],
+    )
 
     assert nameserver.__class__.__name__ == "DoHCurlCffiNameserver"
-    assert nameserver.effective_url == "https://cloudflare-dns.com/dns-query"
-    assert nameserver.resolve_entries == ("cloudflare-dns.com:443:1.1.1.1",)
-    session.assert_called_once()
-    assert session.call_args.kwargs["bootstrap_resolver"] == ("1.1.1.1", "8.8.8.8")
+    assert nameserver.url == "https://cloudflare-dns.com/dns-query"
 
 
 def test_build_nameserver_supports_dot() -> None:

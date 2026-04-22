@@ -4,17 +4,14 @@ from unittest.mock import AsyncMock, patch
 
 import dns.message
 import dns.query
-import pytest
 
 from dns_forwarder.config import HTTPVersionType
+from dns_forwarder.resolver.nameservers import doh_aiohttp, doh_curl_cffi
 from dns_forwarder.resolver.nameservers._trick_sockets import (
     TrickyDatagramSocket,
     TrickyStreamSocket,
 )
 from dns_forwarder.resolver.nameservers.do53_custom import Do53CustomNameserver
-from dns_forwarder.resolver.nameservers.doh_aiohttp import (
-    _SHARED_SESSIONS as AIOHTTP_SHARED_SESSIONS,
-)
 from dns_forwarder.resolver.nameservers.doh_aiohttp import (
     DoHAiohttpNameserver,
 )
@@ -22,10 +19,6 @@ from dns_forwarder.resolver.nameservers.doh_aiohttp import (
     _get_shared_session as get_aiohttp_shared_session,
 )
 from dns_forwarder.resolver.nameservers.doh_curl_cffi import (
-    _SHARED_SESSIONS as CURL_SHARED_SESSIONS,
-)
-from dns_forwarder.resolver.nameservers.doh_curl_cffi import (
-    CurlOpt,
     DoHCurlCffiNameserver,
 )
 from dns_forwarder.resolver.nameservers.doh_curl_cffi import (
@@ -239,24 +232,24 @@ async def test_doh_httpx_get_query_uses_dns_param_and_host_header() -> None:
             http_host="cloudflare-dns.com",
             server_hostname="cloudflare-dns.com",
         )
-
-    result = await nameserver.async_query(
-        request,
-        timeout=1.0,
-        source=None,
-        source_port=0,
-        max_size=False,
-        backend=object(),
-    )
+        result = await nameserver.async_query(
+            request,
+            timeout=1.0,
+            source=None,
+            source_port=0,
+            max_size=False,
+            backend=object(),
+        )
 
     assert result.question == request.question
     fake_client.request.assert_awaited_once()
     args = fake_client.request.await_args.args
     kwargs = fake_client.request.await_args.kwargs
     assert args[0] == "GET"
-    assert args[1].startswith("https://cloudflare-dns.com/dns-query?dns=")
+    assert args[1].startswith("https://1.1.1.1/dns-query?dns=")
     assert kwargs["headers"]["Host"] == "cloudflare-dns.com"
     assert kwargs["content"] is None
+    assert kwargs["extensions"] == {"sni_hostname": "cloudflare-dns.com"}
 
 
 async def test_doh_aiohttp_post_query_passes_tls_hostname_and_body() -> None:
@@ -303,7 +296,7 @@ async def test_doh_aiohttp_post_query_passes_tls_hostname_and_body() -> None:
     assert fake_session.call_kwargs["server_hostname"] == "cloudflare-dns.com"
 
 
-async def test_doh_curl_cffi_get_query_uses_effective_url_and_host_header() -> None:
+async def test_doh_curl_cffi_get_query_uses_request_options_and_host_header() -> None:
     request = dns.message.make_query("example.test", "A")
     fake_session = AsyncMock()
     fake_session.request.return_value = FakeResponse(_doh_response_wire(request))
@@ -318,32 +311,33 @@ async def test_doh_curl_cffi_get_query_uses_effective_url_and_host_header() -> N
             want_get=True,
             http_version=HTTPVersionType.H3,
             http_host="cloudflare-dns.com",
-            server_hostname="cloudflare-dns.com",
             bootstrap_resolver=["1.1.1.1"],
         )
-
-    result = await nameserver.async_query(
-        request,
-        timeout=1.0,
-        source=None,
-        source_port=0,
-        max_size=False,
-        backend=object(),
-    )
+        result = await nameserver.async_query(
+            request,
+            timeout=1.0,
+            source=None,
+            source_port=0,
+            max_size=False,
+            backend=object(),
+        )
 
     assert result.question == request.question
     fake_session.request.assert_awaited_once()
     args = fake_session.request.await_args.args
     kwargs = fake_session.request.await_args.kwargs
     assert args[0] == "GET"
-    assert args[1].startswith("https://cloudflare-dns.com/dns-query?dns=")
+    assert args[1].startswith("https://1.1.1.1/dns-query?dns=")
     assert kwargs["headers"]["Host"] == "cloudflare-dns.com"
     assert kwargs["data"] is None
-    assert nameserver.resolve_entries == ("cloudflare-dns.com:443:1.1.1.1",)
+    assert kwargs["verify"] is True
+    assert kwargs["http_version"] is not None
 
 
 async def test_doh_aiohttp_shared_session_uses_bootstrap_resolver() -> None:
-    AIOHTTP_SHARED_SESSIONS.clear()
+    doh_aiohttp._SHARED_SESSION = None
+    doh_aiohttp._SHARED_BOOTSTRAP_RESOLVER = None
+    doh_aiohttp._SHARED_LOOP_ID = None
 
     with (
         patch("dns_forwarder.resolver.nameservers.doh_aiohttp.AsyncResolver") as resolver,
@@ -356,26 +350,18 @@ async def test_doh_aiohttp_shared_session_uses_bootstrap_resolver() -> None:
     resolver.assert_called_once_with(nameservers=["1.1.1.1", "8.8.8.8"])
     connector.assert_called_once_with(resolver=resolver.return_value, limit=500)
     session.assert_called_once_with(connector=connector.return_value)
-    AIOHTTP_SHARED_SESSIONS.clear()
+    doh_aiohttp._SHARED_SESSION = None
+    doh_aiohttp._SHARED_BOOTSTRAP_RESOLVER = None
+    doh_aiohttp._SHARED_LOOP_ID = None
 
 
-def test_doh_curl_cffi_shared_session_uses_bootstrap_resolver_and_resolve() -> None:
-    if CurlOpt is None:
-        pytest.skip("curl_cffi is not available")
-    CURL_SHARED_SESSIONS.clear()
+def test_doh_curl_cffi_shared_session_uses_single_session() -> None:
+    doh_curl_cffi._SHARED_SESSION = None
 
     with patch("dns_forwarder.resolver.nameservers.doh_curl_cffi.AsyncSession") as session:
-        result = get_curl_shared_session(
-            verify="/tmp/cert.pem",
-            http_version=HTTPVersionType.H3,
-            bootstrap_resolver=("1.1.1.1", "8.8.8.8"),
-            resolve_entries=("cloudflare-dns.com:443:1.1.1.1",),
-        )
+        result = get_curl_shared_session()
 
     assert result is session.return_value
     kwargs = session.call_args.kwargs
-    assert kwargs["verify"] is True
-    assert kwargs["curl_options"][CurlOpt.DNS_SERVERS] == "1.1.1.1,8.8.8.8"
-    assert kwargs["curl_options"][CurlOpt.RESOLVE] == ["cloudflare-dns.com:443:1.1.1.1"]
-    assert kwargs["curl_options"][CurlOpt.CAINFO] == "/tmp/cert.pem"
-    CURL_SHARED_SESSIONS.clear()
+    assert kwargs == {"max_clients": 500}
+    doh_curl_cffi._SHARED_SESSION = None

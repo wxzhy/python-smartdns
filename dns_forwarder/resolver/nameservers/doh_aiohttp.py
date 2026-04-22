@@ -25,14 +25,16 @@ except ImportError:  # pragma: no cover
     AsyncResolver = None  # type: ignore[assignment]
 
 
-_SHARED_SESSIONS: dict[tuple[tuple[str, ...], int], Any] = {}
+_SHARED_SESSION: Any | None = None
+_SHARED_BOOTSTRAP_RESOLVER: tuple[str, ...] | None = None
+_SHARED_LOOP_ID: int | None = None
 
 
 def _get_shared_session(bootstrap_resolver: tuple[str, ...]) -> Any:
+    global _SHARED_BOOTSTRAP_RESOLVER, _SHARED_LOOP_ID, _SHARED_SESSION
     loop = asyncio.get_running_loop()
-    key = (bootstrap_resolver, id(loop))
-    session = _SHARED_SESSIONS.get(key)
-    if session is None:
+    loop_id = id(loop)
+    if _SHARED_SESSION is None or _SHARED_SESSION.closed or _SHARED_LOOP_ID != loop_id:
         if aiohttp is None or AsyncResolver is None:  # pragma: no cover
             raise RuntimeError("aiohttp and aiodns are required for doh_aiohttp")
         resolver = (
@@ -41,17 +43,24 @@ def _get_shared_session(bootstrap_resolver: tuple[str, ...]) -> Any:
             else None
         )
         connector = aiohttp.TCPConnector(resolver=resolver, limit=500)
-        session = aiohttp.ClientSession(connector=connector)
-        _SHARED_SESSIONS[key] = session
-    return session
+        _SHARED_SESSION = aiohttp.ClientSession(connector=connector)
+        _SHARED_BOOTSTRAP_RESOLVER = bootstrap_resolver
+        _SHARED_LOOP_ID = loop_id
+        return _SHARED_SESSION
+
+    if _SHARED_BOOTSTRAP_RESOLVER != bootstrap_resolver:
+        raise RuntimeError("doh_aiohttp bootstrap_resolver changed while session is active")
+    return _SHARED_SESSION
 
 
 async def close_shared_sessions() -> None:
-    sessions = list(_SHARED_SESSIONS.values())
-    _SHARED_SESSIONS.clear()
-    for session in sessions:
-        if not session.closed:
-            await session.close()
+    global _SHARED_BOOTSTRAP_RESOLVER, _SHARED_LOOP_ID, _SHARED_SESSION
+    session = _SHARED_SESSION
+    _SHARED_SESSION = None
+    _SHARED_BOOTSTRAP_RESOLVER = None
+    _SHARED_LOOP_ID = None
+    if session is not None and not session.closed:
+        await session.close()
 
 
 class DoHAiohttpNameserver(dns.nameserver.Nameserver):

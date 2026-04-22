@@ -168,24 +168,29 @@ class DoHCustomNameserverConfig(BaseNameserverConfig):
 
 class BaseHTTPClientDoHNameserverConfig(BaseNameserverConfig):
     url: str
-    verify: bool | str = True
     want_get: bool = False
     http_version: HTTPVersionType = HTTPVersionType.DEFAULT
     http_host: str | None = None
+
+
+class BaseTLSHTTPClientDoHNameserverConfig(BaseHTTPClientDoHNameserverConfig):
+    verify: bool | str = True
     server_hostname: str | None = None
 
 
-class DoHHttpxNameserverConfig(BaseHTTPClientDoHNameserverConfig):
+class DoHHttpxNameserverConfig(BaseTLSHTTPClientDoHNameserverConfig):
     protocol: Literal[NameserverProtocol.DOH_HTTPX] = NameserverProtocol.DOH_HTTPX
 
     @model_validator(mode="after")
     def validate_http_version(self) -> "DoHHttpxNameserverConfig":
-        if self.http_version is HTTPVersionType.H3:
-            raise ValueError("doh_httpx 不支持 HTTP/3")
+        if self.http_version in {HTTPVersionType.H1, HTTPVersionType.H3}:
+            raise ValueError("doh_httpx 仅支持 default / h2")
+        if self.verify is not True:
+            raise ValueError("doh_httpx 不支持按请求配置 verify")
         return self
 
 
-class DoHAiohttpNameserverConfig(BaseHTTPClientDoHNameserverConfig):
+class DoHAiohttpNameserverConfig(BaseTLSHTTPClientDoHNameserverConfig):
     protocol: Literal[NameserverProtocol.DOH_AIOHTTP] = NameserverProtocol.DOH_AIOHTTP
 
     @model_validator(mode="after")
@@ -197,6 +202,7 @@ class DoHAiohttpNameserverConfig(BaseHTTPClientDoHNameserverConfig):
 
 class DoHCurlCffiNameserverConfig(BaseHTTPClientDoHNameserverConfig):
     protocol: Literal[NameserverProtocol.DOH_CURL_CFFI] = NameserverProtocol.DOH_CURL_CFFI
+    verify: bool = True
 
 
 class DoTNameserverConfig(BaseNameserverConfig):

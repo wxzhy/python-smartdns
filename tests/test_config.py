@@ -136,7 +136,6 @@ def test_parse_config_text_accepts_all_supported_nameserver_protocols() -> None:
             "want_get": True,
             "http_version": "h3",
             "http_host": "cloudflare-dns.com",
-            "server_hostname": "cloudflare-dns.com",
         },
         {
             "name": "dot-ns",
@@ -239,6 +238,28 @@ def test_parse_config_text_rejects_unsupported_doh_client_http_versions() -> Non
     config_dict["upstreams"][0]["nameservers"] = ["bad-httpx"]
 
     with pytest.raises(ValueError, match="doh_httpx"):
+        parse_config_dict(config_dict)
+
+    config_dict["nameservers"][0] = {
+        "name": "bad-curl",
+        "protocol": "doh_curl_cffi",
+        "url": "https://1.1.1.1/dns-query",
+        "server_hostname": "cloudflare-dns.com",
+    }
+    config_dict["upstreams"][0]["nameservers"] = ["bad-curl"]
+
+    with pytest.raises(ValueError, match="server_hostname"):
+        parse_config_dict(config_dict)
+
+    config_dict["nameservers"][0] = {
+        "name": "bad-curl-verify",
+        "protocol": "doh_curl_cffi",
+        "url": "https://1.1.1.1/dns-query",
+        "verify": "/tmp/cert.pem",
+    }
+    config_dict["upstreams"][0]["nameservers"] = ["bad-curl-verify"]
+
+    with pytest.raises(ValueError, match="bool"):
         parse_config_dict(config_dict)
 
 

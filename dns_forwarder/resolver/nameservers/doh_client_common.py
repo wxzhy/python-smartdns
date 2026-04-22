@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import base64
 from dataclasses import dataclass
-from ipaddress import ip_address
 from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 
 import dns.message
@@ -49,14 +48,6 @@ def parse_doh_response(
     )
 
 
-def replace_url_hostname(url: str, hostname: str | None) -> str:
-    if not hostname:
-        return url
-    parts = urlsplit(url)
-    port = f":{parts.port}" if parts.port else ""
-    return urlunsplit(parts._replace(netloc=f"{_format_host(hostname)}{port}"))
-
-
 def url_hostname(url: str) -> str | None:
     return urlsplit(url).hostname
 
@@ -68,16 +59,6 @@ def url_port(url: str) -> int:
     return 443 if parts.scheme == "https" else 80
 
 
-def is_ip_address(value: str | None) -> bool:
-    if value is None:
-        return False
-    try:
-        ip_address(value)
-    except ValueError:
-        return False
-    return True
-
-
 def _url_with_dns_param(url: str, wire: bytes) -> str:
     parts = urlsplit(url)
     query_items = parse_qsl(parts.query, keep_blank_values=True)
@@ -87,9 +68,3 @@ def _url_with_dns_param(url: str, wire: bytes) -> str:
 
 def _base64url_no_padding(data: bytes) -> str:
     return base64.urlsafe_b64encode(data).rstrip(b"=").decode("ascii")
-
-
-def _format_host(hostname: str) -> str:
-    if ":" in hostname and not hostname.startswith("["):
-        return f"[{hostname}]"
-    return hostname

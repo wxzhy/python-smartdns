@@ -11,7 +11,6 @@ from dns_forwarder.config import DoHHttpxNameserverConfig, HTTPVersionType
 from .doh_client_common import (
     build_doh_request,
     parse_doh_response,
-    replace_url_hostname,
     url_hostname,
     url_port,
 )
@@ -22,32 +21,31 @@ except ImportError:  # pragma: no cover
     httpx = None  # type: ignore[assignment]
 
 
-_SHARED_CLIENTS: dict[tuple[bool | str, bool], Any] = {}
+_SHARED_CLIENT: Any | None = None
 
 
-def _get_shared_client(verify: bool | str, http2: bool) -> Any:
-    key = (verify, http2)
-    client = _SHARED_CLIENTS.get(key)
-    if client is None:
+def _get_shared_client() -> Any:
+    global _SHARED_CLIENT
+    if _SHARED_CLIENT is None:
         if httpx is None:  # pragma: no cover
             raise RuntimeError("httpx is required for doh_httpx")
-        client = httpx.AsyncClient(
-            http2=http2,
+        _SHARED_CLIENT = httpx.AsyncClient(
+            http2=True,
             limits=httpx.Limits(
                 max_connections=500,
                 max_keepalive_connections=50,
                 keepalive_expiry=30,
             ),
-            verify=verify,
+            verify=True,
         )
-        _SHARED_CLIENTS[key] = client
-    return client
+    return _SHARED_CLIENT
 
 
 async def close_shared_sessions() -> None:
-    clients = list(_SHARED_CLIENTS.values())
-    _SHARED_CLIENTS.clear()
-    for client in clients:
+    global _SHARED_CLIENT
+    client = _SHARED_CLIENT
+    _SHARED_CLIENT = None
+    if client is not None:
         await client.aclose()
 
 
@@ -68,11 +66,9 @@ class DoHHttpxNameserver(dns.nameserver.Nameserver):
         self.http_version = http_version
         self.http_host = http_host
         self.server_hostname = server_hostname
-        self.effective_url = replace_url_hostname(url, server_hostname)
-        self._client = _get_shared_client(verify, http_version is not HTTPVersionType.H1)
 
     def __str__(self) -> str:
-        return self.effective_url
+        return self.url
 
     def kind(self) -> str:
         return "DoH-HTTPX"
@@ -81,10 +77,10 @@ class DoHHttpxNameserver(dns.nameserver.Nameserver):
         return True
 
     def answer_nameserver(self) -> str:
-        return url_hostname(self.effective_url) or self.effective_url
+        return url_hostname(self.url) or self.url
 
     def answer_port(self) -> int:
-        return url_port(self.effective_url)
+        return url_port(self.url)
 
     def query(
         self,
@@ -112,16 +108,17 @@ class DoHHttpxNameserver(dns.nameserver.Nameserver):
         _ = source, source_port, max_size, backend
         doh_request = build_doh_request(
             request,
-            self.effective_url,
+            self.url,
             want_get=self.want_get,
             http_host=self.http_host,
         )
-        response = await self._client.request(
+        response = await _get_shared_client().request(
             doh_request.method,
             doh_request.url,
             headers=doh_request.headers,
             content=doh_request.body,
             timeout=timeout,
+            extensions=_request_extensions(self.server_hostname),
         )
         response.raise_for_status()
         return parse_doh_response(
@@ -140,3 +137,9 @@ def build_nameserver(config: DoHHttpxNameserverConfig) -> DoHHttpxNameserver:
         http_host=config.http_host,
         server_hostname=config.server_hostname,
     )
+
+
+def _request_extensions(server_hostname: str | None) -> dict[str, str] | None:
+    if server_hostname is None:
+        return None
+    return {"sni_hostname": server_hostname}

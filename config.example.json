@@ -10,6 +10,7 @@
       "1.1.1.1",
       "8.8.8.8"
     ],
+    "fingerprint": "chrome",
     "log_level": "INFO"
   },
   "tree_root": {

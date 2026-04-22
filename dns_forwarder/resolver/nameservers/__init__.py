@@ -53,6 +53,7 @@ from .dot import build_nameserver as build_dot_nameserver
 def build_nameserver(
     config: NameserverConfig,
     bootstrap_resolver: list[str] | None = None,
+    fingerprint: str | None = None,
 ) -> dns.nameserver.Nameserver:
     bootstrap_resolver = bootstrap_resolver or []
     if isinstance(config, Do53NameserverConfig):
@@ -68,7 +69,7 @@ def build_nameserver(
     if isinstance(config, DoHAiohttpNameserverConfig):
         return build_doh_aiohttp_nameserver(config, bootstrap_resolver)
     if isinstance(config, DoHCurlCffiNameserverConfig):
-        return build_doh_curl_cffi_nameserver(config, bootstrap_resolver)
+        return build_doh_curl_cffi_nameserver(config, bootstrap_resolver, fingerprint)
     if isinstance(config, DoTNameserverConfig):
         return build_dot_nameserver(config)
     if isinstance(config, DoQNameserverConfig):
@@ -81,8 +82,12 @@ def build_nameserver(
 def build_nameserver_map(
     configs: Iterable[NameserverConfig],
     bootstrap_resolver: list[str] | None = None,
+    fingerprint: str | None = None,
 ) -> dict[str, dns.nameserver.Nameserver]:
-    return {config.name: build_nameserver(config, bootstrap_resolver) for config in configs}
+    return {
+        config.name: build_nameserver(config, bootstrap_resolver, fingerprint)
+        for config in configs
+    }
 
 
 async def close_shared_sessions() -> None:

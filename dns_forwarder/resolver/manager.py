@@ -25,6 +25,7 @@ class ResolverManager:
         self._nameservers = build_nameserver_map(
             config.nameservers,
             config.runtime.bootstrap_resolver,
+            config.runtime.fingerprint,
         )
         self._resolvers = {
             upstream.name: self._build_resolver(upstream) for upstream in config.upstreams

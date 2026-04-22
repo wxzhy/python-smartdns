@@ -72,6 +72,7 @@ def test_parse_config_text_success() -> None:
     assert config.runtime.default_upstream_group == "default"
     assert config.runtime.default_upstream_policy is DispatchStrategyType.RACE
     assert config.runtime.bootstrap_resolver == []
+    assert config.runtime.fingerprint is None
     assert config.listeners[0].protocol.value == "udp"
     assert config.upstreams[0].nameservers == ["local-ns"]
 
@@ -200,7 +201,7 @@ def test_parse_config_text_accepts_all_supported_nameserver_protocols() -> None:
     ]
 
 
-def test_parse_config_text_normalizes_bootstrap_resolver() -> None:
+def test_parse_config_text_normalizes_runtime_http_client_options() -> None:
     config_dict = build_config_dict()
     config_dict["runtime"]["bootstrap_resolver"] = [
         " 1.1.1.1 ",
@@ -208,10 +209,12 @@ def test_parse_config_text_normalizes_bootstrap_resolver() -> None:
         "1.1.1.1",
         "",
     ]
+    config_dict["runtime"]["fingerprint"] = " chrome "
 
     config = parse_config_dict(config_dict)
 
     assert config.runtime.bootstrap_resolver == ["1.1.1.1", "8.8.8.8"]
+    assert config.runtime.fingerprint == "chrome"
 
 
 def test_parse_config_text_rejects_unsupported_doh_client_http_versions() -> None:
@@ -260,6 +263,17 @@ def test_parse_config_text_rejects_unsupported_doh_client_http_versions() -> Non
     config_dict["upstreams"][0]["nameservers"] = ["bad-curl-verify"]
 
     with pytest.raises(ValueError, match="bool"):
+        parse_config_dict(config_dict)
+
+    config_dict["nameservers"][0] = {
+        "name": "bad-curl-fingerprint",
+        "protocol": "doh_curl_cffi",
+        "url": "https://1.1.1.1/dns-query",
+        "ja3": "771,4865-4866-4867,0-11-10,29-23,0",
+    }
+    config_dict["upstreams"][0]["nameservers"] = ["bad-curl-fingerprint"]
+
+    with pytest.raises(ValueError, match="ja3"):
         parse_config_dict(config_dict)
 
 

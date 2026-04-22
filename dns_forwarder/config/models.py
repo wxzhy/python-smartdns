@@ -66,6 +66,7 @@ class RuntimeConfig(StrictConfigModel):
     default_upstream_group: str = "default"
     default_upstream_policy: DispatchStrategyType = DispatchStrategyType.RACE
     bootstrap_resolver: list[str] = Field(default_factory=list)
+    fingerprint: str | None = None
     log_level: str = "INFO"
 
     @field_validator("plugin_dirs")
@@ -89,6 +90,14 @@ class RuntimeConfig(StrictConfigModel):
             seen.add(address)
             normalized.append(address)
         return normalized
+
+    @field_validator("fingerprint", mode="before")
+    @classmethod
+    def normalize_fingerprint(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        normalized = str(value).strip()
+        return normalized or None
 
     @field_validator("log_level")
     @classmethod

@@ -131,10 +131,12 @@ def test_build_nameserver_supports_doh_curl_cffi() -> None:
             http_host="cloudflare-dns.com",
         ),
         bootstrap_resolver=["1.1.1.1", "8.8.8.8"],
+        fingerprint="chrome",
     )
 
     assert nameserver.__class__.__name__ == "DoHCurlCffiNameserver"
     assert nameserver.url == "https://cloudflare-dns.com/dns-query"
+    assert nameserver.fingerprint == "chrome"
 
 
 def test_build_nameserver_supports_dot() -> None:

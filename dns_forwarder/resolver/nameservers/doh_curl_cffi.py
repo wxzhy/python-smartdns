@@ -52,6 +52,7 @@ class DoHCurlCffiNameserver(dns.nameserver.Nameserver):
         want_get: bool,
         http_version: HTTPVersionType,
         http_host: str | None,
+        fingerprint: str | None,
         bootstrap_resolver: list[str],
     ) -> None:
         self.url = url
@@ -59,6 +60,7 @@ class DoHCurlCffiNameserver(dns.nameserver.Nameserver):
         self.want_get = want_get
         self.http_version = http_version
         self.http_host = http_host
+        self.fingerprint = fingerprint
         _ = bootstrap_resolver
 
     def __str__(self) -> str:
@@ -114,6 +116,7 @@ class DoHCurlCffiNameserver(dns.nameserver.Nameserver):
             timeout=timeout,
             verify=self.verify,
             http_version=_curl_http_version(self.http_version),
+            impersonate=self.fingerprint,
         )
         response.raise_for_status()
         return parse_doh_response(
@@ -137,6 +140,7 @@ def _curl_http_version(http_version: HTTPVersionType) -> Any:
 def build_nameserver(
     config: DoHCurlCffiNameserverConfig,
     bootstrap_resolver: list[str],
+    fingerprint: str | None,
 ) -> DoHCurlCffiNameserver:
     return DoHCurlCffiNameserver(
         config.url,
@@ -144,5 +148,6 @@ def build_nameserver(
         want_get=config.want_get,
         http_version=config.http_version,
         http_host=config.http_host,
+        fingerprint=fingerprint,
         bootstrap_resolver=bootstrap_resolver,
     )

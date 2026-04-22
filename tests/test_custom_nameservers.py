@@ -311,6 +311,7 @@ async def test_doh_curl_cffi_get_query_uses_request_options_and_host_header() ->
             want_get=True,
             http_version=HTTPVersionType.H3,
             http_host="cloudflare-dns.com",
+            fingerprint="chrome",
             bootstrap_resolver=["1.1.1.1"],
         )
         result = await nameserver.async_query(
@@ -332,12 +333,15 @@ async def test_doh_curl_cffi_get_query_uses_request_options_and_host_header() ->
     assert kwargs["data"] is None
     assert kwargs["verify"] is True
     assert kwargs["http_version"] is not None
+    assert kwargs["impersonate"] == "chrome"
+    assert "ja3" not in kwargs
+    assert "akamai" not in kwargs
+    assert "extra_fp" not in kwargs
 
 
 async def test_doh_aiohttp_shared_session_uses_bootstrap_resolver() -> None:
     doh_aiohttp._SHARED_SESSION = None
     doh_aiohttp._SHARED_BOOTSTRAP_RESOLVER = None
-    doh_aiohttp._SHARED_LOOP_ID = None
 
     with (
         patch("dns_forwarder.resolver.nameservers.doh_aiohttp.AsyncResolver") as resolver,
@@ -352,7 +356,6 @@ async def test_doh_aiohttp_shared_session_uses_bootstrap_resolver() -> None:
     session.assert_called_once_with(connector=connector.return_value)
     doh_aiohttp._SHARED_SESSION = None
     doh_aiohttp._SHARED_BOOTSTRAP_RESOLVER = None
-    doh_aiohttp._SHARED_LOOP_ID = None
 
 
 def test_doh_curl_cffi_shared_session_uses_single_session() -> None:

@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import asyncio
 import ssl as ssl_module
 from typing import Any
 
@@ -27,14 +26,11 @@ except ImportError:  # pragma: no cover
 
 _SHARED_SESSION: Any | None = None
 _SHARED_BOOTSTRAP_RESOLVER: tuple[str, ...] | None = None
-_SHARED_LOOP_ID: int | None = None
 
 
 def _get_shared_session(bootstrap_resolver: tuple[str, ...]) -> Any:
-    global _SHARED_BOOTSTRAP_RESOLVER, _SHARED_LOOP_ID, _SHARED_SESSION
-    loop = asyncio.get_running_loop()
-    loop_id = id(loop)
-    if _SHARED_SESSION is None or _SHARED_SESSION.closed or _SHARED_LOOP_ID != loop_id:
+    global _SHARED_BOOTSTRAP_RESOLVER, _SHARED_SESSION
+    if _SHARED_SESSION is None or _SHARED_SESSION.closed:
         if aiohttp is None or AsyncResolver is None:  # pragma: no cover
             raise RuntimeError("aiohttp and aiodns are required for doh_aiohttp")
         resolver = (
@@ -45,7 +41,6 @@ def _get_shared_session(bootstrap_resolver: tuple[str, ...]) -> Any:
         connector = aiohttp.TCPConnector(resolver=resolver, limit=500)
         _SHARED_SESSION = aiohttp.ClientSession(connector=connector)
         _SHARED_BOOTSTRAP_RESOLVER = bootstrap_resolver
-        _SHARED_LOOP_ID = loop_id
         return _SHARED_SESSION
 
     if _SHARED_BOOTSTRAP_RESOLVER != bootstrap_resolver:
@@ -54,11 +49,10 @@ def _get_shared_session(bootstrap_resolver: tuple[str, ...]) -> Any:
 
 
 async def close_shared_sessions() -> None:
-    global _SHARED_BOOTSTRAP_RESOLVER, _SHARED_LOOP_ID, _SHARED_SESSION
+    global _SHARED_BOOTSTRAP_RESOLVER, _SHARED_SESSION
     session = _SHARED_SESSION
     _SHARED_SESSION = None
     _SHARED_BOOTSTRAP_RESOLVER = None
-    _SHARED_LOOP_ID = None
     if session is not None and not session.closed:
         await session.close()
 

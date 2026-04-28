@@ -98,6 +98,16 @@ class ResponseMutatingPlugin(Plugin):
         )
 
 
+class FailingResponsePlugin(Plugin):
+    name = "failing-response"
+    config_model = EmptyModel
+    variables_model = EmptyModel
+    response_order = 500
+
+    async def on_response(self, context: RequestContext) -> None:
+        raise RuntimeError("response hook failed")
+
+
 class RequestObserverPlugin(Plugin):
     name = "request-observer"
     config_model = EmptyModel
@@ -140,6 +150,22 @@ async def build_plugin_manager_with_mutator() -> tuple[PluginManager, CachePlugi
             config=mutator.config_model(),
             variables=mutator.variables_model(),
             raw_config=PluginConfig(name="mutator", module="response_mutator"),
+        ),
+    ]
+    return PluginManager(loaded, plugin_manager.registry), cache_plugin
+
+
+async def build_plugin_manager_with_failing_response() -> tuple[PluginManager, CachePlugin]:
+    plugin_manager, cache_plugin = await build_plugin_manager()
+    failing = FailingResponsePlugin()
+    failing.bind(failing.config_model(), failing.variables_model())
+    loaded = [
+        plugin_manager.loaded_plugins[0],
+        LoadedPlugin(
+            instance=failing,
+            config=failing.runtime_config,
+            variables=failing.runtime_variables,
+            raw_config=PluginConfig(name="failing", module="failing_response"),
         ),
     ]
     return PluginManager(loaded, plugin_manager.registry), cache_plugin
@@ -407,6 +433,41 @@ async def test_cache_plugin_coalesces_concurrent_requests_by_cache_key() -> None
     assert resolver_manager.calls == 1
     assert plugin._service is not None
     assert plugin._service.get_for_request(request_two) is not None
+
+
+async def test_cache_plugin_releases_pending_followers_when_owner_pipeline_fails() -> None:
+    manager, plugin = await build_plugin_manager_with_failing_response()
+    request_one = dns.message.make_query("example.test", "A")
+    request_two = dns.message.make_query("example.test", "A")
+    answer = make_answer(request_one, "203.0.113.52")
+    resolver_manager = BlockingResolverManager(
+        build_config(),
+        UpstreamResult(upstream_name="upstream-a", duration_ms=5.0, answer=answer),
+    )
+    engine = PipelineEngine(build_config(), resolver_manager, DispatcherRegistry(), manager)
+
+    first_task = asyncio.create_task(
+        engine.handle_message(request_one, ("127.0.0.1", 10000), "udp")
+    )
+    await resolver_manager.started.wait()
+    second_task = asyncio.create_task(
+        engine.handle_message(request_two, ("127.0.0.1", 10001), "udp")
+    )
+    await asyncio.sleep(0)
+
+    resolver_manager.release.set()
+    first_response, second_response = await asyncio.wait_for(
+        asyncio.gather(first_task, second_task),
+        timeout=1,
+    )
+
+    assert first_response is not None
+    assert second_response is not None
+    assert first_response.rcode() == dns.rcode.SERVFAIL
+    assert second_response.rcode() == dns.rcode.SERVFAIL
+    assert resolver_manager.calls == 1
+    assert plugin._service is not None
+    assert plugin._service._pending == {}
 
 
 async def test_cache_plugin_pending_followers_recheck_cache_and_receive_reduced_ttl(

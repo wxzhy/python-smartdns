@@ -167,6 +167,19 @@ class CachePlugin(Plugin):
                     response_to_share.rcode(),
                 )
 
+    async def on_finish(self, context: RequestContext) -> None:
+        if self._service is None:
+            return
+
+        cache_context = get_cache_context(context)
+        if not cache_context.pending_owner or cache_context.key is None:
+            return
+        if not await self._service.has_pending(cache_context.key):
+            return
+
+        response_to_share = self._resolve_response_to_share(context)
+        await self._service.complete_pending(cache_context.key, response_to_share)
+
     @staticmethod
     def _resolve_response_to_share(context: RequestContext):
         if context.final_answer is not None:

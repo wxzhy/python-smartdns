@@ -88,15 +88,25 @@ class PipelineEngine:
                 self._logger.error("最终响应为空 request_id=%s，返回 SERVFAIL", context.request_id)
                 return make_error_response(request, dns.rcode.SERVFAIL)
             return clone_response_for_request(context.final_response, request)
+        except asyncio.CancelledError:
+            error_response = make_error_response(request, dns.rcode.SERVFAIL)
+            context.final_response = error_response
+            context.final_answer = build_answer_from_response(request, error_response)
+            raise
         except Exception as exc:
             context.metadata["pipeline_error"] = repr(exc)
+            error_response = make_error_response(request, dns.rcode.SERVFAIL)
+            context.final_response = error_response
+            context.final_answer = build_answer_from_response(request, error_response)
             self._logger.exception(
                 "处理请求失败 request_id=%s listener=%s client=%r",
                 context.request_id,
                 context.listener_name,
                 context.clientaddr,
             )
-            return make_error_response(request, dns.rcode.SERVFAIL)
+            return error_response
+        finally:
+            await self._finish_context(context)
 
     def _validate_request_or_error(
         self,
@@ -355,6 +365,19 @@ class PipelineEngine:
         except Exception:
             self._logger.exception(
                 "观测阶段失败 request_id=%s listener=%s",
+                context.request_id,
+                context.listener_name,
+            )
+
+    async def _finish_context(self, context: RequestContext) -> None:
+        on_finish = getattr(self._plugin_manager, "on_finish", None)
+        if on_finish is None:
+            return
+        try:
+            await on_finish(context)
+        except Exception:
+            self._logger.exception(
+                "finish 阶段失败 request_id=%s listener=%s",
                 context.request_id,
                 context.listener_name,
             )

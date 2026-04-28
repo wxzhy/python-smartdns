@@ -68,6 +68,10 @@ class DnsCacheService:
             return
         pending.set_result(response.to_wire() if response is not None else None)
 
+    async def has_pending(self, key: dns.resolver.CacheKey) -> bool:
+        async with self._pending_lock:
+            return key in self._pending
+
     @staticmethod
     async def wait_for_pending_response(
         pending: asyncio.Future[bytes | None],

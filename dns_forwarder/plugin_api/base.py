@@ -6,6 +6,8 @@ from typing import TYPE_CHECKING, Any, Callable
 
 from pydantic import BaseModel
 
+from dns_forwarder.logging import get_logger
+
 from .static_plugins import load_static_plugin_module
 
 if TYPE_CHECKING:
@@ -13,6 +15,8 @@ if TYPE_CHECKING:
 
     from dns_forwarder.config.models import PluginConfig
     from dns_forwarder.pipeline.context import RequestContext, UpstreamResult
+
+logger = get_logger("plugin_api")
 
 
 class EmptyModel(BaseModel):
@@ -90,6 +94,9 @@ class Plugin:
         return None
 
     async def on_observe(self, context: "RequestContext") -> None:
+        return None
+
+    async def on_finish(self, context: "RequestContext") -> None:
         return None
 
 
@@ -189,6 +196,17 @@ class PluginManager:
     async def on_observe(self, context: "RequestContext") -> None:
         for plugin in self._ordered_plugins("observe_order"):
             await plugin.instance.on_observe(context)
+
+    async def on_finish(self, context: "RequestContext") -> None:
+        for plugin in self.loaded_plugins:
+            try:
+                await plugin.instance.on_finish(context)
+            except Exception:
+                logger.exception(
+                    "插件 finish 阶段失败 plugin=%s request_id=%s",
+                    plugin.instance.name,
+                    context.request_id,
+                )
 
     def describe(self) -> list[dict[str, Any]]:
         result: list[dict[str, Any]] = []

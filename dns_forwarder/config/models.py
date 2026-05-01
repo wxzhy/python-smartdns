@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from enum import StrEnum
-from ipaddress import IPv4Network, IPv6Network, ip_network
+from ipaddress import IPv4Network, IPv6Network, ip_address, ip_network
 from typing import Annotated, Any, Literal
 
 import dns.rdatatype
@@ -66,6 +66,7 @@ class RuntimeConfig(StrictConfigModel):
     default_upstream_group: str = "default"
     default_upstream_policy: DispatchStrategyType = DispatchStrategyType.RACE
     bootstrap_resolver: list[str] = Field(default_factory=list)
+    hosts: dict[str, list[str]] = Field(default_factory=dict)
     fingerprint: str | None = None
     log_level: str = "INFO"
 
@@ -89,6 +90,38 @@ class RuntimeConfig(StrictConfigModel):
                 continue
             seen.add(address)
             normalized.append(address)
+        return normalized
+
+    @field_validator("hosts", mode="before")
+    @classmethod
+    def normalize_hosts(cls, value: dict[str, list[str]] | None) -> dict[str, list[str]]:
+        if value is None:
+            return {}
+        if not isinstance(value, dict):
+            raise ValueError("hosts 必须是 domain -> [ip] 映射")
+
+        normalized: dict[str, list[str]] = {}
+        for raw_domain, raw_addresses in value.items():
+            domain = str(raw_domain).strip().rstrip(".").lower()
+            if not domain:
+                raise ValueError("hosts domain 不能为空")
+            if not isinstance(raw_addresses, list):
+                raise ValueError(f"hosts {domain} 必须是 IP 列表")
+
+            addresses: list[str] = []
+            seen: set[str] = set()
+            for raw_address in raw_addresses:
+                address_text = str(raw_address).strip()
+                if not address_text:
+                    continue
+                address = ip_address(address_text).compressed
+                if address in seen:
+                    continue
+                seen.add(address)
+                addresses.append(address)
+            if not addresses:
+                raise ValueError(f"hosts {domain} 至少需要一个 IP")
+            normalized[domain] = addresses
         return normalized
 
     @field_validator("fingerprint", mode="before")

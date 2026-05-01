@@ -72,6 +72,7 @@ def test_parse_config_text_success() -> None:
     assert config.runtime.default_upstream_group == "default"
     assert config.runtime.default_upstream_policy is DispatchStrategyType.RACE
     assert config.runtime.bootstrap_resolver == []
+    assert config.runtime.hosts == {}
     assert config.runtime.fingerprint is None
     assert config.listeners[0].protocol.value == "udp"
     assert config.upstreams[0].nameservers == ["local-ns"]
@@ -209,11 +210,22 @@ def test_parse_config_text_normalizes_runtime_http_client_options() -> None:
         "1.1.1.1",
         "",
     ]
+    config_dict["runtime"]["hosts"] = {
+        " Cloudflare-DNS.COM. ": [
+            " 1.1.1.1 ",
+            "1.1.1.1",
+            "2606:4700:4700::1111",
+            "",
+        ]
+    }
     config_dict["runtime"]["fingerprint"] = " chrome "
 
     config = parse_config_dict(config_dict)
 
     assert config.runtime.bootstrap_resolver == ["1.1.1.1", "8.8.8.8"]
+    assert config.runtime.hosts == {
+        "cloudflare-dns.com": ["1.1.1.1", "2606:4700:4700::1111"]
+    }
     assert config.runtime.fingerprint == "chrome"
 
 
@@ -329,6 +341,14 @@ def test_parse_config_text_rejects_invalid_log_level() -> None:
     config_dict["runtime"]["log_level"] = "verbose"
 
     with pytest.raises(ValueError, match="未知 log_level"):
+        parse_config_dict(config_dict)
+
+
+def test_parse_config_text_rejects_invalid_runtime_hosts() -> None:
+    config_dict = build_config_dict()
+    config_dict["runtime"]["hosts"] = {"dns.example": ["not-an-ip"]}
+
+    with pytest.raises(ValueError):
         parse_config_dict(config_dict)
 
 

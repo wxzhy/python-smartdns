@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from ipaddress import ip_address
 from typing import Any
 
 import dns.asyncbackend
@@ -16,30 +17,37 @@ from .doh_client_common import (
 )
 
 try:  # pragma: no cover - dependency availability is checked at build time
-    from curl_cffi import CurlHttpVersion
+    from curl_cffi import CurlHttpVersion, CurlOpt
     from curl_cffi.requests import AsyncSession
 except ImportError:  # pragma: no cover
     CurlHttpVersion = None  # type: ignore[assignment]
+    CurlOpt = None  # type: ignore[assignment]
     AsyncSession = None  # type: ignore[assignment]
 
 
-_SHARED_SESSION: Any | None = None
+FrozenHosts = tuple[tuple[str, tuple[str, ...]], ...]
+_SHARED_SESSIONS: dict[tuple[str, ...], Any] = {}
 
 
-def _get_shared_session() -> Any:
-    global _SHARED_SESSION
-    if _SHARED_SESSION is None:
+def _get_shared_session(resolve_entries: tuple[str, ...] = ()) -> Any:
+    session = _SHARED_SESSIONS.get(resolve_entries)
+    if session is None:
         if AsyncSession is None:  # pragma: no cover
             raise RuntimeError("curl_cffi is required for doh_curl_cffi")
-        _SHARED_SESSION = AsyncSession(max_clients=500)
-    return _SHARED_SESSION
+        kwargs: dict[str, Any] = {"max_clients": 500}
+        if resolve_entries:
+            if CurlOpt is None:  # pragma: no cover
+                raise RuntimeError("curl_cffi is required for doh_curl_cffi")
+            kwargs["curl_options"] = {CurlOpt.RESOLVE: list(resolve_entries)}
+        session = AsyncSession(**kwargs)
+        _SHARED_SESSIONS[resolve_entries] = session
+    return session
 
 
 async def close_shared_sessions() -> None:
-    global _SHARED_SESSION
-    session = _SHARED_SESSION
-    _SHARED_SESSION = None
-    if session is not None:
+    sessions = list(_SHARED_SESSIONS.values())
+    _SHARED_SESSIONS.clear()
+    for session in sessions:
         await session.close()
 
 
@@ -54,6 +62,7 @@ class DoHCurlCffiNameserver(dns.nameserver.Nameserver):
         http_host: str | None,
         fingerprint: str | None,
         bootstrap_resolver: list[str],
+        hosts: dict[str, list[str]],
     ) -> None:
         self.url = url
         self.verify = verify
@@ -61,6 +70,7 @@ class DoHCurlCffiNameserver(dns.nameserver.Nameserver):
         self.http_version = http_version
         self.http_host = http_host
         self.fingerprint = fingerprint
+        self.resolve_entries = _curl_resolve_entries(_freeze_hosts(hosts), url_port(url))
         _ = bootstrap_resolver
 
     def __str__(self) -> str:
@@ -108,7 +118,7 @@ class DoHCurlCffiNameserver(dns.nameserver.Nameserver):
             want_get=self.want_get,
             http_host=self.http_host,
         )
-        response = await _get_shared_session().request(
+        response = await _get_shared_session(self.resolve_entries).request(
             doh_request.method,
             doh_request.url,
             data=doh_request.body,
@@ -137,10 +147,31 @@ def _curl_http_version(http_version: HTTPVersionType) -> Any:
     }[http_version]
 
 
+def _freeze_hosts(hosts: dict[str, list[str]] | None) -> FrozenHosts:
+    if not hosts:
+        return ()
+    return tuple(sorted((host, tuple(addresses)) for host, addresses in hosts.items()))
+
+
+def _curl_resolve_entries(hosts: FrozenHosts, port: int) -> tuple[str, ...]:
+    return tuple(
+        f"{host}:{port}:{','.join(_curl_resolve_address(address) for address in addresses)}"
+        for host, addresses in hosts
+    )
+
+
+def _curl_resolve_address(address: str) -> str:
+    ip = ip_address(address)
+    if ip.version == 6:
+        return f"[{ip.compressed}]"
+    return ip.compressed
+
+
 def build_nameserver(
     config: DoHCurlCffiNameserverConfig,
     bootstrap_resolver: list[str],
     fingerprint: str | None,
+    hosts: dict[str, list[str]],
 ) -> DoHCurlCffiNameserver:
     return DoHCurlCffiNameserver(
         config.url,
@@ -150,4 +181,5 @@ def build_nameserver(
         http_host=config.http_host,
         fingerprint=fingerprint,
         bootstrap_resolver=bootstrap_resolver,
+        hosts=hosts,
     )

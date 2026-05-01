@@ -10,6 +10,12 @@
       "1.1.1.1",
       "8.8.8.8"
     ],
+    "hosts": {
+      "cloudflare-dns.com": [
+        "1.1.1.1",
+        "1.0.0.1"
+      ]
+    },
     "fingerprint": "chrome",
     "log_level": "INFO"
   },
@@ -90,7 +96,7 @@
     {
       "name": "cloudflare-doh-aiohttp-example",
       "protocol": "doh_aiohttp",
-      "url": "https://1.1.1.1/dns-query",
+      "url": "https://cloudflare-dns.com/dns-query",
       "verify": true,
       "want_get": false,
       "http_version": "h1",

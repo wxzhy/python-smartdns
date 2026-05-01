@@ -26,6 +26,7 @@ class ResolverManager:
             config.nameservers,
             config.runtime.bootstrap_resolver,
             config.runtime.fingerprint,
+            config.runtime.hosts,
         )
         self._resolvers = {
             upstream.name: self._build_resolver(upstream) for upstream in config.upstreams

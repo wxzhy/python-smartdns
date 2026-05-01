@@ -54,8 +54,10 @@ def build_nameserver(
     config: NameserverConfig,
     bootstrap_resolver: list[str] | None = None,
     fingerprint: str | None = None,
+    hosts: dict[str, list[str]] | None = None,
 ) -> dns.nameserver.Nameserver:
     bootstrap_resolver = bootstrap_resolver or []
+    hosts = hosts or {}
     if isinstance(config, Do53NameserverConfig):
         return build_do53_nameserver(config)
     if isinstance(config, Do53CustomNameserverConfig):
@@ -67,9 +69,9 @@ def build_nameserver(
     if isinstance(config, DoHHttpxNameserverConfig):
         return build_doh_httpx_nameserver(config)
     if isinstance(config, DoHAiohttpNameserverConfig):
-        return build_doh_aiohttp_nameserver(config, bootstrap_resolver)
+        return build_doh_aiohttp_nameserver(config, bootstrap_resolver, hosts)
     if isinstance(config, DoHCurlCffiNameserverConfig):
-        return build_doh_curl_cffi_nameserver(config, bootstrap_resolver, fingerprint)
+        return build_doh_curl_cffi_nameserver(config, bootstrap_resolver, fingerprint, hosts)
     if isinstance(config, DoTNameserverConfig):
         return build_dot_nameserver(config)
     if isinstance(config, DoQNameserverConfig):
@@ -83,9 +85,10 @@ def build_nameserver_map(
     configs: Iterable[NameserverConfig],
     bootstrap_resolver: list[str] | None = None,
     fingerprint: str | None = None,
+    hosts: dict[str, list[str]] | None = None,
 ) -> dict[str, dns.nameserver.Nameserver]:
     return {
-        config.name: build_nameserver(config, bootstrap_resolver, fingerprint)
+        config.name: build_nameserver(config, bootstrap_resolver, fingerprint, hosts)
         for config in configs
     }
 

@@ -188,6 +188,7 @@ def test_parse_config_text_accepts_all_supported_nameserver_protocols() -> None:
     config = parse_config_dict(config_dict)
 
     assert len(config.nameservers) == 10
+    assert config.nameservers[1].use_tricks is True
     assert config.upstreams[0].nameservers == [
         "udp-ns",
         "udp-custom-ns",
@@ -227,6 +228,24 @@ def test_parse_config_text_normalizes_runtime_http_client_options() -> None:
         "cloudflare-dns.com": ["1.1.1.1", "2606:4700:4700::1111"]
     }
     assert config.runtime.fingerprint == "chrome"
+
+
+def test_parse_config_text_accepts_do53_custom_use_tricks_override() -> None:
+    config_dict = build_config_dict()
+    config_dict["nameservers"] = [
+        {
+            "name": "udp-custom-ns",
+            "protocol": "do53_custom",
+            "address": "1.0.0.1",
+            "port": 53,
+            "use_tricks": False,
+        }
+    ]
+    config_dict["upstreams"][0]["nameservers"] = ["udp-custom-ns"]
+
+    config = parse_config_dict(config_dict)
+
+    assert config.nameservers[0].use_tricks is False
 
 
 def test_parse_config_text_rejects_unsupported_doh_client_http_versions() -> None:

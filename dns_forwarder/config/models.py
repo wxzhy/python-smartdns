@@ -188,6 +188,7 @@ class Do53CustomNameserverConfig(BaseNameserverConfig):
     protocol: Literal[NameserverProtocol.DO53_CUSTOM] = NameserverProtocol.DO53_CUSTOM
     address: str
     port: int = Field(default=53, ge=1, le=65535)
+    use_tricks: bool = False
 
 
 class DoHNameserverConfig(BaseNameserverConfig):

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import socket
+from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
 
 import dns.message
@@ -8,10 +9,11 @@ import dns.query
 
 from dns_forwarder.config import HTTPVersionType
 from dns_forwarder.resolver.nameservers import doh_aiohttp, doh_curl_cffi
-from dns_forwarder.resolver.nameservers._trick_sockets import (
-    TrickyDatagramSocket,
+from dns_forwarder.resolver.nameservers._trick_tcp import (
     TrickyStreamSocket,
+    _tcp_socket_factory,
 )
+from dns_forwarder.resolver.nameservers._trick_udp import TrickyDatagramSocket
 from dns_forwarder.resolver.nameservers.do53_custom import Do53CustomNameserver
 from dns_forwarder.resolver.nameservers.doh_aiohttp import (
     DoHAiohttpNameserver,
@@ -52,6 +54,29 @@ class FakeAiohttpResponse:
 
     async def read(self) -> bytes:
         return self._content
+
+
+class FakeSocket:
+    def __init__(self, family: int = socket.AF_INET) -> None:
+        self.family = family
+        self.options = []
+        self.sent = []
+        self.closed = False
+
+    def setsockopt(self, level: int, option: int, value: int) -> None:
+        self.options.append((level, option, value))
+
+    def sendall(self, data: bytes, flags: int = 0) -> None:
+        self.sent.append((data, flags))
+
+    def close(self) -> None:
+        self.closed = True
+
+    def getpeername(self) -> tuple[str, int]:
+        return ("192.0.2.10", 53)
+
+    def getsockname(self) -> tuple[str, int]:
+        return ("127.0.0.1", 5300)
 
 
 def _doh_response_wire(request: dns.message.QueryMessage) -> bytes:
@@ -110,7 +135,215 @@ async def test_do53_custom_async_query_uses_tricky_tcp_socket() -> None:
     tcp_mock.assert_awaited_once()
     kwargs = tcp_mock.await_args.kwargs
     assert isinstance(kwargs["sock"], TrickyStreamSocket)
+    assert kwargs["sock"].use_tricks is True
     assert kwargs["sock"].closed is True
+
+
+async def test_do53_custom_async_query_can_disable_udp_tricks() -> None:
+    request = dns.message.make_query("example.test", "A")
+    response = dns.message.make_response(request)
+    nameserver = Do53CustomNameserver("127.0.0.1", 53, use_tricks=False)
+
+    with patch("dns.asyncquery.udp", AsyncMock(return_value=response)) as udp_mock:
+        result = await nameserver.async_query(
+            request,
+            timeout=1.0,
+            source=None,
+            source_port=0,
+            max_size=False,
+            backend=object(),
+        )
+
+    assert result is response
+    udp_mock.assert_awaited_once()
+    assert "sock" not in udp_mock.await_args.kwargs
+
+
+async def test_do53_custom_async_query_keeps_custom_tcp_without_tricks() -> None:
+    request = dns.message.make_query("example.test", "A")
+    response = dns.message.make_response(request)
+    nameserver = Do53CustomNameserver(
+        "dns.example",
+        53,
+        use_tricks=False,
+        hosts={"dns.example": ["192.0.2.10"]},
+    )
+
+    with patch(
+        "dns_forwarder.resolver.nameservers.do53_custom.TrickyStreamSocket.connect",
+        AsyncMock(return_value=None),
+    ):
+        with patch("dns.asyncquery.tcp", AsyncMock(return_value=response)) as tcp_mock:
+            result = await nameserver.async_query(
+                request,
+                timeout=1.0,
+                source=None,
+                source_port=0,
+                max_size=True,
+                backend=object(),
+            )
+
+    assert result is response
+    tcp_mock.assert_awaited_once()
+    kwargs = tcp_mock.await_args.kwargs
+    assert isinstance(kwargs["sock"], TrickyStreamSocket)
+    assert kwargs["sock"].hosts == (("dns.example", ("192.0.2.10",)),)
+    assert kwargs["sock"].use_tricks is False
+
+
+async def test_tricky_tcp_connect_uses_hosts_with_happy_eyeballs() -> None:
+    fake_socket = FakeSocket(socket.AF_INET)
+    hosts = (("dns.example", ("192.0.2.10", "2001:db8::10")),)
+    expected_addr_infos = [
+        (
+            socket.AF_INET,
+            socket.SOCK_STREAM,
+            socket.IPPROTO_TCP,
+            "DNS.EXAMPLE.",
+            ("192.0.2.10", 53),
+        ),
+        (
+            socket.AF_INET6,
+            socket.SOCK_STREAM,
+            socket.IPPROTO_TCP,
+            "DNS.EXAMPLE.",
+            ("2001:db8::10", 53, 0, 0),
+        ),
+    ]
+    tricky_sock = TrickyStreamSocket(socket.AF_UNSPEC, socket.SOCK_STREAM, hosts=hosts)
+
+    with (
+        patch(
+            "dns_forwarder.resolver.nameservers._trick_tcp.asyncio.get_running_loop"
+        ) as get_running_loop,
+        patch(
+            "dns_forwarder.resolver.nameservers._trick_tcp.aiohappyeyeballs.start_connection",
+            AsyncMock(return_value=fake_socket),
+        ) as start_connection,
+    ):
+        await tricky_sock.connect(("DNS.EXAMPLE.", 53), timeout=1.0)
+
+    get_running_loop.assert_not_called()
+    start_connection.assert_awaited_once()
+    assert start_connection.await_args.args == (expected_addr_infos,)
+    assert start_connection.await_args.kwargs["local_addr_infos"] is None
+    assert start_connection.await_args.kwargs["happy_eyeballs_delay"] == 0.25
+    assert start_connection.await_args.kwargs["socket_factory"] is _tcp_socket_factory
+    assert tricky_sock.family == socket.AF_INET
+
+
+async def test_tricky_tcp_connect_falls_back_to_getaddrinfo() -> None:
+    fake_socket = FakeSocket(socket.AF_INET)
+    addr_infos = [
+        (
+            socket.AF_INET,
+            socket.SOCK_STREAM,
+            socket.IPPROTO_TCP,
+            "",
+            ("198.51.100.10", 53),
+        )
+    ]
+    fake_loop = SimpleNamespace(getaddrinfo=AsyncMock(return_value=addr_infos))
+    tricky_sock = TrickyStreamSocket(
+        socket.AF_UNSPEC,
+        socket.SOCK_STREAM,
+        hosts=(),
+        source="127.0.0.1",
+        source_port=0,
+    )
+
+    with (
+        patch(
+            "dns_forwarder.resolver.nameservers._trick_tcp.asyncio.get_running_loop",
+            return_value=fake_loop,
+        ),
+        patch(
+            "dns_forwarder.resolver.nameservers._trick_tcp.aiohappyeyeballs.start_connection",
+            AsyncMock(return_value=fake_socket),
+        ) as start_connection,
+    ):
+        await tricky_sock.connect(("dns.example", 53), timeout=1.0)
+
+    fake_loop.getaddrinfo.assert_awaited_once_with(
+        "dns.example",
+        53,
+        type=socket.SOCK_STREAM,
+        proto=socket.IPPROTO_TCP,
+    )
+    start_connection.assert_awaited_once()
+    assert start_connection.await_args.args == (addr_infos,)
+    assert start_connection.await_args.kwargs["local_addr_infos"] == [
+        (
+            socket.AF_INET,
+            socket.SOCK_STREAM,
+            socket.IPPROTO_TCP,
+            "",
+            ("127.0.0.1", 0),
+        )
+    ]
+
+
+def test_tricky_tcp_socket_factory_sets_tcp_nodelay() -> None:
+    fake_socket = FakeSocket(socket.AF_INET)
+    addr_info = (
+        socket.AF_INET,
+        socket.SOCK_STREAM,
+        socket.IPPROTO_TCP,
+        "",
+        ("192.0.2.10", 53),
+    )
+
+    with patch(
+        "dns_forwarder.resolver.nameservers._trick_tcp.socket.socket",
+        return_value=fake_socket,
+    ) as socket_cls:
+        result = _tcp_socket_factory(addr_info)
+
+    assert result is fake_socket
+    socket_cls.assert_called_once_with(
+        family=socket.AF_INET,
+        type=socket.SOCK_STREAM,
+        proto=socket.IPPROTO_TCP,
+    )
+    assert fake_socket.options == [(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)]
+
+
+async def test_tricky_tcp_sendall_can_skip_oob_trick() -> None:
+    fake_socket = FakeSocket(socket.AF_INET)
+    fake_loop = SimpleNamespace(sock_sendall=AsyncMock(return_value=None))
+    data = b"x" * 64
+    tricky_sock = TrickyStreamSocket(
+        socket.AF_UNSPEC,
+        socket.SOCK_STREAM,
+        use_tricks=False,
+    )
+    tricky_sock._socket = fake_socket
+
+    with patch(
+        "dns_forwarder.resolver.nameservers._trick_tcp.asyncio.get_running_loop",
+        return_value=fake_loop,
+    ):
+        await tricky_sock.sendall(data, timeout=1.0)
+
+    assert fake_socket.sent == []
+    fake_loop.sock_sendall.assert_awaited_once_with(fake_socket, data)
+
+
+async def test_tricky_tcp_sendall_uses_oob_trick_by_default() -> None:
+    fake_socket = FakeSocket(socket.AF_INET)
+    fake_loop = SimpleNamespace(sock_sendall=AsyncMock(return_value=None))
+    data = b"x" * 64
+    tricky_sock = TrickyStreamSocket(socket.AF_UNSPEC, socket.SOCK_STREAM)
+    tricky_sock._socket = fake_socket
+
+    with patch(
+        "dns_forwarder.resolver.nameservers._trick_tcp.asyncio.get_running_loop",
+        return_value=fake_loop,
+    ):
+        await tricky_sock.sendall(data, timeout=1.0)
+
+    assert fake_socket.sent == [(data[:16] + b"\x00", socket.MSG_OOB)]
+    fake_loop.sock_sendall.assert_awaited_once_with(fake_socket, data[16:])
 
 
 async def test_doh_custom_async_query_uses_shared_client_for_standard_settings() -> None:

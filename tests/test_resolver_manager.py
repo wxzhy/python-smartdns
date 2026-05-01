@@ -43,12 +43,29 @@ def test_build_nameserver_supports_do53() -> None:
 
 def test_build_nameserver_supports_do53_custom() -> None:
     nameserver = build_nameserver(
-        Do53CustomNameserverConfig(name="local-custom", address="127.0.0.1", port=5302)
+        Do53CustomNameserverConfig(name="local-custom", address="127.0.0.1", port=5302),
+        hosts={"dns.example": ["192.0.2.10"]},
     )
 
     assert nameserver.__class__.__name__ == "Do53CustomNameserver"
     assert nameserver.address == "127.0.0.1"
     assert nameserver.port == 5302
+    assert nameserver.use_tricks is True
+    assert nameserver.hosts == (("dns.example", ("192.0.2.10",)),)
+
+
+def test_build_nameserver_supports_do53_custom_without_tricks() -> None:
+    nameserver = build_nameserver(
+        Do53CustomNameserverConfig(
+            name="local-custom",
+            address="127.0.0.1",
+            port=5302,
+            use_tricks=False,
+        )
+    )
+
+    assert nameserver.__class__.__name__ == "Do53CustomNameserver"
+    assert nameserver.use_tricks is False
 
 
 def test_build_nameserver_supports_doh() -> None:

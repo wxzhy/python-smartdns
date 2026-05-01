@@ -50,7 +50,8 @@
       "name": "cf-udp-custom",
       "protocol": "do53_custom",
       "address": "1.0.0.1",
-      "port": 53
+      "port": 53,
+      "use_tricks": true
     },
     {
       "name": "google-udp",

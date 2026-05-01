@@ -61,7 +61,7 @@ def build_nameserver(
     if isinstance(config, Do53NameserverConfig):
         return build_do53_nameserver(config)
     if isinstance(config, Do53CustomNameserverConfig):
-        return build_do53_custom_nameserver(config)
+        return build_do53_custom_nameserver(config, hosts)
     if isinstance(config, DoHNameserverConfig):
         return build_doh_nameserver(config)
     if isinstance(config, DoHCustomNameserverConfig):

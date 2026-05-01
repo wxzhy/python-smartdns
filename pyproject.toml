@@ -5,6 +5,7 @@ description = "Async dns-forwarder skeleton built with dnspython and FastAPI"
 readme = "README.md"
 requires-python = ">=3.14"
 dependencies = [
+    "aiohappyeyeballs>=2.6.1",
     "aiodns>=4.0.0",
     "async-lru>=2.0.5",
     "dnspython[doh,doq,idna]>=2.8.0",

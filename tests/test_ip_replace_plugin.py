@@ -120,6 +120,12 @@ def answer_addresses(answer: dns.resolver.Answer) -> list[str]:
     return [record.address for record in answer.rrset or () if hasattr(record, "address")]
 
 
+def response_addresses(answer: dns.resolver.Answer) -> list[str]:
+    if not answer.response.answer:
+        return []
+    return [record.address for record in answer.response.answer[-1] if hasattr(record, "address")]
+
+
 async def build_plugin_manager_with_tag_replace_and_cache(tmp_path: Path) -> PluginManager:
     domain_dir = tmp_path / "domains"
     ip_dir = tmp_path / "ips"
@@ -237,6 +243,7 @@ def test_ip_replace_service_expands_ipv4_targets_and_deduplicates_stably() -> No
 
     assert changed is True
     assert answer_addresses(answer) == ["10.10.0.1", "10.20.0.1"]
+    assert response_addresses(answer) == ["10.10.0.1", "10.20.0.1"]
 
 
 def test_ip_replace_service_expands_ipv6_targets() -> None:
@@ -425,6 +432,7 @@ async def test_ip_replace_plugin_rewrites_upstream_answer_from_result_tags() -> 
 
     assert result.answer is not None
     assert answer_addresses(result.answer) == ["10.10.0.10", "10.20.0.10"]
+    assert response_addresses(result.answer) == ["10.10.0.10", "10.20.0.10"]
 
 
 async def test_ip_replace_plugin_honors_global_skip_tags() -> None:

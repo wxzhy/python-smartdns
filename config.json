@@ -222,6 +222,20 @@
       "ecs": "2409:8020:2000::/48"
     },
     {
+      "name": "v-ecs-g",
+      "nameservers": [
+        "v-ecs"
+      ],
+      "ecs": "2409:8020:2000::/48"
+    },
+    {
+      "name": "cf-g",
+      "nameservers": [
+        "cf"
+      ],
+      "ecs": "2409:8020:2000::/48"
+    },
+    {
       "name": "v-opt",
       "nameservers": [
         "v-opt"
@@ -305,7 +319,9 @@
     {
       "name": "gws",
       "upstreams": [
-        "google-cn"
+        "google-cn",
+        "cf-g",
+        "v-ecs-g"
       ]
     }
   ],
@@ -413,14 +429,14 @@
       "module": "speedtest_plugin",
       "enabled": true,
       "config": {
-        "cache_ttl_seconds": 900,
+        "cache_ttl_seconds": 1800,
         "cache_maxsize": 4096,
         "max_concurrency": 64,
-        "probe_timeout": 0.5,
+        "probe_timeout": 0.75,
         "ping_count": 1,
         "ping_privileged": true,
         "response_ip_limit": 2,
-        "response_ttl_seconds": 300,
+        "response_ttl_seconds": 600,
         "skip_tags": [],
         "fallback_rules": [
           {
@@ -542,12 +558,41 @@
             ],
             "exclude_tags": [],
             "ipv4_targets": [
+              "162.159.38.0/32",
+              "162.159.39.0/32",
               "162.159.44.0/32",
-              "162.159.45.0/32"
+              "162.159.45.0/32",
+              "172.64.52.0/32",
+              "172.64.53.0/32",
+              "108.162.198.0/32"
             ],
             "ipv6_targets": [
               "2606:4700:52::/128",
-              "2606:4700:57::/128"
+              "2606:4700:57::/128",
+              "2606:4700:5a::/128"
+            ]
+          },
+          {
+            "name": "cloudfront",
+            "match_tags": [
+              "cloudfront"
+            ],
+            "exclude_tags": [],
+            "ipv4_targets": [
+              "13.33.100.0/32",
+              "108.156.136.0/32",
+              "3.165.79.0/32",
+              "13.33.89.0/32",
+              "13.33.77.0/32",
+              "108.156.142.0/32",
+              "3.165.78.0/32"
+            ],
+            "ipv6_targets": [
+              "2600:f0f0:602::/128",
+              "2600:f0f0:601::/128",
+              "2600:9000:271a::/128",
+              "2600:9000:2721::/128",
+              "2600:9000:2178::/128"
             ]
           },
           {

@@ -10,7 +10,7 @@ import dns.rrset
 from pydantic import BaseModel, Field, field_validator, model_validator
 
 from dns_forwarder.logging import format_tags, get_logger
-from dns_forwarder.pipeline import RequestContext, UpstreamResult
+from dns_forwarder.pipeline import RequestContext, UpstreamResult, sync_answer_rrset_to_response
 from dns_forwarder.plugin_api import EmptyModel, Plugin, PluginRegistry
 
 from .models import (
@@ -287,6 +287,7 @@ class SpeedTestPlugin(Plugin):
             answer.rdtype,
             ips,
         )
+        sync_answer_rrset_to_response(answer)
         answer.expiration = time.time() + ttl
 
     def _select_fallback_ips(self, tags: set[str], rdtype: dns.rdatatype.RdataType) -> list[str]:

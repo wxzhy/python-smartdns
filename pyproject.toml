@@ -21,6 +21,7 @@ dependencies = [
     "pynacl>=1.6.2",
     "aiohttp[speedups]>=3.13.5",
     "curl-cffi>=0.15.0",
+    "niquests[full]>=3.18.7",
 ]
 
 [dependency-groups]

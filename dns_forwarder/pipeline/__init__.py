@@ -8,6 +8,7 @@ from .context import (
     inherit_request_tags,
     make_error_response,
     sync_answer_response,
+    sync_answer_rrset_to_response,
 )
 
 __all__ = [
@@ -20,4 +21,5 @@ __all__ = [
     "inherit_request_tags",
     "make_error_response",
     "sync_answer_response",
+    "sync_answer_rrset_to_response",
 ]

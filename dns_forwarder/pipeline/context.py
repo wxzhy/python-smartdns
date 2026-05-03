@@ -111,7 +111,7 @@ def build_answer_from_response(
     return answer
 
 
-def sync_answer_response(answer: dns.resolver.Answer) -> dns.resolver.Answer:
+def sync_answer_rrset_to_response(answer: dns.resolver.Answer) -> dns.resolver.Answer:
     rrset = answer.rrset
     if rrset is not None and (rrset.rdtype != answer.rdtype or rrset.rdclass != answer.rdclass):
         raise ValueError("answer.rrset 的类型或 class 与查询不一致")
@@ -130,6 +130,12 @@ def sync_answer_response(answer: dns.resolver.Answer) -> dns.resolver.Answer:
     else:
         source_response.answer.append(rrset)
 
+    return answer
+
+
+def sync_answer_response(answer: dns.resolver.Answer) -> dns.resolver.Answer:
+    sync_answer_rrset_to_response(answer)
+    source_response = answer.response
     response = dns.message.from_wire(source_response.to_wire())
 
     rebuilt = dns.resolver.Answer(

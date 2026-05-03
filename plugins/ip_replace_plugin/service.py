@@ -9,6 +9,7 @@ import dns.resolver
 import dns.rrset
 
 from dns_forwarder.logging import format_tags, get_logger
+from dns_forwarder.pipeline import sync_answer_rrset_to_response
 
 from .models import IpReplaceRuleConfig
 
@@ -76,6 +77,7 @@ class IpReplaceService:
             answer.rdtype,
             replaced_addresses,
         )
+        sync_answer_rrset_to_response(answer)
         logger.debug(
             "IP 替换完成 stage=%s qname=%s qtype=%s rule=%s original_count=%s replaced_count=%s tags=%s",
             stage,

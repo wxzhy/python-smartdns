@@ -73,8 +73,15 @@ async def build_plugin_manager_with_ip_replace_and_speedtest(
     speedtest_plugin: SpeedTestPlugin,
     *,
     replace_targets: list[str] | None = None,
+    replace_ipv4_targets: list[str] | None = None,
+    replace_ipv6_targets: list[str] | None = None,
 ) -> PluginManager:
     registry = PluginRegistry()
+    ipv4_targets = (
+        replace_ipv4_targets
+        if replace_ipv4_targets is not None
+        else (replace_targets or ["10.10.0.0/24"])
+    )
 
     ip_replace_plugin = IpReplacePlugin()
     ip_replace_plugin.bind(
@@ -83,7 +90,8 @@ async def build_plugin_manager_with_ip_replace_and_speedtest(
                 IpReplaceRuleConfig(
                     name="proxy-map",
                     match_tags=["proxy"],
-                    ipv4_targets=replace_targets or ["10.10.0.0/24"],
+                    ipv4_targets=ipv4_targets,
+                    ipv6_targets=replace_ipv6_targets or [],
                 )
             ]
         ),
@@ -482,6 +490,149 @@ async def test_speedtest_plugin_measures_replaced_ips_after_response_ip_replace(
     assert stub_service.calls == ["10.10.0.20"]
 
 
+async def test_speedtest_plugin_measures_all_ipv6_targets_after_upstream_ip_replace() -> None:
+    speedtest_plugin = SpeedTestPlugin()
+    speedtest_plugin.bind(SpeedTestPluginConfig(), speedtest_plugin.variables_model())
+    manager = await build_plugin_manager_with_ip_replace_and_speedtest(
+        speedtest_plugin,
+        replace_ipv4_targets=[],
+        replace_ipv6_targets=["fd10::1/128", "fd10::2/128", "fd10::3/128"],
+    )
+
+    stub_service = StubSpeedTestService()
+    speedtest_plugin._service = stub_service
+
+    request = dns.message.make_query("example.test", "AAAA")
+    response = dns.message.make_response(request)
+    response.answer.append(
+        dns.rrset.from_text(
+            "example.test.",
+            60,
+            "IN",
+            "AAAA",
+            "2001:db8::10",
+        )
+    )
+    answer = build_answer_from_response(request, response)
+    context = RequestContext(
+        request=request,
+        clientaddr=("127.0.0.1", 5300),
+        listener_name="udp",
+        extensions=manager.build_context_extensions(),
+    )
+    result = UpstreamResult(
+        upstream_name="default",
+        duration_ms=1.0,
+        answer=answer,
+        tags={"proxy"},
+    )
+
+    await manager.on_upstream_response(context, result)
+
+    expected_ips = ["fd10::1", "fd10::2", "fd10::3"]
+    assert result.answer is not None
+    assert [item.address for item in result.answer.rrset] == expected_ips
+    assert [item.address for item in result.answer.response.answer[0]] == expected_ips
+    assert stub_service.calls == expected_ips
+
+
+async def test_speedtest_plugin_limits_replaced_ipv4_targets_by_rtt() -> None:
+    speedtest_plugin = SpeedTestPlugin()
+    speedtest_plugin.bind(
+        SpeedTestPluginConfig(response_ip_limit=2),
+        speedtest_plugin.variables_model(),
+    )
+    manager = await build_plugin_manager_with_ip_replace_and_speedtest(
+        speedtest_plugin,
+        replace_ipv4_targets=["10.10.0.1/32", "10.10.0.2/32", "10.10.0.3/32"],
+    )
+    speedtest_plugin._service = MappedSpeedTestService(
+        {
+            "10.10.0.1": 30.0,
+            "10.10.0.2": 10.0,
+            "10.10.0.3": 20.0,
+        }
+    )
+
+    request = dns.message.make_query("example.test", "A")
+    response = dns.message.make_response(request)
+    response.answer.append(
+        dns.rrset.from_text("example.test.", 60, "IN", "A", "198.51.100.20")
+    )
+    answer = build_answer_from_response(request, response)
+    context = RequestContext(
+        request=request,
+        clientaddr=("127.0.0.1", 5300),
+        listener_name="udp",
+        extensions=manager.build_context_extensions(),
+        final_answer=answer,
+    )
+    result = UpstreamResult(
+        upstream_name="default",
+        duration_ms=1.0,
+        answer=answer,
+        tags={"proxy"},
+    )
+    context.upstream_results.append(result)
+
+    await manager.on_upstream_response(context, result)
+    await manager.on_response(context)
+
+    expected_ips = ["10.10.0.2", "10.10.0.3"]
+    assert [item.address for item in answer.rrset] == expected_ips
+    assert [item.address for item in answer.response.answer[0]] == expected_ips
+    assert speedtest_plugin._service.calls == ["10.10.0.1", "10.10.0.2", "10.10.0.3"]
+
+
+async def test_speedtest_plugin_limits_replaced_ipv6_targets_by_rtt() -> None:
+    speedtest_plugin = SpeedTestPlugin()
+    speedtest_plugin.bind(
+        SpeedTestPluginConfig(response_ip_limit=2),
+        speedtest_plugin.variables_model(),
+    )
+    manager = await build_plugin_manager_with_ip_replace_and_speedtest(
+        speedtest_plugin,
+        replace_ipv4_targets=[],
+        replace_ipv6_targets=["fd10::1/128", "fd10::2/128", "fd10::3/128"],
+    )
+    speedtest_plugin._service = MappedSpeedTestService(
+        {
+            "fd10::1": 30.0,
+            "fd10::2": 10.0,
+            "fd10::3": 20.0,
+        }
+    )
+
+    request = dns.message.make_query("example.test", "AAAA")
+    response = dns.message.make_response(request)
+    response.answer.append(
+        dns.rrset.from_text("example.test.", 60, "IN", "AAAA", "2001:db8::20")
+    )
+    answer = build_answer_from_response(request, response)
+    context = RequestContext(
+        request=request,
+        clientaddr=("127.0.0.1", 5300),
+        listener_name="udp",
+        extensions=manager.build_context_extensions(),
+        final_answer=answer,
+    )
+    result = UpstreamResult(
+        upstream_name="default",
+        duration_ms=1.0,
+        answer=answer,
+        tags={"proxy"},
+    )
+    context.upstream_results.append(result)
+
+    await manager.on_upstream_response(context, result)
+    await manager.on_response(context)
+
+    expected_ips = ["fd10::2", "fd10::3"]
+    assert [item.address for item in answer.rrset] == expected_ips
+    assert [item.address for item in answer.response.answer[0]] == expected_ips
+    assert speedtest_plugin._service.calls == ["fd10::1", "fd10::2", "fd10::3"]
+
+
 async def test_speedtest_plugin_on_response_prefers_replaced_ip_from_other_wait_all_result() -> None:
     config = build_wait_all_config()
     speedtest_plugin = SpeedTestPlugin()
@@ -714,11 +865,10 @@ async def test_speedtest_plugin_on_response_replaces_answer_rrset_with_fastest_i
     assert {item.address for item in answer.rrset} == {"203.0.113.11", "203.0.113.12"}
     assert len(answer.rrset) == 2
     assert {item.address for item in answer.response.answer[0]} == {
-        "203.0.113.10",
         "203.0.113.11",
         "203.0.113.12",
     }
-    assert len(answer.response.answer[0]) == 3
+    assert len(answer.response.answer[0]) == 2
 
 
 async def test_speedtest_plugin_on_response_updates_ttl_and_expiration_when_replacing(

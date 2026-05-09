@@ -94,6 +94,14 @@ def test_parse_config_text_accepts_all_supported_nameserver_protocols() -> None:
             "port": 53,
         },
         {
+            "name": "aiodns-ns",
+            "protocol": "aiodns",
+            "servers": ["1.1.1.1", "1.0.0.1"],
+            "port": 53,
+            "tcp": True,
+            "timeout": 2.0,
+        },
+        {
             "name": "doh-ns",
             "protocol": "doh",
             "url": "https://cloudflare-dns.com/dns-query",
@@ -172,6 +180,7 @@ def test_parse_config_text_accepts_all_supported_nameserver_protocols() -> None:
             "nameservers": [
                 "udp-ns",
                 "udp-custom-ns",
+                "aiodns-ns",
                 "doh-ns",
                 "doh-custom-ns",
                 "doh-httpx-ns",
@@ -187,11 +196,15 @@ def test_parse_config_text_accepts_all_supported_nameserver_protocols() -> None:
 
     config = parse_config_dict(config_dict)
 
-    assert len(config.nameservers) == 10
+    assert len(config.nameservers) == 11
     assert config.nameservers[1].use_tricks is True
+    assert config.nameservers[2].servers == ["1.1.1.1", "1.0.0.1"]
+    assert config.nameservers[2].tcp is True
+    assert config.nameservers[2].timeout == 2.0
     assert config.upstreams[0].nameservers == [
         "udp-ns",
         "udp-custom-ns",
+        "aiodns-ns",
         "doh-ns",
         "doh-custom-ns",
         "doh-httpx-ns",
@@ -201,6 +214,41 @@ def test_parse_config_text_accepts_all_supported_nameserver_protocols() -> None:
         "doq-ns",
         "dnscrypt-ns",
     ]
+
+
+def test_parse_config_text_accepts_aiodns_defaults_and_normalizes_servers() -> None:
+    config_dict = build_config_dict()
+    config_dict["nameservers"] = [
+        {
+            "name": "aiodns-ns",
+            "protocol": "aiodns",
+            "servers": [" 1.1.1.1 ", "1.0.0.1", "1.1.1.1", ""],
+        }
+    ]
+    config_dict["upstreams"][0]["nameservers"] = ["aiodns-ns"]
+
+    config = parse_config_dict(config_dict)
+
+    nameserver = config.nameservers[0]
+    assert nameserver.servers == ["1.1.1.1", "1.0.0.1"]
+    assert nameserver.port == 53
+    assert nameserver.tcp is False
+    assert nameserver.timeout == 1.0
+
+
+def test_parse_config_text_rejects_empty_aiodns_servers() -> None:
+    config_dict = build_config_dict()
+    config_dict["nameservers"] = [
+        {
+            "name": "aiodns-ns",
+            "protocol": "aiodns",
+            "servers": [" ", ""],
+        }
+    ]
+    config_dict["upstreams"][0]["nameservers"] = ["aiodns-ns"]
+
+    with pytest.raises(ValueError):
+        parse_config_dict(config_dict)
 
 
 def test_parse_config_text_normalizes_runtime_http_client_options() -> None:

@@ -871,12 +871,22 @@ async def test_speedtest_plugin_on_response_replaces_answer_rrset_with_fastest_i
     assert len(answer.response.answer[0]) == 2
 
 
-async def test_speedtest_plugin_on_response_updates_ttl_and_expiration_when_replacing(
+@pytest.mark.parametrize(
+    ("original_ttl", "configured_ttl", "expected_ttl"),
+    [
+        (60, 120, 120),
+        (300, 120, 300),
+    ],
+)
+async def test_speedtest_plugin_on_response_uses_larger_ttl_when_replacing(
+    original_ttl: int,
+    configured_ttl: int,
+    expected_ttl: int,
     monkeypatch,
 ) -> None:
     plugin = SpeedTestPlugin()
     plugin.bind(
-        SpeedTestPluginConfig(response_ip_limit=1, response_ttl_seconds=120),
+        SpeedTestPluginConfig(response_ip_limit=1, response_ttl_seconds=configured_ttl),
         plugin.variables_model(),
     )
     registry = PluginRegistry()
@@ -888,7 +898,7 @@ async def test_speedtest_plugin_on_response_updates_ttl_and_expiration_when_repl
     response.answer.append(
         dns.rrset.from_text(
             "example.test.",
-            60,
+            original_ttl,
             "IN",
             "A",
             "203.0.113.10",
@@ -915,8 +925,8 @@ async def test_speedtest_plugin_on_response_updates_ttl_and_expiration_when_repl
     await plugin.on_response(context)
 
     assert [item.address for item in answer.rrset] == ["203.0.113.11"]
-    assert answer.rrset.ttl == 120
-    assert answer.expiration == pytest.approx(1120.0)
+    assert answer.rrset.ttl == expected_ttl
+    assert answer.expiration == pytest.approx(1000.0 + expected_ttl)
 
 
 async def test_speedtest_plugin_on_response_keeps_answer_when_all_ips_timeout() -> None:

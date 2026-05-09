@@ -5,6 +5,7 @@ from collections.abc import Iterable
 import dns.nameserver
 
 from dns_forwarder.config import (
+    AiodnsNameserverConfig,
     DNSCryptNameserverConfig,
     Do53CustomNameserverConfig,
     Do53NameserverConfig,
@@ -18,6 +19,8 @@ from dns_forwarder.config import (
     NameserverConfig,
 )
 
+from .aiodns import build_nameserver as build_aiodns_nameserver
+from .aiodns import close_shared_sessions as close_aiodns_sessions
 from .dnscrypt import build_nameserver as build_dnscrypt_nameserver
 from .do53 import build_nameserver as build_do53_nameserver
 from .do53_custom import build_nameserver as build_do53_custom_nameserver
@@ -58,6 +61,8 @@ def build_nameserver(
 ) -> dns.nameserver.Nameserver:
     bootstrap_resolver = bootstrap_resolver or []
     hosts = hosts or {}
+    if isinstance(config, AiodnsNameserverConfig):
+        return build_aiodns_nameserver(config)
     if isinstance(config, Do53NameserverConfig):
         return build_do53_nameserver(config)
     if isinstance(config, Do53CustomNameserverConfig):
@@ -94,6 +99,7 @@ def build_nameserver_map(
 
 
 async def close_shared_sessions() -> None:
+    await close_aiodns_sessions()
     await close_doh_custom_sessions()
     await close_doh_httpx_sessions()
     await close_doh_aiohttp_sessions()

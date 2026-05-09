@@ -12,6 +12,7 @@ import dns.rrset
 import pytest
 
 from dns_forwarder.config import (
+    AiodnsNameserverConfig,
     DNSCryptNameserverConfig,
     Do53CustomNameserverConfig,
     Do53NameserverConfig,
@@ -66,6 +67,25 @@ def test_build_nameserver_supports_do53_custom_without_tricks() -> None:
 
     assert nameserver.__class__.__name__ == "Do53CustomNameserver"
     assert nameserver.use_tricks is False
+
+
+def test_build_nameserver_supports_aiodns() -> None:
+    nameserver = build_nameserver(
+        AiodnsNameserverConfig(
+            name="aiodns",
+            servers=["1.1.1.1", "1.0.0.1"],
+            port=5301,
+            tcp=True,
+            timeout=2.5,
+        )
+    )
+
+    assert nameserver.__class__.__name__ == "AiodnsNameserver"
+    assert nameserver.servers == ("1.1.1.1", "1.0.0.1")
+    assert nameserver.port == 5301
+    assert nameserver.tcp is True
+    assert nameserver.timeout == 2.5
+    assert nameserver.is_always_max_size() is True
 
 
 def test_build_nameserver_supports_doh() -> None:

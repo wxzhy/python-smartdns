@@ -32,6 +32,7 @@ class ListenerProtocol(StrEnum):
 
 
 class NameserverProtocol(StrEnum):
+    AIODNS = "aiodns"
     DO53 = "do53"
     DO53_CUSTOM = "do53_custom"
     DOH = "doh"
@@ -178,6 +179,29 @@ class BaseNameserverConfig(StrictConfigModel):
     name: str
 
 
+class AiodnsNameserverConfig(BaseNameserverConfig):
+    protocol: Literal[NameserverProtocol.AIODNS] = NameserverProtocol.AIODNS
+    servers: list[str] = Field(min_length=1)
+    port: int = Field(default=53, ge=1, le=65535)
+    tcp: bool = False
+    timeout: float = Field(default=1.0, gt=0)
+
+    @field_validator("servers", mode="before")
+    @classmethod
+    def normalize_servers(cls, value: Any) -> Any:
+        if not isinstance(value, list):
+            return value
+        seen: set[str] = set()
+        normalized: list[str] = []
+        for item in value:
+            server = str(item).strip()
+            if not server or server in seen:
+                continue
+            seen.add(server)
+            normalized.append(server)
+        return normalized
+
+
 class Do53NameserverConfig(BaseNameserverConfig):
     protocol: Literal[NameserverProtocol.DO53] = NameserverProtocol.DO53
     address: str
@@ -188,7 +212,7 @@ class Do53CustomNameserverConfig(BaseNameserverConfig):
     protocol: Literal[NameserverProtocol.DO53_CUSTOM] = NameserverProtocol.DO53_CUSTOM
     address: str
     port: int = Field(default=53, ge=1, le=65535)
-    use_tricks: bool = False
+    use_tricks: bool = True
 
 
 class DoHNameserverConfig(BaseNameserverConfig):
@@ -275,7 +299,8 @@ class DNSCryptNameserverConfig(BaseNameserverConfig):
 
 
 NameserverConfig = Annotated[
-    Do53NameserverConfig
+    AiodnsNameserverConfig
+    | Do53NameserverConfig
     | Do53CustomNameserverConfig
     | DoHNameserverConfig
     | DoHCustomNameserverConfig

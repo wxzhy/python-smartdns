@@ -2,11 +2,16 @@ from __future__ import annotations
 
 import socket
 from types import SimpleNamespace
-from unittest.mock import AsyncMock, patch
+from unittest.mock import AsyncMock, Mock, patch, sentinel
 
 import dns.message
 import dns.query
+import dns.rcode
+import dns.rdtypes.svcbbase
+import pycares
+from aiodns import error as aiodns_error
 
+import dns_forwarder.resolver.nameservers.aiodns as aiodns_nameserver
 from dns_forwarder.config import HTTPVersionType
 from dns_forwarder.resolver.nameservers import doh_aiohttp, doh_curl_cffi
 from dns_forwarder.resolver.nameservers._trick_tcp import (
@@ -14,6 +19,7 @@ from dns_forwarder.resolver.nameservers._trick_tcp import (
     _tcp_socket_factory,
 )
 from dns_forwarder.resolver.nameservers._trick_udp import TrickyDatagramSocket
+from dns_forwarder.resolver.nameservers.aiodns import AiodnsDNSResolver, AiodnsNameserver
 from dns_forwarder.resolver.nameservers.do53_custom import Do53CustomNameserver
 from dns_forwarder.resolver.nameservers.doh_aiohttp import (
     DoHAiohttpNameserver,
@@ -82,6 +88,205 @@ class FakeSocket:
 def _doh_response_wire(request: dns.message.QueryMessage) -> bytes:
     response = dns.message.make_response(request)
     return response.to_wire()
+
+
+def test_aiodns_dns_resolver_query_dns_supports_https() -> None:
+    resolver = object.__new__(AiodnsDNSResolver)
+    resolver._closed = True
+    resolver._get_future_callback = Mock(return_value=(sentinel.future, sentinel.callback))
+    resolver._channel = Mock()
+
+    result = resolver.query_dns("example.test", "HTTPS", "IN")
+
+    assert result is sentinel.future
+    resolver._channel.query.assert_called_once_with(
+        "example.test",
+        pycares.QUERY_TYPE_HTTPS,
+        query_class=pycares.QUERY_CLASS_IN,
+        callback=sentinel.callback,
+    )
+
+
+def test_aiodns_dns_resolver_query_dns_delegates_non_https() -> None:
+    resolver = object.__new__(AiodnsDNSResolver)
+    resolver._closed = True
+
+    with patch.object(
+        aiodns_nameserver.aiodns.DNSResolver,
+        "query_dns",
+        return_value=sentinel.result,
+    ) as query_dns:
+        result = resolver.query_dns("example.test", "A", "IN")
+
+    assert result is sentinel.result
+    query_dns.assert_called_once_with("example.test", "A", "IN")
+
+
+async def test_aiodns_get_resolver_configures_pycares_channel() -> None:
+    aiodns_nameserver._RESOLVERS.clear()
+    try:
+        with patch(
+            "dns_forwarder.resolver.nameservers.aiodns.AiodnsDNSResolver"
+        ) as resolver_cls:
+            result = aiodns_nameserver._get_resolver(
+                ("1.1.1.1", "1.0.0.1"),
+                5301,
+                2.5,
+                True,
+            )
+
+        assert result is resolver_cls.return_value
+        kwargs = resolver_cls.call_args.kwargs
+        assert kwargs["nameservers"] == ["1.1.1.1", "1.0.0.1"]
+        assert kwargs["flags"] == pycares.ARES_FLAG_USEVC
+        assert kwargs["timeout"] == 2.5
+        assert kwargs["tcp_port"] == 5301
+        assert kwargs["udp_port"] == 5301
+        assert kwargs["rotate"] is True
+    finally:
+        aiodns_nameserver._RESOLVERS.clear()
+
+
+async def test_aiodns_nameserver_async_query_fills_response_sections() -> None:
+    request = dns.message.make_query("example.test", "HTTPS")
+    result = pycares.DNSResult(
+        answer=[
+            pycares.DNSRecord(
+                name="example.test",
+                type=pycares.QUERY_TYPE_HTTPS,
+                record_class=pycares.QUERY_CLASS_IN,
+                ttl=60,
+                data=pycares.HTTPSRecordData(
+                    priority=1,
+                    target="svc.example.test",
+                    params=[(3, b"\x01\xbb")],
+                ),
+            )
+        ],
+        authority=[
+            pycares.DNSRecord(
+                name="example.test",
+                type=pycares.QUERY_TYPE_NS,
+                record_class=pycares.QUERY_CLASS_IN,
+                ttl=300,
+                data=pycares.NSRecordData(nsdname="ns.example.test"),
+            )
+        ],
+        additional=[
+            pycares.DNSRecord(
+                name="ns.example.test",
+                type=pycares.QUERY_TYPE_A,
+                record_class=pycares.QUERY_CLASS_IN,
+                ttl=300,
+                data=pycares.ARecordData(addr="192.0.2.53"),
+            )
+        ],
+    )
+    fake_resolver = Mock()
+    fake_resolver.query_dns = AsyncMock(return_value=result)
+    nameserver = AiodnsNameserver(["1.1.1.1", "1.0.0.1"], port=5301, timeout=2.0)
+
+    with patch(
+        "dns_forwarder.resolver.nameservers.aiodns._get_resolver",
+        return_value=fake_resolver,
+    ) as get_resolver:
+        response = await nameserver.async_query(
+            request,
+            timeout=1.0,
+            source=None,
+            source_port=0,
+            max_size=False,
+            backend=object(),
+        )
+
+    get_resolver.assert_called_once_with(nameserver.servers, 5301, 2.0, False)
+    fake_resolver.query_dns.assert_awaited_once_with("example.test", "HTTPS", "IN")
+    assert response.question == request.question
+    assert response.answer[0].ttl == 60
+    assert response.answer[0][0].priority == 1
+    assert response.answer[0][0].target.to_text() == "svc.example.test."
+    assert response.answer[0][0].params[dns.rdtypes.svcbbase.ParamKey.PORT].port == 443
+    assert response.authority[0].to_text().startswith("example.test. 300 IN NS")
+    assert response.additional[0].to_text().startswith("ns.example.test. 300 IN A")
+
+
+async def test_aiodns_nameserver_async_query_supports_one_rr_per_rrset() -> None:
+    request = dns.message.make_query("example.test", "A")
+    result = pycares.DNSResult(
+        answer=[
+            pycares.DNSRecord(
+                name="example.test",
+                type=pycares.QUERY_TYPE_A,
+                record_class=pycares.QUERY_CLASS_IN,
+                ttl=60,
+                data=pycares.ARecordData(addr="192.0.2.1"),
+            ),
+            pycares.DNSRecord(
+                name="example.test",
+                type=pycares.QUERY_TYPE_A,
+                record_class=pycares.QUERY_CLASS_IN,
+                ttl=60,
+                data=pycares.ARecordData(addr="192.0.2.2"),
+            ),
+        ],
+        authority=[],
+        additional=[],
+    )
+    fake_resolver = Mock()
+    fake_resolver.query_dns = AsyncMock(return_value=result)
+
+    with patch(
+        "dns_forwarder.resolver.nameservers.aiodns._get_resolver",
+        return_value=fake_resolver,
+    ):
+        response = await AiodnsNameserver(["1.1.1.1"]).async_query(
+            request,
+            timeout=1.0,
+            source=None,
+            source_port=0,
+            max_size=False,
+            backend=object(),
+            one_rr_per_rrset=True,
+        )
+
+    assert len(response.answer) == 2
+    assert [rrset[0].address for rrset in response.answer] == ["192.0.2.1", "192.0.2.2"]
+
+
+async def test_aiodns_nameserver_async_query_uses_tcp_for_max_size_and_maps_errors() -> None:
+    request = dns.message.make_query("missing.test", "A")
+    fake_resolver = Mock()
+    fake_resolver.query_dns = AsyncMock(
+        side_effect=aiodns_error.DNSError(aiodns_error.ARES_ENOTFOUND, "not found")
+    )
+    nameserver = AiodnsNameserver(["1.1.1.1"], port=5301, timeout=2.0)
+
+    with patch(
+        "dns_forwarder.resolver.nameservers.aiodns._get_resolver",
+        return_value=fake_resolver,
+    ) as get_resolver:
+        response = await nameserver.async_query(
+            request,
+            timeout=1.0,
+            source=None,
+            source_port=0,
+            max_size=True,
+            backend=object(),
+        )
+
+    get_resolver.assert_called_once_with(nameserver.servers, 5301, 2.0, True)
+    assert response.rcode() == dns.rcode.NXDOMAIN
+
+
+async def test_aiodns_close_shared_sessions_closes_cached_resolvers() -> None:
+    resolver = AsyncMock()
+    key = aiodns_nameserver._ResolverKey(1, ("1.1.1.1",), 53, 1.0, False)
+    aiodns_nameserver._RESOLVERS[key] = resolver
+
+    await aiodns_nameserver.close_shared_sessions()
+
+    resolver.close.assert_awaited_once()
+    assert aiodns_nameserver._RESOLVERS == {}
 
 
 async def test_do53_custom_async_query_uses_tricky_udp_socket() -> None:

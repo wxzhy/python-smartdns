@@ -1,4 +1,5 @@
 from .models import (
+    AiodnsNameserverConfig,
     AppConfig,
     BaseNameserverConfig,
     DispatchStrategyType,
@@ -62,6 +63,7 @@ def build_config_json_schema(*args, **kwargs):
 
 __all__ = [
     "AppConfig",
+    "AiodnsNameserverConfig",
     "BaseNameserverConfig",
     "DispatchStrategyType",
     "DNSCryptNameserverConfig",

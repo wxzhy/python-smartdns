@@ -279,7 +279,7 @@ class SpeedTestPlugin(Plugin):
         )
 
     def _replace_answer_ips(self, answer: dns.resolver.Answer, ips: list[str]) -> None:
-        ttl = self.runtime_config.response_ttl_seconds
+        ttl = max(answer.rrset.ttl, self.runtime_config.response_ttl_seconds)
         answer.rrset = dns.rrset.from_text_list(
             answer.rrset.name,
             ttl,

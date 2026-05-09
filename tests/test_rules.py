@@ -124,6 +124,41 @@ def test_rule_engine_allows_dispatcher_override_without_group_override() -> None
     assert selection.dispatcher is DispatchStrategyType.WAIT_ALL
 
 
+def test_rule_engine_uses_first_matching_rule_by_config_order() -> None:
+    first_rule = RuleConfig.model_validate(
+        {
+            "name": "proxy-first",
+            "match": {
+                "match_tags": ["proxy"],
+            },
+            "action": {
+                "upstream_group": "first",
+                "dispatcher": "race",
+            },
+        }
+    )
+    second_rule = RuleConfig.model_validate(
+        {
+            "name": "proxy-addresses-second",
+            "match": {
+                "match_tags": ["proxy"],
+                "qtypes": ["A"],
+            },
+            "action": {
+                "upstream_group": "second",
+                "dispatcher": "wait_all",
+            },
+        }
+    )
+    engine = RuleEngine([first_rule, second_rule], "default")
+
+    selection = engine.select(_build_context("www.example.org", "A", tags={"proxy"}))
+
+    assert selection.rule_name == "proxy-first"
+    assert selection.upstream_group == "first"
+    assert selection.dispatcher is DispatchStrategyType.RACE
+
+
 def test_rule_engine_matches_tags_with_any_of_semantics() -> None:
     rule = RuleConfig.model_validate(
         {

@@ -8,6 +8,7 @@ import dns.message
 import dns.query
 import dns.rcode
 import dns.rdtypes.svcbbase
+import dns.resolver
 import pycares
 from aiodns import error as aiodns_error
 
@@ -251,6 +252,56 @@ async def test_aiodns_nameserver_async_query_supports_one_rr_per_rrset() -> None
 
     assert len(response.answer) == 2
     assert [rrset[0].address for rrset in response.answer] == ["192.0.2.1", "192.0.2.2"]
+
+
+async def test_aiodns_nameserver_async_query_indexes_a_and_aaaa_answers() -> None:
+    request = dns.message.make_query("example.test", "A")
+    result = pycares.DNSResult(
+        answer=[
+            pycares.DNSRecord(
+                name="example.test",
+                type=pycares.QUERY_TYPE_A,
+                record_class=pycares.QUERY_CLASS_IN,
+                ttl=60,
+                data=pycares.ARecordData(addr="192.0.2.1"),
+            ),
+            pycares.DNSRecord(
+                name="example.test",
+                type=pycares.QUERY_TYPE_AAAA,
+                record_class=pycares.QUERY_CLASS_IN,
+                ttl=60,
+                data=pycares.AAAARecordData(addr="2001:db8::1"),
+            ),
+        ],
+        authority=[],
+        additional=[],
+    )
+    fake_resolver = Mock()
+    fake_resolver.query_dns = AsyncMock(return_value=result)
+
+    with patch(
+        "dns_forwarder.resolver.nameservers.aiodns._get_resolver",
+        return_value=fake_resolver,
+    ):
+        response = await AiodnsNameserver(["1.1.1.1"]).async_query(
+            request,
+            timeout=1.0,
+            source=None,
+            source_port=0,
+            max_size=False,
+            backend=object(),
+        )
+
+    answer = dns.resolver.Answer(
+        request.question[0].name,
+        request.question[0].rdtype,
+        request.question[0].rdclass,
+        response,
+    )
+    assert answer.rrset is not None
+    assert [record.address for record in answer] == ["192.0.2.1"]
+    aaaa_rrset = response.find_rrset(response.answer, "example.test", "IN", "AAAA")
+    assert [record.address for record in aaaa_rrset] == ["2001:db8::1"]
 
 
 async def test_aiodns_nameserver_async_query_uses_tcp_for_max_size_and_maps_errors() -> None:

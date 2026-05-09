@@ -205,35 +205,31 @@ def _build_response(
     one_rr_per_rrset: bool,
 ) -> dns.message.Message:
     response = dns.message.make_response(request)
-    _append_records(response.answer, result.answer, one_rr_per_rrset)
-    _append_records(response.authority, result.authority, one_rr_per_rrset)
-    _append_records(response.additional, result.additional, one_rr_per_rrset)
+    _append_records(response, response.answer, result.answer, one_rr_per_rrset)
+    _append_records(response, response.authority, result.authority, one_rr_per_rrset)
+    _append_records(response, response.additional, result.additional, one_rr_per_rrset)
     return response
 
 
 def _append_records(
+    response: dns.message.Message,
     section: list[dns.rrset.RRset],
     records: list[pycares.DNSRecord],
     one_rr_per_rrset: bool,
 ) -> None:
-    rrsets: dict[tuple[dns.name.Name, dns.rdataclass.RdataClass, dns.rdatatype.RdataType], dns.rrset.RRset] = {}
     for record in records:
         rdclass = dns.rdataclass.RdataClass.make(record.record_class)
         rdtype = dns.rdatatype.RdataType.make(record.type)
         name = dns.name.from_text(record.name)
         rdata = _record_data_to_rdata(record.data, rdclass, rdtype)
-        if one_rr_per_rrset:
-            rrset = dns.rrset.RRset(name, rdclass, rdtype)
-            rrset.add(rdata, record.ttl)
-            section.append(rrset)
-            continue
-
-        key = (name, rdclass, rdtype)
-        rrset = rrsets.get(key)
-        if rrset is None:
-            rrset = dns.rrset.RRset(name, rdclass, rdtype)
-            rrsets[key] = rrset
-            section.append(rrset)
+        rrset = response.find_rrset(
+            section,
+            name,
+            rdclass,
+            rdtype,
+            create=True,
+            force_unique=one_rr_per_rrset,
+        )
         rrset.add(rdata, record.ttl)
 
 

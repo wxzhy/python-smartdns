@@ -120,7 +120,7 @@ def test_parse_config_text_accepts_all_supported_nameserver_protocols() -> None:
         },
         {
             "name": "doh-httpx-ns",
-            "protocol": "doh_httpx",
+            "protocol": "httpx",
             "url": "https://cloudflare-dns.com/dns-query",
             "verify": True,
             "want_get": False,
@@ -130,7 +130,7 @@ def test_parse_config_text_accepts_all_supported_nameserver_protocols() -> None:
         },
         {
             "name": "doh-aiohttp-ns",
-            "protocol": "doh_aiohttp",
+            "protocol": "aiohttp",
             "url": "https://1.1.1.1/dns-query",
             "verify": True,
             "want_get": False,
@@ -140,7 +140,7 @@ def test_parse_config_text_accepts_all_supported_nameserver_protocols() -> None:
         },
         {
             "name": "doh-curl-cffi-ns",
-            "protocol": "doh_curl_cffi",
+            "protocol": "curl",
             "url": "https://1.1.1.1/dns-query",
             "verify": True,
             "want_get": True,
@@ -301,30 +301,30 @@ def test_parse_config_text_rejects_unsupported_doh_client_http_versions() -> Non
     config_dict["nameservers"] = [
         {
             "name": "bad-aiohttp",
-            "protocol": "doh_aiohttp",
+            "protocol": "aiohttp",
             "url": "https://dns.example/dns-query",
             "http_version": "h2",
         }
     ]
     config_dict["upstreams"][0]["nameservers"] = ["bad-aiohttp"]
 
-    with pytest.raises(ValueError, match="doh_aiohttp"):
+    with pytest.raises(ValueError, match="aiohttp"):
         parse_config_dict(config_dict)
 
     config_dict["nameservers"][0] = {
         "name": "bad-httpx",
-        "protocol": "doh_httpx",
+        "protocol": "httpx",
         "url": "https://dns.example/dns-query",
         "http_version": "h3",
     }
     config_dict["upstreams"][0]["nameservers"] = ["bad-httpx"]
 
-    with pytest.raises(ValueError, match="doh_httpx"):
+    with pytest.raises(ValueError, match="httpx"):
         parse_config_dict(config_dict)
 
     config_dict["nameservers"][0] = {
         "name": "bad-curl",
-        "protocol": "doh_curl_cffi",
+        "protocol": "curl",
         "url": "https://1.1.1.1/dns-query",
         "server_hostname": "cloudflare-dns.com",
     }
@@ -335,7 +335,7 @@ def test_parse_config_text_rejects_unsupported_doh_client_http_versions() -> Non
 
     config_dict["nameservers"][0] = {
         "name": "bad-curl-verify",
-        "protocol": "doh_curl_cffi",
+        "protocol": "curl",
         "url": "https://1.1.1.1/dns-query",
         "verify": "/tmp/cert.pem",
     }
@@ -346,7 +346,7 @@ def test_parse_config_text_rejects_unsupported_doh_client_http_versions() -> Non
 
     config_dict["nameservers"][0] = {
         "name": "bad-curl-fingerprint",
-        "protocol": "doh_curl_cffi",
+        "protocol": "curl",
         "url": "https://1.1.1.1/dns-query",
         "ja3": "771,4865-4866-4867,0-11-10,29-23,0",
     }

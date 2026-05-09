@@ -28,7 +28,7 @@ def _get_shared_client() -> Any:
     global _SHARED_CLIENT
     if _SHARED_CLIENT is None:
         if httpx is None:  # pragma: no cover
-            raise RuntimeError("httpx is required for doh_httpx")
+            raise RuntimeError("httpx is required for httpx nameserver")
         _SHARED_CLIENT = httpx.AsyncClient(
             http2=True,
             limits=httpx.Limits(
@@ -92,7 +92,7 @@ class DoHHttpxNameserver(dns.nameserver.Nameserver):
         one_rr_per_rrset: bool = False,
         ignore_trailing: bool = False,
     ) -> dns.message.Message:
-        raise NotImplementedError("doh_httpx only supports async queries")
+        raise NotImplementedError("httpx nameserver only supports async queries")
 
     async def async_query(
         self,

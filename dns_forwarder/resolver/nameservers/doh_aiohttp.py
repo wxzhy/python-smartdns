@@ -63,7 +63,7 @@ def _get_shared_session(bootstrap_resolver: tuple[str, ...], hosts: FrozenHosts)
     global _SHARED_BOOTSTRAP_RESOLVER, _SHARED_HOSTS, _SHARED_SESSION
     if _SHARED_SESSION is None or _SHARED_SESSION.closed:
         if aiohttp is None or AsyncResolver is None:  # pragma: no cover
-            raise RuntimeError("aiohttp and aiodns are required for doh_aiohttp")
+            raise RuntimeError("aiohttp and aiodns are required for aiohttp nameserver")
         resolver = _build_resolver(bootstrap_resolver, hosts)
         connector = aiohttp.TCPConnector(resolver=resolver, limit=500, keepalive_timeout=30)
         _SHARED_SESSION = aiohttp.ClientSession(connector=connector)
@@ -72,7 +72,7 @@ def _get_shared_session(bootstrap_resolver: tuple[str, ...], hosts: FrozenHosts)
         return _SHARED_SESSION
 
     if _SHARED_BOOTSTRAP_RESOLVER != bootstrap_resolver or _SHARED_HOSTS != hosts:
-        raise RuntimeError("doh_aiohttp bootstrap_resolver/hosts changed while session is active")
+        raise RuntimeError("aiohttp bootstrap_resolver/hosts changed while session is active")
     return _SHARED_SESSION
 
 
@@ -89,7 +89,7 @@ async def close_shared_sessions() -> None:
 def _build_resolver(bootstrap_resolver: tuple[str, ...], hosts: FrozenHosts) -> Any:
     if hosts:
         if HostsAsyncResolver is None:  # pragma: no cover
-            raise RuntimeError("aiohttp and aiodns are required for doh_aiohttp")
+            raise RuntimeError("aiohttp and aiodns are required for aiohttp nameserver")
         if bootstrap_resolver:
             return HostsAsyncResolver(hosts, nameservers=list(bootstrap_resolver))
         return HostsAsyncResolver(hosts)
@@ -180,7 +180,7 @@ class DoHAiohttpNameserver(dns.nameserver.Nameserver):
         one_rr_per_rrset: bool = False,
         ignore_trailing: bool = False,
     ) -> dns.message.Message:
-        raise NotImplementedError("doh_aiohttp only supports async queries")
+        raise NotImplementedError("aiohttp nameserver only supports async queries")
 
     async def async_query(
         self,

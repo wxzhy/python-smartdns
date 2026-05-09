@@ -33,11 +33,11 @@ def _get_shared_session(resolve_entries: tuple[str, ...] = ()) -> Any:
     session = _SHARED_SESSIONS.get(resolve_entries)
     if session is None:
         if AsyncSession is None:  # pragma: no cover
-            raise RuntimeError("curl_cffi is required for doh_curl_cffi")
+            raise RuntimeError("curl_cffi is required for curl nameserver")
         kwargs: dict[str, Any] = {"max_clients": 500}
         if resolve_entries:
             if CurlOpt is None:  # pragma: no cover
-                raise RuntimeError("curl_cffi is required for doh_curl_cffi")
+                raise RuntimeError("curl_cffi is required for curl nameserver")
             kwargs["curl_options"] = {CurlOpt.RESOLVE: list(resolve_entries)}
         session = AsyncSession(**kwargs)
         _SHARED_SESSIONS[resolve_entries] = session
@@ -98,7 +98,7 @@ class DoHCurlCffiNameserver(dns.nameserver.Nameserver):
         one_rr_per_rrset: bool = False,
         ignore_trailing: bool = False,
     ) -> dns.message.Message:
-        raise NotImplementedError("doh_curl_cffi only supports async queries")
+        raise NotImplementedError("curl nameserver only supports async queries")
 
     async def async_query(
         self,

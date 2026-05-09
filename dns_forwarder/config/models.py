@@ -37,9 +37,9 @@ class NameserverProtocol(StrEnum):
     DO53_CUSTOM = "do53_custom"
     DOH = "doh"
     DOH_CUSTOM = "doh_custom"
-    DOH_HTTPX = "doh_httpx"
-    DOH_AIOHTTP = "doh_aiohttp"
-    DOH_CURL_CFFI = "doh_curl_cffi"
+    DOH_HTTPX = "httpx"
+    DOH_AIOHTTP = "aiohttp"
+    DOH_CURL_CFFI = "curl"
     DOT = "dot"
     DOQ = "doq"
     DNSCRYPT = "dnscrypt"
@@ -251,9 +251,9 @@ class DoHHttpxNameserverConfig(BaseTLSHTTPClientDoHNameserverConfig):
     @model_validator(mode="after")
     def validate_http_version(self) -> "DoHHttpxNameserverConfig":
         if self.http_version in {HTTPVersionType.H1, HTTPVersionType.H3}:
-            raise ValueError("doh_httpx 仅支持 default / h2")
+            raise ValueError("httpx 仅支持 default / h2")
         if self.verify is not True:
-            raise ValueError("doh_httpx 不支持按请求配置 verify")
+            raise ValueError("httpx 不支持按请求配置 verify")
         return self
 
 
@@ -263,7 +263,7 @@ class DoHAiohttpNameserverConfig(BaseTLSHTTPClientDoHNameserverConfig):
     @model_validator(mode="after")
     def validate_http_version(self) -> "DoHAiohttpNameserverConfig":
         if self.http_version in {HTTPVersionType.H2, HTTPVersionType.H3}:
-            raise ValueError("doh_aiohttp 仅支持 default / h1")
+            raise ValueError("aiohttp 仅支持 default / h1")
         return self
 
 

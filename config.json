@@ -70,7 +70,7 @@
     },
     {
       "name": "cf",
-      "protocol": "doh_curl_cffi",
+      "protocol": "curl",
       "url": "https://jxl61mtx82.cloudflare-gateway.com/dns-query",
       "verify": true
     },
@@ -101,59 +101,59 @@
     },
     {
       "name": "v-opt",
-      "protocol": "doh_curl_cffi",
+      "protocol": "curl",
       "url": "https://v.recipes/dns-cn"
     },
     {
       "name": "v-ecs",
-      "protocol": "doh_curl_cffi",
+      "protocol": "curl",
       "url": "https://v.recipes/dns-ecs"
     },
     {
       "name": "hinet-a",
-      "protocol": "doh_curl_cffi",
+      "protocol": "curl",
       "url": "https://[2001:b000:168::1]/dns-query",
       "verify": false
     },
     {
       "name": "hinet-b",
-      "protocol": "doh_curl_cffi",
+      "protocol": "curl",
       "url": "https://[2001:b000:168::2]/dns-query",
       "verify": false
     },
     {
       "name": "hinet-c",
-      "protocol": "doh_curl_cffi",
+      "protocol": "curl",
       "url": "https://168.95.192.1/dns-query",
       "verify": false
     },
     {
       "name": "hinet-d",
-      "protocol": "doh_curl_cffi",
+      "protocol": "curl",
       "url": "https://168.95.1.1/dns-query",
       "verify": false
     },
     {
       "name": "iij-a",
-      "protocol": "doh_curl_cffi",
+      "protocol": "curl",
       "url": "https://[2001:300::5]/dns-query",
       "verify": false
     },
     {
       "name": "iij-b",
-      "protocol": "doh_curl_cffi",
+      "protocol": "curl",
       "url": "https://[2001:300::6]/dns-query",
       "verify": false
     },
     {
       "name": "iij-c",
-      "protocol": "doh_curl_cffi",
+      "protocol": "curl",
       "url": "https://103.2.57.5/dns-query",
       "verify": false
     },
     {
       "name": "iij-d",
-      "protocol": "doh_curl_cffi",
+      "protocol": "curl",
       "url": "https://103.2.57.6/dns-query",
       "verify": false
     },

@@ -97,7 +97,7 @@
     },
     {
       "name": "cloudflare-doh-httpx-example",
-      "protocol": "doh_httpx",
+      "protocol": "httpx",
       "url": "https://1.1.1.1/dns-query",
       "verify": true,
       "want_get": false,
@@ -107,7 +107,7 @@
     },
     {
       "name": "cloudflare-doh-aiohttp-example",
-      "protocol": "doh_aiohttp",
+      "protocol": "aiohttp",
       "url": "https://cloudflare-dns.com/dns-query",
       "verify": true,
       "want_get": false,
@@ -117,7 +117,7 @@
     },
     {
       "name": "cloudflare-doh-curl-cffi-example",
-      "protocol": "doh_curl_cffi",
+      "protocol": "curl",
       "url": "https://cloudflare-dns.com/dns-query",
       "verify": true,
       "want_get": true,

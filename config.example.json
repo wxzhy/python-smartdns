@@ -17,7 +17,13 @@
       ]
     },
     "fingerprint": "chrome",
-    "log_level": "INFO"
+    "log_level": "INFO",
+    "multiprocess": {
+      "workers": "auto",
+      "queue_size": 1024,
+      "response_timeout": 10.0,
+      "front_cache_size": 100000
+    }
   },
   "tree_root": {
     "domain_dir": "examples/tags/domains",

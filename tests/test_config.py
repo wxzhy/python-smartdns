@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import os
 from pathlib import Path
 
 import pytest
@@ -74,8 +75,52 @@ def test_parse_config_text_success() -> None:
     assert config.runtime.bootstrap_resolver == []
     assert config.runtime.hosts == {}
     assert config.runtime.fingerprint is None
+    assert config.runtime.multiprocess.workers == 1
+    assert config.runtime.multiprocess.resolved_workers() == 1
+    assert config.runtime.multiprocess.queue_size == 1024
+    assert config.runtime.multiprocess.response_timeout == 10.0
+    assert config.runtime.multiprocess.front_cache_size == 100000
     assert config.listeners[0].protocol.value == "udp"
     assert config.upstreams[0].nameservers == ["local-ns"]
+
+
+def test_runtime_multiprocess_config_validates_bounds() -> None:
+    config_dict = build_config_dict()
+    config_dict["runtime"] = {
+        "plugin_dirs": ["plugins"],
+        "default_upstream_group": "default",
+        "multiprocess": {
+            "workers": 0,
+            "queue_size": 1024,
+            "response_timeout": 10.0,
+            "front_cache_size": 100000,
+        },
+    }
+
+    with pytest.raises(ValueError, match="greater than or equal to 1"):
+        parse_config_dict(config_dict)
+
+
+def test_runtime_multiprocess_config_accepts_auto_workers(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    config_dict = build_config_dict()
+    config_dict["runtime"] = {
+        "plugin_dirs": ["plugins"],
+        "default_upstream_group": "default",
+        "multiprocess": {
+            "workers": "auto",
+            "queue_size": 1024,
+            "response_timeout": 10.0,
+            "front_cache_size": 100000,
+        },
+    }
+
+    config = parse_config_dict(config_dict)
+
+    monkeypatch.setattr(os, "process_cpu_count", lambda: 4, raising=False)
+    assert config.runtime.multiprocess.workers == "auto"
+    assert config.runtime.multiprocess.resolved_workers() == 4
 
 
 def test_parse_config_text_accepts_all_supported_nameserver_protocols() -> None:

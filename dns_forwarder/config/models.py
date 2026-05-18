@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 from enum import StrEnum
 from ipaddress import IPv4Network, IPv6Network, ip_address, ip_network
 from typing import Annotated, Any, Literal
@@ -61,6 +62,31 @@ class StrictConfigModel(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
 
+WorkerCount = Annotated[int, Field(ge=1)] | Literal["auto"]
+
+
+class MultiprocessConfig(StrictConfigModel):
+    workers: WorkerCount = 1
+    queue_size: int = Field(default=1024, ge=1)
+    response_timeout: float = Field(default=10.0, gt=0)
+    front_cache_size: int = Field(default=100000, ge=1)
+
+    @field_validator("workers", mode="before")
+    @classmethod
+    def normalize_workers(cls, value: Any) -> Any:
+        if isinstance(value, str):
+            stripped = value.strip().lower()
+            return "auto" if stripped == "auto" else value
+        return value
+
+    def resolved_workers(self) -> int:
+        if self.workers != "auto":
+            return self.workers
+        process_cpu_count = getattr(os, "process_cpu_count", None)
+        count = process_cpu_count() if callable(process_cpu_count) else os.cpu_count()
+        return max(1, count or 1)
+
+
 class RuntimeConfig(StrictConfigModel):
     plugin_dirs: list[str] = Field(default_factory=lambda: ["plugins"])
     loop_policy: str = "auto"
@@ -70,6 +96,7 @@ class RuntimeConfig(StrictConfigModel):
     hosts: dict[str, list[str]] = Field(default_factory=dict)
     fingerprint: str | None = None
     log_level: str = "INFO"
+    multiprocess: MultiprocessConfig = Field(default_factory=MultiprocessConfig)
 
     @field_validator("plugin_dirs")
     @classmethod

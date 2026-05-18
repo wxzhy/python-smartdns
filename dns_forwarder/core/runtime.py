@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -9,6 +10,7 @@ from typing import Any
 from dns_forwarder.config import AppConfig, ListenerProtocol, load_config
 from dns_forwarder.dispatcher import DispatcherRegistry
 from dns_forwarder.logging import configure_logging, get_logger
+from dns_forwarder.pipeline.context import NestedResolveHandler
 from dns_forwarder.pipeline.engine import PipelineEngine
 from dns_forwarder.plugin_api import PluginManager
 from dns_forwarder.resolver import ResolverManager
@@ -33,12 +35,20 @@ class RuntimeState:
 
 
 class RuntimeManager:
-    def __init__(self, config_path: str | Path = "config.json") -> None:
+    def __init__(
+        self,
+        config_path: str | Path = "config.json",
+        *,
+        shared_contexts: Mapping[str, Any] | None = None,
+        nested_resolve_handler: NestedResolveHandler | None = None,
+    ) -> None:
         self.config_path = Path(config_path)
         self._lock = asyncio.Lock()
         self._state: RuntimeState | None = None
         self._listeners: list[UdpDnsServer | TcpDnsServer] = []
         self._webui_server: ManagedUvicornServer | None = None
+        self._shared_context_overrides = dict(shared_contexts or {})
+        self._nested_resolve_handler = nested_resolve_handler
 
     @property
     def reload_endpoint(self) -> str:
@@ -157,7 +167,13 @@ class RuntimeManager:
         )
         resolver_manager = ResolverManager(config, plugin_manager.registry)
         dispatcher_registry = DispatcherRegistry()
-        pipeline = PipelineEngine(config, resolver_manager, dispatcher_registry, plugin_manager)
+        pipeline = PipelineEngine(
+            config,
+            resolver_manager,
+            dispatcher_registry,
+            plugin_manager,
+            nested_resolve_handler=self._nested_resolve_handler,
+        )
         return RuntimeState(
             config=config,
             plugin_manager=plugin_manager,
@@ -171,7 +187,8 @@ class RuntimeManager:
             DOMAINSET_CONTEXT_KEY: DomainSet(config.tree_root.domain_dir),
             IPSET_CONTEXT_KEY: IPSet(config.tree_root.ip_dir),
         }
-        if self._is_query_log_plugin_enabled(config):
+        shared_contexts.update(self._shared_context_overrides)
+        if self._is_query_log_plugin_enabled(config) and QUERY_LOG_STORE_KEY not in shared_contexts:
             query_log_store = self.get_query_log_store()
             if query_log_store is not None:
                 shared_contexts[QUERY_LOG_STORE_KEY] = query_log_store
@@ -256,12 +273,22 @@ def install_loop_policy(loop_policy: str) -> None:
 
 
 async def serve(config_path: Path) -> None:
-    manager = RuntimeManager(config_path)
+    manager = create_runtime_manager(config_path)
     await manager.start()
     try:
         await asyncio.Event().wait()
     finally:
         await manager.stop()
+
+
+def create_runtime_manager(config_path: str | Path = "config.json") -> Any:
+    resolved_config_path = Path(config_path)
+    config = load_config(resolved_config_path)
+    if config.runtime.multiprocess.resolved_workers() > 1:
+        from .multiprocess import MultiprocessRuntimeManager
+
+        return MultiprocessRuntimeManager(resolved_config_path)
+    return RuntimeManager(resolved_config_path)
 
 
 def build_parser() -> argparse.ArgumentParser:

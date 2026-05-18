@@ -10,6 +10,12 @@
       "114.114.114.114",
       "119.29.29.29"
     ],
+    "multiprocess": {
+      "workers": "auto",
+      "queue_size": 1024,
+      "response_timeout": 10.0,
+      "front_cache_size": 100000
+    },
     "hosts": {
       "jxl61mtx82.cloudflare-gateway.com": [
         "162.159.38.0",

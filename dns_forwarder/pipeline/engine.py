@@ -15,6 +15,7 @@ from dns_forwarder.config import AppConfig
 from dns_forwarder.dispatcher import DispatcherRegistry
 from dns_forwarder.logging import format_tags, get_logger
 from dns_forwarder.pipeline.context import (
+    NestedResolveHandler,
     NestedResolveRecursionError,
     RequestContext,
     UpstreamResult,
@@ -37,10 +38,12 @@ class PipelineEngine:
         resolver_manager: ResolverManager,
         dispatcher_registry: DispatcherRegistry,
         plugin_manager: PluginManager,
+        nested_resolve_handler: NestedResolveHandler | None = None,
     ) -> None:
         self._resolver_manager = resolver_manager
         self._dispatcher_registry = dispatcher_registry
         self._plugin_manager = plugin_manager
+        self._nested_resolve_handler = nested_resolve_handler
         self._rule_engine = RuleEngine(config.rules, config.runtime.default_upstream_group)
         self._default_dispatcher = config.runtime.default_upstream_policy
         self._logger = get_logger("pipeline.engine")
@@ -236,7 +239,7 @@ class PipelineEngine:
                 if answer_registry_refs is None
                 else dict(answer_registry_refs)
             ),
-            _resolve_handler=self._resolve_nested,
+            _resolve_handler=self._nested_resolve_handler or self._resolve_nested,
             _nested_resolve_chain=nested_resolve_chain,
             _nested_resolve_max_depth=self.MAX_NESTED_RESOLVE_DEPTH,
         )
@@ -311,10 +314,44 @@ class PipelineEngine:
             len(nested_context._nested_resolve_chain),
         )
         result = await self._dispatch_context(nested_context)
+        return self._answer_from_nested_result(context, nested_context, result)
+
+    async def resolve_nested_query(
+        self,
+        qname: str,
+        qtype: str,
+        clientaddr: Any,
+        listener_name: str,
+        nested_resolve_chain: tuple[tuple[str, str], ...],
+    ) -> dns.resolver.Answer:
+        nested_request = dns.message.make_query(qname, qtype, rdclass=dns.rdataclass.IN)
+        nested_context = self._build_context(
+            request=nested_request,
+            clientaddr=clientaddr,
+            listener_name=listener_name,
+            nested_resolve_chain=nested_resolve_chain,
+        )
+        self._logger.debug(
+            "发起 IPC 内部解析 request_id=%s qname=%s qtype=%s depth=%s",
+            nested_context.request_id,
+            qname,
+            qtype,
+            len(nested_context._nested_resolve_chain),
+        )
+        result = await self._dispatch_context(nested_context)
+        return self._answer_from_nested_result(None, nested_context, result)
+
+    def _answer_from_nested_result(
+        self,
+        outer_context: RequestContext | None,
+        nested_context: RequestContext,
+        result: UpstreamResult,
+    ) -> dns.resolver.Answer:
+        outer_request_id = outer_context.request_id if outer_context is not None else "ipc"
         if result.answer is not None:
             self._logger.debug(
                 "内部解析成功 outer_request_id=%s request_id=%s upstream=%s duration_ms=%.2f",
-                context.request_id,
+                outer_request_id,
                 nested_context.request_id,
                 result.upstream_name,
                 result.duration_ms,
@@ -323,13 +360,18 @@ class PipelineEngine:
         if result.error is not None:
             self._logger.debug(
                 "内部解析失败 outer_request_id=%s request_id=%s upstream=%s error=%s",
-                context.request_id,
+                outer_request_id,
                 nested_context.request_id,
                 result.upstream_name,
                 type(result.error).__name__,
             )
             raise result.error
-        raise RuntimeError(f"内部解析未返回有效答案 qname={qname} qtype={qtype}")
+        question = nested_context.request.question[0]
+        raise RuntimeError(
+            "内部解析未返回有效答案 "
+            f"qname={question.name.to_text().rstrip('.')} "
+            f"qtype={dns.rdatatype.to_text(question.rdtype)}"
+        )
 
     def _finalize_context(self, context: RequestContext) -> None:
         if context.final_answer is None and context.final_response is not None:

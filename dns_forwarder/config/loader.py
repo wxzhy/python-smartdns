@@ -30,6 +30,16 @@ def _build_settings_class(config_path: Path) -> type[AppConfig]:
     return FileAppConfig
 
 
+def _build_text_settings_class() -> type[AppConfig]:
+    base_config = dict(AppConfig.model_config)
+    base_config.update(json_file=None)
+
+    class TextAppConfig(AppConfig):
+        model_config = SettingsConfigDict(**base_config)
+
+    return TextAppConfig
+
+
 def load_config(config_path: str | Path) -> AppConfig:
     path = Path(config_path)
     settings_cls = _build_settings_class(path)
@@ -43,7 +53,7 @@ def parse_config_text(config_text: str) -> AppConfig:
     raw: Any = json.loads(config_text)
     if not isinstance(raw, dict):
         raise ValueError("配置根节点必须是 object")
-    config = AppConfig.model_validate(raw)
+    config = _build_text_settings_class().model_validate(raw)
     validate_plugin_configs(config.plugins, config.runtime.plugin_dirs)
     config.plugins = materialize_plugin_configs(config.plugins, config.runtime.plugin_dirs)
     return config

@@ -75,6 +75,16 @@
       ]
     },
     {
+      "name": "isp",
+      "protocol": "aiodns",
+      "servers": [
+        "218.2.2.2",
+        "218.4.4.4",
+        "240e:5a::6666",
+        "240e:5b::6666"
+      ]
+    },
+    {
       "name": "alidns",
       "protocol": "aiodns",
       "servers": [
@@ -214,6 +224,12 @@
       ]
     },
     {
+      "name": "isp",
+      "nameservers": [
+        "isp"
+      ]
+    },
+    {
       "name": "alidns",
       "nameservers": [
         "alidns"
@@ -321,6 +337,7 @@
         "alidns",
         "dnspod",
         "trafficroute",
+        "isp",
         "google-v4",
         "google-v6",
         "cf",
@@ -336,7 +353,8 @@
         "114dns",
         "alidns",
         "dnspod",
-        "trafficroute"
+        "trafficroute",
+        "isp"
       ]
     },
     {

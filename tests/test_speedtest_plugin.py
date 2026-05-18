@@ -700,6 +700,65 @@ async def test_speedtest_plugin_on_response_prefers_replaced_ip_from_other_wait_
     assert speedtest_plugin._service.calls == ["203.0.113.10", "10.10.0.20"]
 
 
+async def test_speedtest_plugin_on_response_uses_other_wait_all_result_when_fastest_has_no_ip() -> None:
+    config = build_wait_all_config()
+    speedtest_plugin = SpeedTestPlugin()
+    speedtest_plugin.bind(
+        SpeedTestPluginConfig(response_ip_limit=1),
+        speedtest_plugin.variables_model(),
+    )
+    manager = await build_plugin_manager_with_ip_replace_and_speedtest(speedtest_plugin)
+    speedtest_plugin._service = MappedSpeedTestService({"10.10.0.20": 5.0})
+
+    async def resolve_empty(context: RequestContext) -> UpstreamResult:
+        await asyncio.sleep(0.01)
+        request = context.request
+        response = dns.message.make_response(request)
+        return UpstreamResult(
+            upstream_name="resolver-empty",
+            duration_ms=5.0,
+            answer=build_answer_from_response(request, response),
+            tags=set(),
+        )
+
+    async def resolve_with_ip(context: RequestContext) -> UpstreamResult:
+        await asyncio.sleep(0.02)
+        request = context.request
+        response = dns.message.make_response(request)
+        response.answer.append(
+            dns.rrset.from_text("example.test.", 60, "IN", "A", "198.51.100.20")
+        )
+        return UpstreamResult(
+            upstream_name="resolver-ip",
+            duration_ms=10.0,
+            answer=build_answer_from_response(request, response),
+            tags={"proxy"},
+        )
+
+    engine = PipelineEngine(
+        config,
+        StaticResolverManager(
+            config,
+            {
+                "resolver-a": resolve_empty,
+                "resolver-b": resolve_with_ip,
+            },
+        ),
+        DispatcherRegistry(),
+        manager,
+    )
+
+    response = await engine.handle_message(
+        dns.message.make_query("example.test", "A"),
+        ("127.0.0.1", 5300),
+        "udp",
+    )
+
+    assert response is not None
+    assert [item.address for item in response.answer[0]] == ["10.10.0.20"]
+    assert speedtest_plugin._service.calls == ["10.10.0.20"]
+
+
 async def test_speedtest_plugin_skips_measurement_for_global_skip_tags() -> None:
     plugin = SpeedTestPlugin()
     plugin.bind(SpeedTestPluginConfig(skip_tags=["direct"]), plugin.variables_model())

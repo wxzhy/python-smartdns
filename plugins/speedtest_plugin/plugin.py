@@ -4,6 +4,7 @@ import asyncio
 import ipaddress
 import time
 
+import dns.rcode
 import dns.rdatatype
 import dns.resolver
 import dns.rrset
@@ -172,8 +173,8 @@ class SpeedTestPlugin(Plugin):
         answer = context.final_answer
         if (
             answer is not None
-            and answer.rrset is not None
             and answer.rdtype in {dns.rdatatype.A, dns.rdatatype.AAAA}
+            and answer.response.rcode() == dns.rcode.NOERROR
         ):
             speedtest_context = get_speedtest_context(context)
             current_ips = self._extract_unique_ips(answer)
@@ -279,9 +280,13 @@ class SpeedTestPlugin(Plugin):
         )
 
     def _replace_answer_ips(self, answer: dns.resolver.Answer, ips: list[str]) -> None:
-        ttl = max(answer.rrset.ttl, self.runtime_config.response_ttl_seconds)
+        ttl = self.runtime_config.response_ttl_seconds
+        rrset_name = answer.canonical_name
+        if answer.rrset is not None:
+            ttl = max(answer.rrset.ttl, ttl)
+            rrset_name = answer.rrset.name
         answer.rrset = dns.rrset.from_text_list(
-            answer.rrset.name,
+            rrset_name,
             ttl,
             answer.rdclass,
             answer.rdtype,

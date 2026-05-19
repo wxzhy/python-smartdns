@@ -7,6 +7,9 @@ import queue
 import shutil
 import threading
 import uuid
+from concurrent.futures import Future, ProcessPoolExecutor
+from concurrent.futures import wait as wait_futures
+from concurrent.futures.process import BrokenProcessPool
 from dataclasses import dataclass
 from multiprocessing import get_context, shared_memory
 from pathlib import Path
@@ -99,20 +102,47 @@ class SharedTreeResources:
 @dataclass(slots=True)
 class WorkerHandle:
     worker_id: int
-    process: Any
     request_queue: Any
+    future: Future[None]
+    generation: int
+
+
+@dataclass(frozen=True, slots=True)
+class WorkerProcessState:
+    config_path: str
+    request_queues: tuple[Any, ...]
+    result_queue: Any
+    domain_snapshot: DomainSetSnapshot
+    ip_snapshot: SharedIPSetSnapshot
+    query_log_enabled: bool
+    query_log_max_entries: int
+    response_timeout: float
+
+
+_WORKER_PROCESS_STATE: WorkerProcessState | None = None
 
 
 class WorkerQueryLogStore(QueryLogStore):
-    def __init__(self, max_entries: int, result_queue: Any) -> None:
+    def __init__(
+        self,
+        max_entries: int,
+        result_queue: Any,
+        *,
+        worker_id: int,
+        generation: int,
+    ) -> None:
         super().__init__(max_entries)
         self._result_queue = result_queue
+        self._worker_id = worker_id
+        self._generation = generation
 
     async def append(self, payload: QueryLogPayload) -> QueryLogEntry:
         try:
             self._result_queue.put_nowait(
                 {
                     "type": "query_log",
+                    "worker_id": self._worker_id,
+                    "generation": self._generation,
                     "payload": payload.model_dump(mode="json"),
                 }
             )
@@ -126,10 +156,12 @@ class WorkerNestedResolver:
         self,
         *,
         worker_id: int,
+        generation: int,
         result_queue: Any,
         response_timeout: float,
     ) -> None:
         self._worker_id = worker_id
+        self._generation = generation
         self._result_queue = result_queue
         self._response_timeout = response_timeout
         self._pending: dict[str, tuple[asyncio.Future[bytes], dns.message.Message]] = {}
@@ -155,6 +187,7 @@ class WorkerNestedResolver:
         request_message = {
             "type": "resolve_request",
             "worker_id": self._worker_id,
+            "generation": self._generation,
             "resolve_id": resolve_id,
             "qname": qname,
             "qtype": qtype,
@@ -194,6 +227,7 @@ class WorkerRuntime:
         self,
         *,
         worker_id: int,
+        generation: int,
         config_path: Path,
         request_queue: Any,
         result_queue: Any,
@@ -204,6 +238,7 @@ class WorkerRuntime:
         response_timeout: float,
     ) -> None:
         self._worker_id = worker_id
+        self._generation = generation
         self._config_path = config_path
         self._request_queue = request_queue
         self._result_queue = result_queue
@@ -215,6 +250,7 @@ class WorkerRuntime:
         self._tasks: set[asyncio.Task[None]] = set()
         self._nested_resolver = WorkerNestedResolver(
             worker_id=worker_id,
+            generation=generation,
             result_queue=result_queue,
             response_timeout=response_timeout,
         )
@@ -226,7 +262,13 @@ class WorkerRuntime:
             nested_resolve_handler=self._nested_resolver.resolve,
         )
         await manager.load()
-        self._result_queue.put({"type": "worker_ready", "worker_id": self._worker_id})
+        self._result_queue.put(
+            {
+                "type": "worker_ready",
+                "worker_id": self._worker_id,
+                "generation": self._generation,
+            }
+        )
         try:
             while True:
                 message = await asyncio.to_thread(self._request_queue.get)
@@ -256,6 +298,8 @@ class WorkerRuntime:
             shared_contexts[QUERY_LOG_STORE_KEY] = WorkerQueryLogStore(
                 self._query_log_max_entries,
                 self._result_queue,
+                worker_id=self._worker_id,
+                generation=self._generation,
             )
         return shared_contexts
 
@@ -279,6 +323,7 @@ class WorkerRuntime:
             response_message = {
                 "type": "query_response",
                 "worker_id": self._worker_id,
+                "generation": self._generation,
                 "request_id": request_id,
                 "wire": response.to_wire() if response is not None else None,
             }
@@ -286,6 +331,7 @@ class WorkerRuntime:
             response_message = {
                 "type": "query_response",
                 "worker_id": self._worker_id,
+                "generation": self._generation,
                 "request_id": request_id,
                 "wire": None,
                 "error": f"{type(exc).__name__}: {exc}",
@@ -294,6 +340,8 @@ class WorkerRuntime:
 
 
 class MultiprocessWorkerPool:
+    STOP_TIMEOUT_SECONDS = 3.0
+
     def __init__(
         self,
         *,
@@ -308,25 +356,33 @@ class MultiprocessWorkerPool:
         self._manager = manager
         self._start_method = config.runtime.multiprocess.resolved_start_method()
         self._mp_context = get_context(self._start_method)
-        self._result_queue = self._mp_context.Queue(config.runtime.multiprocess.queue_size)
+        self._worker_count = config.runtime.multiprocess.resolved_workers()
+        self._result_queue: Any | None = None
+        self._request_queues: list[Any] = []
+        self._executor: ProcessPoolExecutor | None = None
         self._workers: list[WorkerHandle] = []
         self._pending: dict[str, asyncio.Future[bytes | None]] = {}
         self._request_counter = itertools.count(1)
         self._worker_counter = itertools.count()
+        self._generation_counter = itertools.count(1)
         self._loop: asyncio.AbstractEventLoop | None = None
         self._reader_thread: threading.Thread | None = None
         self._stop_reader = threading.Event()
         self._supervisor_task: asyncio.Task[None] | None = None
+        self._stopping = False
+        self._restarting = False
 
     async def start(self) -> None:
         self._loop = asyncio.get_running_loop()
         logger.info("worker 启动方式 start_method=%s", self._start_method)
-        for worker_id in range(self._config.runtime.multiprocess.resolved_workers()):
-            self._workers.append(self._start_worker(worker_id))
+        self._create_ipc_resources()
+        self._create_executor()
+        self._start_workers()
         self._start_result_reader()
         self._supervisor_task = asyncio.create_task(self._supervise_workers())
 
     async def stop(self) -> None:
+        self._stopping = True
         if self._supervisor_task is not None:
             self._supervisor_task.cancel()
             await asyncio.gather(self._supervisor_task, return_exceptions=True)
@@ -334,27 +390,95 @@ class MultiprocessWorkerPool:
 
         for worker in self._workers:
             _put_nowait(worker.request_queue, {"type": "stop"})
-        for worker in self._workers:
-            worker.process.join(timeout=3)
-            if worker.process.is_alive():
-                worker.process.kill()
-                worker.process.join(timeout=3)
-            worker.request_queue.close()
-            worker.request_queue.join_thread()
+        await self._stop_executor()
+
+        self._fail_pending(RuntimeError("worker pool stopped"))
+
+        await self._stop_result_reader()
+        self._close_ipc_resources()
+
+    def _create_ipc_resources(self) -> None:
+        queue_size = self._config.runtime.multiprocess.queue_size
+        self._result_queue = self._mp_context.Queue(queue_size)
+        self._request_queues = [
+            self._mp_context.Queue(queue_size) for _ in range(self._worker_count)
+        ]
+
+    def _create_executor(self) -> None:
+        if self._result_queue is None:
+            raise RuntimeError("result queue 尚未初始化")
+        self._executor = ProcessPoolExecutor(
+            max_workers=self._worker_count,
+            mp_context=self._mp_context,
+            initializer=_worker_process_initializer,
+            initargs=(
+                str(self._config_path),
+                tuple(self._request_queues),
+                self._result_queue,
+                self._resources.domain_snapshot,
+                self._resources.ip_snapshot,
+                RuntimeManager._is_query_log_plugin_enabled(self._config),
+                _query_log_max_entries(self._config),
+                self._config.runtime.multiprocess.response_timeout,
+            ),
+        )
+
+    def _start_workers(self) -> None:
+        self._workers = [self._start_worker(worker_id) for worker_id in range(self._worker_count)]
+
+    async def _stop_executor(self) -> None:
+        executor = self._executor
+        if executor is None:
+            self._workers.clear()
+            return
+
+        futures = [worker.future for worker in self._workers]
+        pending: set[Future[None]] = set()
+        if futures:
+            _, pending = await asyncio.to_thread(
+                wait_futures,
+                futures,
+                timeout=self.STOP_TIMEOUT_SECONDS,
+            )
+
+        forced_shutdown = False
+        if pending:
+            logger.warning("worker 未在超时时间内退出，准备 terminate count=%s", len(pending))
+            await asyncio.to_thread(executor.terminate_workers)
+            forced_shutdown = True
+            _, pending = await asyncio.to_thread(
+                wait_futures,
+                futures,
+                timeout=self.STOP_TIMEOUT_SECONDS,
+            )
+
+        if pending:
+            logger.warning("worker terminate 后仍未退出，准备 kill count=%s", len(pending))
+            await asyncio.to_thread(executor.kill_workers)
+            forced_shutdown = True
+
+        if not forced_shutdown:
+            await asyncio.to_thread(executor.shutdown, wait=True, cancel_futures=True)
+
+        self._executor = None
         self._workers.clear()
 
-        for future in self._pending.values():
-            if not future.done():
-                future.set_exception(RuntimeError("worker pool stopped"))
-        self._pending.clear()
-
+    async def _stop_result_reader(self) -> None:
         self._stop_reader.set()
-        _put_nowait(self._result_queue, {"type": "stop_reader"})
+        if self._result_queue is not None:
+            _put_nowait(self._result_queue, {"type": "stop_reader"})
         if self._reader_thread is not None:
-            self._reader_thread.join(timeout=3)
+            await asyncio.to_thread(self._reader_thread.join, self.STOP_TIMEOUT_SECONDS)
             self._reader_thread = None
-        self._result_queue.close()
-        self._result_queue.join_thread()
+        self._stop_reader.clear()
+
+    def _close_ipc_resources(self) -> None:
+        for item in self._request_queues:
+            _close_queue(item)
+        self._request_queues.clear()
+        if self._result_queue is not None:
+            _close_queue(self._result_queue)
+            self._result_queue = None
 
     async def process_query(
         self,
@@ -393,6 +517,8 @@ class MultiprocessWorkerPool:
     def _read_results(self) -> None:
         while not self._stop_reader.is_set():
             try:
+                if self._result_queue is None:
+                    return
                 message = self._result_queue.get()
             except (EOFError, OSError):
                 return
@@ -404,15 +530,26 @@ class MultiprocessWorkerPool:
     def _handle_result(self, message: dict[str, Any]) -> None:
         message_type = message.get("type")
         if message_type == "worker_ready":
-            logger.info("worker 已启动 id=%s", message["worker_id"])
+            if self._is_current_worker_message(message):
+                logger.info(
+                    "worker 已启动 id=%s generation=%s",
+                    message["worker_id"],
+                    message["generation"],
+                )
             return
         if message_type == "query_response":
+            if not self._is_current_worker_message(message):
+                return
             self._handle_query_response(message)
             return
         if message_type == "resolve_request":
+            if not self._is_current_worker_message(message):
+                return
             asyncio.create_task(self._handle_resolve_request(message))
             return
         if message_type == "query_log":
+            if not self._is_current_worker_message(message):
+                return
             asyncio.create_task(self._handle_query_log(message))
 
     def _handle_query_response(self, message: dict[str, Any]) -> None:
@@ -432,6 +569,7 @@ class MultiprocessWorkerPool:
         response: dict[str, Any] = {
             "type": "resolve_response",
             "resolve_id": message["resolve_id"],
+            "generation": worker.generation,
         }
         try:
             answer = await self._manager.resolve_nested_query(
@@ -457,35 +595,52 @@ class MultiprocessWorkerPool:
     async def _supervise_workers(self) -> None:
         while True:
             await asyncio.sleep(0.5)
-            for index, worker in enumerate(tuple(self._workers)):
-                if worker.process.is_alive():
-                    continue
-                logger.warning("worker 已退出，准备重启 id=%s", worker.worker_id)
-                worker.process.join(timeout=0)
-                worker.request_queue.close()
-                worker.request_queue.join_thread()
-                replacement = self._start_worker(worker.worker_id)
-                self._workers[index] = replacement
+            await self._restart_finished_workers_once()
+
+    async def _restart_finished_workers_once(self) -> None:
+        if self._restarting or self._stopping:
+            return
+        for index, worker in enumerate(tuple(self._workers)):
+            if not worker.future.done():
+                continue
+            try:
+                worker.future.result()
+            except BrokenProcessPool as exc:
+                await self._restart_broken_pool(exc)
+                break
+            except Exception:
+                logger.exception(
+                    "worker 任务异常退出，准备重启 id=%s generation=%s",
+                    worker.worker_id,
+                    worker.generation,
+                )
+            else:
+                logger.warning(
+                    "worker 任务已退出，准备重启 id=%s generation=%s",
+                    worker.worker_id,
+                    worker.generation,
+                )
+            if self._restarting or self._stopping:
+                break
+            self._workers[index] = self._start_worker(worker.worker_id)
 
     def _start_worker(self, worker_id: int) -> WorkerHandle:
-        request_queue = self._mp_context.Queue(self._config.runtime.multiprocess.queue_size)
-        process = self._mp_context.Process(
-            target=_worker_entry,
-            kwargs={
-                "worker_id": worker_id,
-                "config_path": str(self._config_path),
-                "request_queue": request_queue,
-                "result_queue": self._result_queue,
-                "domain_snapshot": self._resources.domain_snapshot,
-                "ip_snapshot": self._resources.ip_snapshot,
-                "query_log_enabled": RuntimeManager._is_query_log_plugin_enabled(self._config),
-                "query_log_max_entries": _query_log_max_entries(self._config),
-                "response_timeout": self._config.runtime.multiprocess.response_timeout,
-            },
+        if self._executor is None:
+            raise RuntimeError("worker executor 尚未启动")
+        request_queue = self._request_queues[worker_id]
+        generation = next(self._generation_counter)
+        future = self._executor.submit(_worker_entry, worker_id, generation)
+        logger.info(
+            "worker 任务已提交 id=%s generation=%s",
+            worker_id,
+            generation,
         )
-        process.start()
-        logger.info("worker 进程已启动 id=%s pid=%s", worker_id, process.pid)
-        return WorkerHandle(worker_id=worker_id, process=process, request_queue=request_queue)
+        return WorkerHandle(
+            worker_id=worker_id,
+            request_queue=request_queue,
+            future=future,
+            generation=generation,
+        )
 
     def _next_worker(self) -> WorkerHandle:
         if not self._workers:
@@ -493,7 +648,7 @@ class MultiprocessWorkerPool:
         start_index = next(self._worker_counter)
         for offset in range(len(self._workers)):
             worker = self._workers[(start_index + offset) % len(self._workers)]
-            if worker.process.is_alive():
+            if not worker.future.done():
                 return worker
         raise RuntimeError("没有可用 worker")
 
@@ -502,6 +657,53 @@ class MultiprocessWorkerPool:
             if worker.worker_id == worker_id:
                 return worker
         return None
+
+    def _is_current_worker_message(self, message: dict[str, Any]) -> bool:
+        worker_id = message.get("worker_id")
+        generation = message.get("generation")
+        if not isinstance(worker_id, int) or not isinstance(generation, int):
+            return False
+        worker = self._worker_by_id(worker_id)
+        return worker is not None and worker.generation == generation
+
+    async def _restart_broken_pool(self, exc: BrokenProcessPool) -> None:
+        if self._restarting or self._stopping:
+            return
+        self._restarting = True
+        logger.exception("worker pool 已损坏，准备重建")
+        self._fail_pending(RuntimeError(f"worker pool broken: {exc}"))
+        try:
+            await self._stop_result_reader()
+            await self._force_shutdown_executor()
+            self._close_ipc_resources()
+            self._workers.clear()
+            self._create_ipc_resources()
+            self._create_executor()
+            self._start_workers()
+            self._start_result_reader()
+        finally:
+            self._restarting = False
+
+    async def _force_shutdown_executor(self) -> None:
+        executor = self._executor
+        if executor is None:
+            return
+        try:
+            await asyncio.to_thread(executor.terminate_workers)
+        except Exception:
+            logger.exception("terminate worker pool 失败，尝试 kill")
+            try:
+                await asyncio.to_thread(executor.kill_workers)
+            except Exception:
+                logger.exception("kill worker pool 失败")
+        finally:
+            self._executor = None
+
+    def _fail_pending(self, exc: Exception) -> None:
+        for future in self._pending.values():
+            if not future.done():
+                future.set_exception(exc)
+        self._pending.clear()
 
 
 class MultiprocessRuntimeManager:
@@ -766,11 +968,9 @@ class MultiprocessRuntimeManager:
         self._front_cache = None
 
 
-def _worker_entry(
-    *,
-    worker_id: int,
+def _worker_process_initializer(
     config_path: str,
-    request_queue: Any,
+    request_queues: tuple[Any, ...],
     result_queue: Any,
     domain_snapshot: DomainSetSnapshot,
     ip_snapshot: SharedIPSetSnapshot,
@@ -778,15 +978,10 @@ def _worker_entry(
     query_log_max_entries: int,
     response_timeout: float,
 ) -> None:
-    config_file = Path(config_path)
-    configure_logging("INFO")
-    config = load_config(config_file)
-    configure_logging(config.runtime.log_level)
-    install_loop_policy(config.runtime.loop_policy)
-    runtime = WorkerRuntime(
-        worker_id=worker_id,
-        config_path=config_file,
-        request_queue=request_queue,
+    global _WORKER_PROCESS_STATE
+    _WORKER_PROCESS_STATE = WorkerProcessState(
+        config_path=config_path,
+        request_queues=request_queues,
         result_queue=result_queue,
         domain_snapshot=domain_snapshot,
         ip_snapshot=ip_snapshot,
@@ -794,13 +989,48 @@ def _worker_entry(
         query_log_max_entries=query_log_max_entries,
         response_timeout=response_timeout,
     )
+
+
+def _worker_entry(worker_id: int, generation: int) -> None:
+    if _WORKER_PROCESS_STATE is None:
+        raise RuntimeError("worker process state 未初始化")
+
+    state = _WORKER_PROCESS_STATE
+    config_file = Path(state.config_path)
+    configure_logging("INFO")
+    config = load_config(config_file)
+    configure_logging(config.runtime.log_level)
+    install_loop_policy(config.runtime.loop_policy)
+    runtime = WorkerRuntime(
+        worker_id=worker_id,
+        generation=generation,
+        config_path=config_file,
+        request_queue=state.request_queues[worker_id],
+        result_queue=state.result_queue,
+        domain_snapshot=state.domain_snapshot,
+        ip_snapshot=state.ip_snapshot,
+        query_log_enabled=state.query_log_enabled,
+        query_log_max_entries=state.query_log_max_entries,
+        response_timeout=state.response_timeout,
+    )
     asyncio.run(runtime.run())
 
 
 def _put_nowait(target_queue: Any, message: dict[str, Any]) -> None:
     try:
         target_queue.put_nowait(message)
-    except queue.Full:
+    except (OSError, ValueError, queue.Full):
+        pass
+
+
+def _close_queue(target_queue: Any) -> None:
+    try:
+        target_queue.close()
+    except (OSError, ValueError):
+        pass
+    try:
+        target_queue.join_thread()
+    except (OSError, ValueError):
         pass
 
 

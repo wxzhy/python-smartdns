@@ -1,8 +1,12 @@
 from __future__ import annotations
 
 import asyncio
+import itertools
 import json
+from concurrent.futures import Future
+from concurrent.futures.process import BrokenProcessPool
 from pathlib import Path
+from typing import Any
 
 import dns.asyncquery
 import dns.message
@@ -10,7 +14,33 @@ import dns.rcode
 import dns.rdatatype
 import dns.rrset
 
-from dns_forwarder.core.multiprocess import MultiprocessRuntimeManager
+from dns_forwarder.core.multiprocess import (
+    MultiprocessRuntimeManager,
+    MultiprocessWorkerPool,
+    WorkerHandle,
+)
+
+
+class FakeExecutor:
+    def __init__(self) -> None:
+        self.submitted: list[tuple[Any, int, int, Future[None]]] = []
+        self.terminated = 0
+        self.killed = 0
+        self.shutdown_args: tuple[bool, bool] | None = None
+
+    def submit(self, fn: Any, worker_id: int, generation: int) -> Future[None]:
+        future: Future[None] = Future()
+        self.submitted.append((fn, worker_id, generation, future))
+        return future
+
+    def terminate_workers(self) -> None:
+        self.terminated += 1
+
+    def kill_workers(self) -> None:
+        self.killed += 1
+
+    def shutdown(self, *, wait: bool, cancel_futures: bool) -> None:
+        self.shutdown_args = (wait, cancel_futures)
 
 
 class FakeUpstreamProtocol(asyncio.DatagramProtocol):
@@ -135,6 +165,117 @@ async def wait_for_query_log(manager: MultiprocessRuntimeManager) -> list:
             return entries
         await asyncio.sleep(0.05)
     return []
+
+
+def make_worker_pool_stub(executor: FakeExecutor) -> MultiprocessWorkerPool:
+    pool = object.__new__(MultiprocessWorkerPool)
+    pool._executor = executor
+    pool._request_queues = [object()]
+    pool._workers = []
+    pool._generation_counter = itertools.count(2)
+    pool._restarting = False
+    pool._stopping = False
+    return pool
+
+
+async def test_worker_future_exception_resubmits_same_worker_id() -> None:
+    executor = FakeExecutor()
+    pool = make_worker_pool_stub(executor)
+    old_future: Future[None] = Future()
+    old_future.set_exception(RuntimeError("boom"))
+    old_queue = pool._request_queues[0]
+    pool._workers = [
+        WorkerHandle(
+            worker_id=0,
+            request_queue=old_queue,
+            future=old_future,
+            generation=1,
+        )
+    ]
+
+    await pool._restart_finished_workers_once()
+
+    assert len(executor.submitted) == 1
+    _, worker_id, generation, replacement_future = executor.submitted[0]
+    assert worker_id == 0
+    assert generation == 2
+    assert pool._workers[0].worker_id == 0
+    assert pool._workers[0].request_queue is old_queue
+    assert pool._workers[0].future is replacement_future
+
+
+async def test_worker_future_broken_pool_triggers_full_restart() -> None:
+    executor = FakeExecutor()
+    pool = make_worker_pool_stub(executor)
+    old_future: Future[None] = Future()
+    broken = BrokenProcessPool("broken")
+    old_future.set_exception(broken)
+    pool._workers = [
+        WorkerHandle(
+            worker_id=0,
+            request_queue=pool._request_queues[0],
+            future=old_future,
+            generation=1,
+        )
+    ]
+    calls: list[BrokenProcessPool] = []
+
+    async def restart_broken_pool(exc: BrokenProcessPool) -> None:
+        calls.append(exc)
+        pool._restarting = True
+
+    pool._restart_broken_pool = restart_broken_pool
+
+    await pool._restart_finished_workers_once()
+
+    assert calls == [broken]
+    assert not executor.submitted
+
+
+async def test_stop_executor_uses_shutdown_for_graceful_workers() -> None:
+    executor = FakeExecutor()
+    pool = make_worker_pool_stub(executor)
+    future: Future[None] = Future()
+    future.set_result(None)
+    pool._workers = [
+        WorkerHandle(
+            worker_id=0,
+            request_queue=pool._request_queues[0],
+            future=future,
+            generation=1,
+        )
+    ]
+
+    await pool._stop_executor()
+
+    assert executor.shutdown_args == (True, True)
+    assert executor.terminated == 0
+    assert executor.killed == 0
+    assert pool._executor is None
+    assert not pool._workers
+
+
+async def test_stop_executor_terminates_and_kills_pending_workers(monkeypatch) -> None:
+    monkeypatch.setattr(MultiprocessWorkerPool, "STOP_TIMEOUT_SECONDS", 0.01)
+    executor = FakeExecutor()
+    pool = make_worker_pool_stub(executor)
+    future: Future[None] = Future()
+    pool._workers = [
+        WorkerHandle(
+            worker_id=0,
+            request_queue=pool._request_queues[0],
+            future=future,
+            generation=1,
+        )
+    ]
+
+    await pool._stop_executor()
+
+    assert executor.terminated == 1
+    assert executor.killed == 1
+    assert executor.shutdown_args is None
+    assert pool._executor is None
+    assert not pool._workers
 
 
 async def test_multiprocess_process_query_and_query_log(tmp_path: Path) -> None:

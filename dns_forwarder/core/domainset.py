@@ -17,6 +17,8 @@ class DomainSetSnapshot:
 
 def normalize_domain(value: str) -> str:
     normalized = value.strip().rstrip(".").lower()
+    if normalized.startswith("+."):
+        normalized = normalized[2:]
     if not normalized:
         raise ValueError("域名不能为空")
     return normalized
@@ -37,8 +39,7 @@ class DomainSet:
         domain_to_tags = self._build_domain_entries(directory)
         self._trie = (
             marisa_trie.BytesTrie(
-                (domain, _encode_tags(tags))
-                for domain, tags in domain_to_tags.items()
+                (domain, _encode_tags(tags)) for domain, tags in domain_to_tags.items()
             )
             if domain_to_tags
             else None
@@ -73,10 +74,7 @@ class DomainSet:
             for domain in domains:
                 reversed_domain = reverse_domain(domain)
                 domain_to_tags[reversed_domain].add(tag)
-        return {
-            domain: frozenset(tags)
-            for domain, tags in sorted(domain_to_tags.items())
-        }
+        return {domain: frozenset(tags) for domain, tags in sorted(domain_to_tags.items())}
 
 
 def _encode_tags(tags: frozenset[str]) -> bytes:

@@ -37,6 +37,18 @@ def test_domainset_merges_same_tag_files_and_domain_suffix_matches(tmp_path: Pat
     assert domainset.lookup("example.net") == set()
 
 
+def test_domainset_normalizes_geosite_plus_dot_suffix(tmp_path: Path) -> None:
+    domain_dir = tmp_path / "domains"
+    domain_dir.mkdir()
+    _write_lines(domain_dir / "proxy.list", ["+.anthropic.com"])
+
+    domainset = DomainSet(str(domain_dir))
+
+    assert domainset.lookup("anthropic.com") == {"proxy"}
+    assert domainset.lookup("api.anthropic.com") == {"proxy"}
+    assert domainset.lookup("notanthropic.com") == set()
+
+
 def test_ipset_unions_covering_ip_prefix_tags(tmp_path: Path) -> None:
     ip_dir = tmp_path / "ips"
     ip_dir.mkdir()

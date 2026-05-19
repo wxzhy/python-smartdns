@@ -76,7 +76,10 @@ def test_parse_config_text_success() -> None:
     assert config.runtime.hosts == {}
     assert config.runtime.fingerprint is None
     assert config.runtime.multiprocess.workers == 1
+    assert config.runtime.multiprocess.start_method == "auto"
     assert config.runtime.multiprocess.resolved_workers() == 1
+    assert config.runtime.multiprocess.resolved_start_method(["forkserver", "spawn"]) == "forkserver"
+    assert config.runtime.multiprocess.resolved_start_method(["spawn"]) == "spawn"
     assert config.runtime.multiprocess.queue_size == 1024
     assert config.runtime.multiprocess.response_timeout == 10.0
     assert config.runtime.multiprocess.front_cache_size == 100000
@@ -121,6 +124,46 @@ def test_runtime_multiprocess_config_accepts_auto_workers(
     monkeypatch.setattr(os, "process_cpu_count", lambda: 4, raising=False)
     assert config.runtime.multiprocess.workers == "auto"
     assert config.runtime.multiprocess.resolved_workers() == 4
+
+
+def test_runtime_multiprocess_config_accepts_start_method() -> None:
+    config_dict = build_config_dict()
+    config_dict["runtime"] = {
+        "plugin_dirs": ["plugins"],
+        "default_upstream_group": "default",
+        "multiprocess": {
+            "workers": 2,
+            "start_method": " forkserver ",
+            "queue_size": 1024,
+            "response_timeout": 10.0,
+            "front_cache_size": 100000,
+        },
+    }
+
+    config = parse_config_dict(config_dict)
+
+    assert config.runtime.multiprocess.start_method == "forkserver"
+    assert config.runtime.multiprocess.resolved_start_method(["forkserver", "spawn"]) == "forkserver"
+    with pytest.raises(ValueError, match="start_method=forkserver"):
+        config.runtime.multiprocess.resolved_start_method(["spawn"])
+
+
+def test_runtime_multiprocess_config_rejects_unknown_start_method() -> None:
+    config_dict = build_config_dict()
+    config_dict["runtime"] = {
+        "plugin_dirs": ["plugins"],
+        "default_upstream_group": "default",
+        "multiprocess": {
+            "workers": 2,
+            "start_method": "prefork",
+            "queue_size": 1024,
+            "response_timeout": 10.0,
+            "front_cache_size": 100000,
+        },
+    }
+
+    with pytest.raises(ValueError):
+        parse_config_dict(config_dict)
 
 
 def test_parse_config_text_accepts_all_supported_nameserver_protocols() -> None:

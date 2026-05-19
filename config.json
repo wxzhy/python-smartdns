@@ -12,6 +12,7 @@
     ],
     "multiprocess": {
       "workers": "auto",
+      "start_method": "auto",
       "queue_size": 1024,
       "response_timeout": 10.0,
       "front_cache_size": 100000

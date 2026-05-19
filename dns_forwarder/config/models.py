@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import multiprocessing
 import os
 from enum import StrEnum
 from ipaddress import IPv4Network, IPv6Network, ip_address, ip_network
@@ -63,10 +64,12 @@ class StrictConfigModel(BaseModel):
 
 
 WorkerCount = Annotated[int, Field(ge=1)] | Literal["auto"]
+MultiprocessStartMethod = Literal["auto", "spawn", "forkserver", "fork"]
 
 
 class MultiprocessConfig(StrictConfigModel):
     workers: WorkerCount = 1
+    start_method: MultiprocessStartMethod = "auto"
     queue_size: int = Field(default=1024, ge=1)
     response_timeout: float = Field(default=10.0, gt=0)
     front_cache_size: int = Field(default=100000, ge=1)
@@ -79,12 +82,39 @@ class MultiprocessConfig(StrictConfigModel):
             return "auto" if stripped == "auto" else value
         return value
 
+    @field_validator("start_method", mode="before")
+    @classmethod
+    def normalize_start_method(cls, value: Any) -> Any:
+        if isinstance(value, str):
+            return value.strip().lower()
+        return value
+
     def resolved_workers(self) -> int:
         if self.workers != "auto":
             return self.workers
         process_cpu_count = getattr(os, "process_cpu_count", None)
         count = process_cpu_count() if callable(process_cpu_count) else os.cpu_count()
         return max(1, count or 1)
+
+    def resolved_start_method(self, available_methods: list[str] | None = None) -> str:
+        methods = (
+            list(available_methods)
+            if available_methods is not None
+            else multiprocessing.get_all_start_methods()
+        )
+        if self.start_method == "auto":
+            if "forkserver" in methods:
+                return "forkserver"
+            if "spawn" in methods:
+                return "spawn"
+            return methods[0]
+        if self.start_method not in methods:
+            available = ", ".join(methods)
+            raise ValueError(
+                "当前平台不支持 multiprocessing start_method="
+                f"{self.start_method}，可用: {available}"
+            )
+        return self.start_method
 
 
 class RuntimeConfig(StrictConfigModel):

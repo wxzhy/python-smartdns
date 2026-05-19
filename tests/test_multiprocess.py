@@ -64,6 +64,7 @@ def write_config(
             "log_level": "INFO",
             "multiprocess": {
                 "workers": 2,
+                "start_method": "spawn",
                 "queue_size": 32,
                 "response_timeout": 5.0,
                 "front_cache_size": 128,

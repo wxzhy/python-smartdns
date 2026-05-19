@@ -306,7 +306,8 @@ class MultiprocessWorkerPool:
         self._config = config
         self._resources = resources
         self._manager = manager
-        self._mp_context = get_context("spawn")
+        self._start_method = config.runtime.multiprocess.resolved_start_method()
+        self._mp_context = get_context(self._start_method)
         self._result_queue = self._mp_context.Queue(config.runtime.multiprocess.queue_size)
         self._workers: list[WorkerHandle] = []
         self._pending: dict[str, asyncio.Future[bytes | None]] = {}
@@ -319,9 +320,10 @@ class MultiprocessWorkerPool:
 
     async def start(self) -> None:
         self._loop = asyncio.get_running_loop()
-        self._start_result_reader()
+        logger.info("worker 启动方式 start_method=%s", self._start_method)
         for worker_id in range(self._config.runtime.multiprocess.resolved_workers()):
             self._workers.append(self._start_worker(worker_id))
+        self._start_result_reader()
         self._supervisor_task = asyncio.create_task(self._supervise_workers())
 
     async def stop(self) -> None:

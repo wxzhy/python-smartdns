@@ -911,6 +911,7 @@ async def test_speedtest_plugin_on_response_replaces_answer_rrset_with_fastest_i
         final_answer=answer,
     )
     speedtest_context = get_speedtest_context(context)
+    await speedtest_context.reserve_ips(["203.0.113.10", "203.0.113.11", "203.0.113.12"])
     await speedtest_context.add_results(
         [
             IpRttResult(ip="203.0.113.10", best_ms=30.0),
@@ -973,6 +974,7 @@ async def test_speedtest_plugin_on_response_uses_larger_ttl_when_replacing(
         final_answer=answer,
     )
     speedtest_context = get_speedtest_context(context)
+    await speedtest_context.reserve_ips(["203.0.113.10", "203.0.113.11"])
     await speedtest_context.add_results(
         [
             IpRttResult(ip="203.0.113.10", best_ms=30.0),
@@ -1016,6 +1018,7 @@ async def test_speedtest_plugin_on_response_keeps_answer_when_all_ips_timeout() 
         final_answer=answer,
     )
     speedtest_context = get_speedtest_context(context)
+    await speedtest_context.reserve_ips(["203.0.113.10", "203.0.113.11"])
     await speedtest_context.add_results(
         [
             IpRttResult(ip="203.0.113.10", best_ms=None),
@@ -1070,6 +1073,7 @@ async def test_speedtest_plugin_on_response_uses_fallback_ips_when_all_ips_timeo
         final_answer=answer,
     )
     speedtest_context = get_speedtest_context(context)
+    await speedtest_context.reserve_ips(["203.0.113.10", "203.0.113.11"])
     await speedtest_context.add_results(
         [
             IpRttResult(ip="203.0.113.10", best_ms=None),
@@ -1129,6 +1133,7 @@ async def test_speedtest_plugin_on_response_skips_excluded_fallback_rule() -> No
         final_answer=answer,
     )
     speedtest_context = get_speedtest_context(context)
+    await speedtest_context.reserve_ips(["203.0.113.10", "203.0.113.11"])
     await speedtest_context.add_results(
         [
             IpRttResult(ip="203.0.113.10", best_ms=None),
@@ -1172,3 +1177,57 @@ async def test_speedtest_plugin_setup_registers_service_and_context_extensions()
     assert SPEEDTEST_SERVICE_KEY in extensions
     assert SPEEDTEST_CONTEXT_KEY in extensions
     assert isinstance(extensions[SPEEDTEST_CONTEXT_KEY], SpeedTestContext)
+
+
+async def test_speedtest_plugin_filters_out_large_rtt_gaps() -> None:
+    plugin = SpeedTestPlugin()
+    plugin.bind(
+        SpeedTestPluginConfig(
+            response_ip_limit=3,
+            rtt_tolerance_ms=50.0,
+            rtt_gap_threshold_ms=15.0,
+        ),
+        plugin.variables_model(),
+    )
+    registry = PluginRegistry()
+    await plugin.setup(registry)
+    manager = PluginManager([], registry)
+
+    stub_service = StubSpeedTestService()
+    plugin._service = stub_service
+
+    request = dns.message.make_query("example.test", "A")
+    response = dns.message.make_response(request)
+    response.answer.append(
+        dns.rrset.from_text(
+            "example.test.",
+            60,
+            "IN",
+            "A",
+            "203.0.113.10",
+            "203.0.113.11",
+            "203.0.113.12",
+        )
+    )
+    answer = build_answer_from_response(request, response)
+    context = RequestContext(
+        request=request,
+        clientaddr=("127.0.0.1", 5300),
+        listener_name="udp",
+        extensions=manager.build_context_extensions(),
+        final_answer=answer,
+    )
+    speedtest_context = get_speedtest_context(context)
+    await speedtest_context.reserve_ips(["203.0.113.10", "203.0.113.11", "203.0.113.12"])
+    await speedtest_context.add_results(
+        [
+            IpRttResult(ip="203.0.113.10", best_ms=10.0),
+            IpRttResult(ip="203.0.113.11", best_ms=15.0),
+            IpRttResult(ip="203.0.113.12", best_ms=35.0),
+        ]
+    )
+
+    await plugin.on_response(context)
+
+    assert [item.address for item in answer.rrset] == ["203.0.113.10", "203.0.113.11"]
+

@@ -87,14 +87,16 @@ class BlockPlugin(Plugin):
         addresses: list[str] = []
         if question.rdtype == dns.rdatatype.A:
             addresses = rule.ipv4_addresses
-            response.answer.append(
-                self._build_record(question.name.to_text(), question.rdtype, rule)
-            )
+            if addresses:
+                response.answer.append(
+                    self._build_record(question.name.to_text(), question.rdtype, rule)
+                )
         elif question.rdtype == dns.rdatatype.AAAA:
             addresses = rule.ipv6_addresses
-            response.answer.append(
-                self._build_record(question.name.to_text(), question.rdtype, rule)
-            )
+            if addresses:
+                response.answer.append(
+                    self._build_record(question.name.to_text(), question.rdtype, rule)
+                )
         context.final_response = response
         context.final_answer = build_answer_from_response(context.request, response)
         context.stop_processing = True

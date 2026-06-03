@@ -64,6 +64,8 @@ class SpeedTestPluginConfig(BaseModel):
     ping_privileged: bool = False
     response_ip_limit: int = Field(default=2, ge=1)
     response_ttl_seconds: int = Field(default=60, ge=1)
+    rtt_tolerance_ms: float = Field(default=50.0, ge=0.0)
+    rtt_gap_threshold_ms: float = Field(default=20.0, ge=0.0)
     skip_tags: list[str] = Field(default_factory=list)
     fallback_rules: list[SpeedTestFallbackRuleConfig] = Field(default_factory=list)
 
@@ -194,16 +196,50 @@ class SpeedTestPlugin(Plugin):
             }
             if measured_results:
                 original_order = {ip: index for index, ip in enumerate(candidate_ips)}
-                sorted_ips = [
-                    item.ip
-                    for item in sorted(
-                        measured_results.values(),
-                        key=lambda item: (
-                            item.best_ms if item.best_ms is not None else float("inf"),
-                            original_order[item.ip],
-                        ),
-                    )
-                ]
+                sorted_items = sorted(
+                    measured_results.values(),
+                    key=lambda item: (
+                        item.best_ms if item.best_ms is not None else float("inf"),
+                        original_order[item.ip],
+                    ),
+                )
+                
+                # Apply RTT tolerance to filter out slower IPs
+                filtered_items = []
+                best_ms = None
+                for item in sorted_items:
+                    if item.best_ms is None:
+                        continue
+                    if best_ms is None:
+                        best_ms = item.best_ms
+                    
+                    if item.best_ms - best_ms <= self.runtime_config.rtt_tolerance_ms:
+                        filtered_items.append(item)
+                    else:
+                        break
+                
+                # Fallback to sorted_items if all valid items are filtered out (shouldn't happen)
+                if not filtered_items:
+                    filtered_items = sorted_items
+                
+                truncated_items = []
+                for i, item in enumerate(filtered_items):
+                    if i > 0:
+                        prev_item = filtered_items[i - 1]
+                        if (
+                            item.best_ms is not None
+                            and prev_item.best_ms is not None
+                            and item.best_ms - prev_item.best_ms > self.runtime_config.rtt_gap_threshold_ms
+                        ):
+                            logger.debug(
+                                "测速相邻 IP RTT 差距过大，进行截断 rtt_gap=%.2fms threshold=%.2fms",
+                                item.best_ms - prev_item.best_ms,
+                                self.runtime_config.rtt_gap_threshold_ms,
+                            )
+                            break
+                    truncated_items.append(item)
+
+                sorted_ips = [item.ip for item in truncated_items]
                 sorted_ips = sorted_ips[: self.runtime_config.response_ip_limit]
                 if sorted_ips != current_ips:
                     self._replace_answer_ips(answer, sorted_ips)

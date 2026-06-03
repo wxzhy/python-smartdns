@@ -310,6 +310,7 @@
         "ping_privileged": false,
         "response_ip_limit": 2,
         "response_ttl_seconds": 600,
+        "rtt_gap_threshold_ms": 20.0,
         "skip_tags": [
           "direct",
           "local"

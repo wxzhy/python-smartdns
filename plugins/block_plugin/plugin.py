@@ -152,11 +152,6 @@ class BlockPlugin(Plugin):
             rule.ipv6_addresses,
         )
 
-    @staticmethod
-    def _has_any_tag(current_tags: set[str], configured_tags: list[str]) -> bool:
-        return bool(current_tags.intersection(configured_tags))
-
-
 def _normalize_tags(value: list[str] | None) -> list[str]:
     if value is None:
         return []

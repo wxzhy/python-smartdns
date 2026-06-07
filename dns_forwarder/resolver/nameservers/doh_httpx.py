@@ -4,15 +4,13 @@ from typing import Any
 
 import dns.asyncbackend
 import dns.message
-import dns.nameserver
 
-from dns_forwarder.config import DoHHttpxNameserverConfig, HTTPVersionType
+from dns_forwarder.config import DoHHttpxNameserverConfig
 
 from .doh_client_common import (
+    BaseAsyncDoHNameserver,
     build_doh_request,
     parse_doh_response,
-    url_hostname,
-    url_port,
 )
 
 try:  # pragma: no cover - dependency availability is checked at build time
@@ -49,50 +47,9 @@ async def close_shared_sessions() -> None:
         await client.aclose()
 
 
-class DoHHttpxNameserver(dns.nameserver.Nameserver):
-    def __init__(
-        self,
-        url: str,
-        *,
-        verify: bool | str,
-        want_get: bool,
-        http_version: HTTPVersionType,
-        http_host: str | None,
-        server_hostname: str | None,
-    ) -> None:
-        self.url = url
-        self.verify = verify
-        self.want_get = want_get
-        self.http_version = http_version
-        self.http_host = http_host
-        self.server_hostname = server_hostname
-
-    def __str__(self) -> str:
-        return self.url
-
+class DoHHttpxNameserver(BaseAsyncDoHNameserver):
     def kind(self) -> str:
         return "DoH-HTTPX"
-
-    def is_always_max_size(self) -> bool:
-        return True
-
-    def answer_nameserver(self) -> str:
-        return url_hostname(self.url) or self.url
-
-    def answer_port(self) -> int:
-        return url_port(self.url)
-
-    def query(
-        self,
-        request: dns.message.QueryMessage,
-        timeout: float,
-        source: str | None,
-        source_port: int,
-        max_size: bool,
-        one_rr_per_rrset: bool = False,
-        ignore_trailing: bool = False,
-    ) -> dns.message.Message:
-        raise NotImplementedError("httpx nameserver only supports async queries")
 
     async def async_query(
         self,

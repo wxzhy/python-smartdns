@@ -75,6 +75,10 @@ class Plugin:
     runtime_config: BaseModel = EmptyModel()
     runtime_variables: BaseModel = EmptyModel()
 
+    @staticmethod
+    def _has_any_tag(current_tags: set[str], configured_tags: list[str]) -> bool:
+        return bool(current_tags.intersection(configured_tags))
+
     def bind(self, config: BaseModel, variables: BaseModel) -> None:
         self.runtime_config = config
         self.runtime_variables = variables

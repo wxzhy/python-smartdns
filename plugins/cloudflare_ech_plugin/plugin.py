@@ -150,10 +150,6 @@ class CloudflareEchPlugin(Plugin):
         return answer
 
     @staticmethod
-    def _has_any_tag(current_tags: set[str], configured_tags: list[str]) -> bool:
-        return bool(current_tags.intersection(configured_tags))
-
-    @staticmethod
     def _has_any_ech(answer: dns.resolver.Answer) -> bool:
         if answer.rrset is None:
             return False

@@ -7,15 +7,15 @@ from typing import Any
 
 import dns.asyncbackend
 import dns.message
-import dns.nameserver
 
 from dns_forwarder.config import DoHAiohttpNameserverConfig, HTTPVersionType
 
 from .doh_client_common import (
+    BaseAsyncDoHNameserver,
     build_doh_request,
+    freeze_hosts,
+    FrozenHosts,
     parse_doh_response,
-    url_hostname,
-    url_port,
 )
 
 try:  # pragma: no cover - dependency availability is checked at query time
@@ -26,7 +26,6 @@ except ImportError:  # pragma: no cover
     AsyncResolver = None  # type: ignore[assignment]
 
 
-FrozenHosts = tuple[tuple[str, tuple[str, ...]], ...]
 _NUMERIC_SOCKET_FLAGS = socket.AI_NUMERICHOST | socket.AI_NUMERICSERV
 _SHARED_SESSION: Any | None = None
 _SHARED_BOOTSTRAP_RESOLVER: tuple[str, ...] | None = None
@@ -98,12 +97,6 @@ def _build_resolver(bootstrap_resolver: tuple[str, ...], hosts: FrozenHosts) -> 
     return None
 
 
-def _freeze_hosts(hosts: dict[str, list[str]] | None) -> FrozenHosts:
-    if not hosts:
-        return ()
-    return tuple(sorted((host, tuple(addresses)) for host, addresses in hosts.items()))
-
-
 def _normalize_host(host: str) -> str:
     return host.strip().rstrip(".").lower()
 
@@ -133,7 +126,7 @@ def _hosts_resolve_results(
     return results
 
 
-class DoHAiohttpNameserver(dns.nameserver.Nameserver):
+class DoHAiohttpNameserver(BaseAsyncDoHNameserver):
     def __init__(
         self,
         url: str,
@@ -146,41 +139,19 @@ class DoHAiohttpNameserver(dns.nameserver.Nameserver):
         bootstrap_resolver: list[str],
         hosts: dict[str, list[str]],
     ) -> None:
-        self.url = url
-        self.verify = verify
-        self.want_get = want_get
-        self.http_version = http_version
-        self.http_host = http_host
-        self.server_hostname = server_hostname
+        super().__init__(
+            url,
+            verify=verify,
+            want_get=want_get,
+            http_version=http_version,
+            http_host=http_host,
+            server_hostname=server_hostname,
+        )
         self.bootstrap_resolver = tuple(bootstrap_resolver)
-        self.hosts = _freeze_hosts(hosts)
-
-    def __str__(self) -> str:
-        return self.url
+        self.hosts = freeze_hosts(hosts)
 
     def kind(self) -> str:
         return "DoH-AIOHTTP"
-
-    def is_always_max_size(self) -> bool:
-        return True
-
-    def answer_nameserver(self) -> str:
-        return url_hostname(self.url) or self.url
-
-    def answer_port(self) -> int:
-        return url_port(self.url)
-
-    def query(
-        self,
-        request: dns.message.QueryMessage,
-        timeout: float,
-        source: str | None,
-        source_port: int,
-        max_size: bool,
-        one_rr_per_rrset: bool = False,
-        ignore_trailing: bool = False,
-    ) -> dns.message.Message:
-        raise NotImplementedError("aiohttp nameserver only supports async queries")
 
     async def async_query(
         self,

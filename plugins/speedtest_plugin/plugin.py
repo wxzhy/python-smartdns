@@ -17,6 +17,7 @@ from dns_forwarder.plugin_api import EmptyModel, Plugin, PluginRegistry
 from .models import (
     SPEEDTEST_CONTEXT_KEY,
     SPEEDTEST_SERVICE_KEY,
+    IpRttResult,
     SpeedTestContext,
 )
 from .service import SpeedTestService
@@ -67,9 +68,10 @@ class SpeedTestPluginConfig(BaseModel):
     rtt_tolerance_ms: float = Field(default=50.0, ge=0.0)
     rtt_gap_threshold_ms: float = Field(default=20.0, ge=0.0)
     skip_tags: list[str] = Field(default_factory=list)
+    no_speedtest_tags: list[str] = Field(default_factory=list)
     fallback_rules: list[SpeedTestFallbackRuleConfig] = Field(default_factory=list)
 
-    @field_validator("skip_tags", mode="before")
+    @field_validator("skip_tags", "no_speedtest_tags", mode="before")
     @classmethod
     def normalize_global_tags(cls, value: list[str] | None) -> list[str]:
         return _normalize_tags(value)
@@ -109,10 +111,11 @@ class SpeedTestPlugin(Plugin):
         registry.register_context(SPEEDTEST_SERVICE_KEY, self._service)
         registry.register_context_factory(SPEEDTEST_CONTEXT_KEY, SpeedTestContext)
         logger.debug(
-            "测速插件初始化完成 response_ip_limit=%s response_ttl=%s skip_tags=%s fallback_rule_count=%s",
+            "测速插件初始化完成 response_ip_limit=%s response_ttl=%s skip_tags=%s no_speedtest_tags=%s fallback_rule_count=%s",
             self.runtime_config.response_ip_limit,
             self.runtime_config.response_ttl_seconds,
             self.runtime_config.skip_tags,
+            self.runtime_config.no_speedtest_tags,
             len(self.runtime_config.fallback_rules),
         )
 
@@ -137,6 +140,21 @@ class SpeedTestPlugin(Plugin):
             response_ips,
         )
         speedtest_context = get_speedtest_context(context)
+
+        # 对命中 no_speedtest_tags 的上游结果，其 IP 直接标记为 inf，不实际测速
+        if self._has_any_tag(result.tags, self.runtime_config.no_speedtest_tags):
+            inf_results = self._make_inf_results(response_ips)
+            if inf_results:
+                await speedtest_context.reserve_ips(response_ips)
+                await speedtest_context.add_results(inf_results)
+                logger.debug(
+                    "测速跳过 request_id=%s stage=upstream_response reason=no_speedtest_tags result_tags=%s ips=%s",
+                    context.request_id,
+                    format_tags(result.tags),
+                    response_ips,
+                )
+            return
+
         await self._measure_new_ips(
             context.request_id,
             speedtest_context,
@@ -180,7 +198,7 @@ class SpeedTestPlugin(Plugin):
         ):
             speedtest_context = get_speedtest_context(context)
             current_ips = self._extract_unique_ips(answer)
-            candidate_ips = self._collect_candidate_ips(context, answer)
+            candidate_ips = self._collect_candidate_ips(context, answer, speedtest_context)
             if candidate_ips:
                 await self._measure_new_ips(
                     context.request_id,
@@ -315,6 +333,10 @@ class SpeedTestPlugin(Plugin):
             len(successful_results),
         )
 
+    @staticmethod
+    def _make_inf_results(ips: list[str]) -> list[IpRttResult]:
+        return [IpRttResult(ip=ip, best_ms=float("inf")) for ip in ips]
+
     def _replace_answer_ips(self, answer: dns.resolver.Answer, ips: list[str]) -> None:
         ttl = self.runtime_config.response_ttl_seconds
         rrset_name = answer.canonical_name
@@ -346,16 +368,25 @@ class SpeedTestPlugin(Plugin):
         self,
         context: RequestContext,
         answer: dns.resolver.Answer,
+        speedtest_context: SpeedTestContext,
     ) -> list[str]:
         candidates: list[str] = []
         seen: set[str] = set()
+        no_speedtest_tags = self.runtime_config.no_speedtest_tags
+        inf_results: list[IpRttResult] = []
 
-        def add_answer_ips(item: dns.resolver.Answer | None) -> None:
+        def add_answer_ips(
+            item: dns.resolver.Answer | None,
+            *,
+            mark_inf: bool = False,
+        ) -> None:
             for ip in self._extract_unique_ips(item) if item is not None else []:
                 if ip in seen:
                     continue
                 seen.add(ip)
                 candidates.append(ip)
+                if mark_inf:
+                    inf_results.append(IpRttResult(ip=ip, best_ms=float("inf")))
 
         add_answer_ips(answer)
         if not context.upstream_results:
@@ -367,12 +398,17 @@ class SpeedTestPlugin(Plugin):
             key=lambda item: (item.duration_ms, item.upstream_name),
         )
         for result in collected_results:
-            add_answer_ips(result.answer)
-        return candidates
+            should_inf = self._has_any_tag(result.tags, no_speedtest_tags)
+            add_answer_ips(result.answer, mark_inf=should_inf)
 
-    @staticmethod
-    def _has_any_tag(current_tags: set[str], configured_tags: list[str]) -> bool:
-        return bool(current_tags.intersection(configured_tags))
+        # 将 no_speedtest_tags 命中的 IP 的 inf 结果写入 context（同步安全，此处无并发）
+        if inf_results:
+            speedtest_context.ip_rtt_results.extend(inf_results)
+            logger.debug(
+                "测速标记 inf ips=%s reason=no_speedtest_tags",
+                [r.ip for r in inf_results],
+            )
+        return candidates
 
 
 def _normalize_tags(value: list[str] | None) -> list[str]:

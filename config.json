@@ -498,6 +498,9 @@
         "response_ip_limit": 2,
         "response_ttl_seconds": 600,
         "skip_tags": [],
+        "no_speedtest_tags": [
+          "private"
+        ],
         "fallback_rules": [
           {
             "match_tags": [

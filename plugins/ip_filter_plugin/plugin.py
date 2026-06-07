@@ -111,9 +111,4 @@ class IpFilterPlugin(Plugin):
             return False
         return True
 
-    @staticmethod
-    def _has_any_tag(current_tags: set[str], configured_tags: list[str]) -> bool:
-        return bool(current_tags.intersection(configured_tags))
-
-
 plugin = IpFilterPlugin()

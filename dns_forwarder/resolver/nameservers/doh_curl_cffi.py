@@ -5,14 +5,15 @@ from typing import Any
 
 import dns.asyncbackend
 import dns.message
-import dns.nameserver
 
 from dns_forwarder.config import DoHCurlCffiNameserverConfig, HTTPVersionType
 
 from .doh_client_common import (
+    BaseAsyncDoHNameserver,
     build_doh_request,
+    freeze_hosts,
+    FrozenHosts,
     parse_doh_response,
-    url_hostname,
     url_port,
 )
 
@@ -25,7 +26,6 @@ except ImportError:  # pragma: no cover
     AsyncSession = None  # type: ignore[assignment]
 
 
-FrozenHosts = tuple[tuple[str, tuple[str, ...]], ...]
 _SHARED_SESSIONS: dict[tuple[str, ...], Any] = {}
 
 
@@ -51,7 +51,7 @@ async def close_shared_sessions() -> None:
         await session.close()
 
 
-class DoHCurlCffiNameserver(dns.nameserver.Nameserver):
+class DoHCurlCffiNameserver(BaseAsyncDoHNameserver):
     def __init__(
         self,
         url: str,
@@ -64,41 +64,20 @@ class DoHCurlCffiNameserver(dns.nameserver.Nameserver):
         bootstrap_resolver: list[str],
         hosts: dict[str, list[str]],
     ) -> None:
-        self.url = url
-        self.verify = verify
-        self.want_get = want_get
-        self.http_version = http_version
-        self.http_host = http_host
+        super().__init__(
+            url,
+            verify=verify,
+            want_get=want_get,
+            http_version=http_version,
+            http_host=http_host,
+            server_hostname=None,
+        )
         self.fingerprint = fingerprint
-        self.resolve_entries = _curl_resolve_entries(_freeze_hosts(hosts), url_port(url))
+        self.resolve_entries = _curl_resolve_entries(freeze_hosts(hosts), url_port(url))
         _ = bootstrap_resolver
-
-    def __str__(self) -> str:
-        return self.url
 
     def kind(self) -> str:
         return "DoH-CURL-CFFI"
-
-    def is_always_max_size(self) -> bool:
-        return True
-
-    def answer_nameserver(self) -> str:
-        return url_hostname(self.url) or self.url
-
-    def answer_port(self) -> int:
-        return url_port(self.url)
-
-    def query(
-        self,
-        request: dns.message.QueryMessage,
-        timeout: float,
-        source: str | None,
-        source_port: int,
-        max_size: bool,
-        one_rr_per_rrset: bool = False,
-        ignore_trailing: bool = False,
-    ) -> dns.message.Message:
-        raise NotImplementedError("curl nameserver only supports async queries")
 
     async def async_query(
         self,
@@ -145,12 +124,6 @@ def _curl_http_version(http_version: HTTPVersionType) -> Any:
         HTTPVersionType.H2: CurlHttpVersion.V2_0,
         HTTPVersionType.H3: CurlHttpVersion.V3,
     }[http_version]
-
-
-def _freeze_hosts(hosts: dict[str, list[str]] | None) -> FrozenHosts:
-    if not hosts:
-        return ()
-    return tuple(sorted((host, tuple(addresses)) for host, addresses in hosts.items()))
 
 
 def _curl_resolve_entries(hosts: FrozenHosts, port: int) -> tuple[str, ...]:

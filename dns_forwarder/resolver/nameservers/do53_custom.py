@@ -12,7 +12,7 @@ from dns_forwarder.config import Do53CustomNameserverConfig
 
 from ._trick_tcp import TrickyStreamSocket
 from ._trick_udp import TrickyDatagramSocket
-from .doh_client_common import freeze_hosts, FrozenHosts
+from .doh_client_common import freeze_hosts
 
 
 def _source_tuple(af: int, source: str | None, source_port: int) -> tuple[str, int] | None:
@@ -40,7 +40,6 @@ class Do53CustomNameserver(dns.nameserver.Do53Nameserver):
         super().__init__(address, port)
         self.use_tricks = use_tricks
         self.hosts = freeze_hosts(hosts)
-
 
     async def async_query(
         self,

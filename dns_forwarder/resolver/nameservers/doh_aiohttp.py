@@ -12,9 +12,9 @@ from dns_forwarder.config import DoHAiohttpNameserverConfig, HTTPVersionType
 
 from .doh_client_common import (
     BaseAsyncDoHNameserver,
+    FrozenHosts,
     build_doh_request,
     freeze_hosts,
-    FrozenHosts,
     parse_doh_response,
 )
 

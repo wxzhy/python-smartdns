@@ -5,6 +5,8 @@ from .base import (
     Plugin,
     PluginManager,
     PluginRegistry,
+    StrictPluginModel,
+    normalize_tag_list,
 )
 from .catalog import (
     PluginCatalogEntry,
@@ -22,8 +24,10 @@ __all__ = [
     "Plugin",
     "PluginManager",
     "PluginRegistry",
+    "StrictPluginModel",
     "discover_available_plugins",
     "materialize_plugin_configs",
     "namespace_json_schema",
+    "normalize_tag_list",
     "validate_plugin_configs",
 ]

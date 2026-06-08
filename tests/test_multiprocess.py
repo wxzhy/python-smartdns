@@ -14,11 +14,8 @@ import dns.rcode
 import dns.rdatatype
 import dns.rrset
 
-from dns_forwarder.core.multiprocess import (
-    MultiprocessRuntimeManager,
-    MultiprocessWorkerPool,
-    WorkerHandle,
-)
+from dns_forwarder.core.multiprocess.manager import MultiprocessRuntimeManager
+from dns_forwarder.core.multiprocess.pool import MultiprocessWorkerPool, WorkerHandle
 
 
 class FakeExecutor:

@@ -10,9 +10,9 @@ from dns_forwarder.config import DoHCurlCffiNameserverConfig, HTTPVersionType
 
 from .doh_client_common import (
     BaseAsyncDoHNameserver,
+    FrozenHosts,
     build_doh_request,
     freeze_hosts,
-    FrozenHosts,
     parse_doh_response,
     url_port,
 )

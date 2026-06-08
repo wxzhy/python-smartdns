@@ -1,10 +1,11 @@
 from __future__ import annotations
 
-from collections import defaultdict
 from dataclasses import dataclass
 from pathlib import Path
 
 import marisa_trie
+
+from .tag_files import load_tag_files
 
 DOMAINSET_CONTEXT_KEY = "core.domainset"
 TAG_SEPARATOR = "\0"
@@ -69,11 +70,11 @@ class DomainSet:
 
     @staticmethod
     def _build_domain_entries(directory: str | None) -> dict[str, frozenset[str]]:
-        domain_to_tags: dict[str, set[str]] = defaultdict(set)
-        for tag, domains in _load_tag_files(directory, normalize_domain).items():
+        domain_to_tags: dict[str, set[str]] = {}
+        for tag, domains in load_tag_files(directory, normalize_domain).items():
             for domain in domains:
                 reversed_domain = reverse_domain(domain)
-                domain_to_tags[reversed_domain].add(tag)
+                domain_to_tags.setdefault(reversed_domain, set()).add(tag)
         return {domain: frozenset(tags) for domain, tags in sorted(domain_to_tags.items())}
 
 
@@ -83,32 +84,3 @@ def _encode_tags(tags: frozenset[str]) -> bytes:
 
 def _decode_tags(value: bytes) -> set[str]:
     return {tag for tag in value.decode("utf-8").split(TAG_SEPARATOR) if tag}
-
-
-def _load_tag_files(
-    directory: str | None,
-    normalizer,
-) -> dict[str, set[str]]:
-    tag_to_values: dict[str, set[str]] = defaultdict(set)
-    if directory is None:
-        return tag_to_values
-
-    path = Path(directory)
-    if not path.exists():
-        raise FileNotFoundError(f"tag 目录不存在: {path}")
-    if not path.is_dir():
-        raise NotADirectoryError(f"tag 路径不是目录: {path}")
-
-    for file_path in sorted(path.iterdir(), key=lambda item: item.name):
-        if not file_path.is_file() or file_path.name.startswith("."):
-            continue
-        tag = file_path.stem
-        if not tag:
-            continue
-        for line in file_path.read_text(encoding="utf-8").splitlines():
-            stripped = line.strip()
-            if not stripped or stripped.startswith("#"):
-                continue
-            tag_to_values[tag].add(normalizer(stripped))
-
-    return tag_to_values

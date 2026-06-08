@@ -5,9 +5,9 @@ import dns.rdatatype
 import dns.rrset
 from pydantic import BaseModel, Field, field_validator
 
+from dns_forwarder.core.domainset import normalize_domain
 from dns_forwarder.logging import get_logger
 from dns_forwarder.pipeline import build_answer_from_response, sync_answer_response
-from dns_forwarder.core.domainset import normalize_domain
 from dns_forwarder.plugin_api import Plugin, PluginRegistry
 
 logger = get_logger("plugins.sample")

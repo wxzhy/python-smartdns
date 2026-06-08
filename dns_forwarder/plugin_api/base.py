@@ -4,7 +4,7 @@ from dataclasses import dataclass, field
 from types import ModuleType
 from typing import TYPE_CHECKING, Any, Callable
 
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict
 
 from dns_forwarder.logging import get_logger
 
@@ -21,6 +21,24 @@ logger = get_logger("plugin_api")
 
 class EmptyModel(BaseModel):
     """默认的空插件配置模型。"""
+
+
+class StrictPluginModel(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+
+def normalize_tag_list(value: list[str] | None) -> list[str]:
+    if value is None:
+        return []
+    seen: set[str] = set()
+    normalized: list[str] = []
+    for item in value:
+        tag = str(item).strip()
+        if not tag or tag in seen:
+            continue
+        seen.add(tag)
+        normalized.append(tag)
+    return normalized
 
 
 AnswerBuilder = Callable[["RequestContext"], "dns.message.Message"]

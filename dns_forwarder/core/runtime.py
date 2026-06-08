@@ -7,7 +7,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from dns_forwarder.config import AppConfig, ListenerProtocol, load_config
+from dns_forwarder.config import AppConfig, load_config
 from dns_forwarder.dispatcher import DispatcherRegistry
 from dns_forwarder.logging import configure_logging, get_logger
 from dns_forwarder.pipeline.context import NestedResolveHandler
@@ -15,12 +15,12 @@ from dns_forwarder.pipeline.engine import PipelineEngine
 from dns_forwarder.plugin_api import PluginManager
 from dns_forwarder.resolver import ResolverManager
 from dns_forwarder.resolver.nameservers import close_shared_sessions as close_nameserver_sessions
-from dns_forwarder.server import TcpDnsServer, UdpDnsServer
 from dns_forwarder.webui import WEBUI_RELOAD_ENDPOINT, ManagedUvicornServer, create_webui_app
 from plugins.query_log_plugin import QUERY_LOG_STORE_KEY, QueryLogStore
 
 from .domainset import DOMAINSET_CONTEXT_KEY, DomainSet
 from .ipset import IPSET_CONTEXT_KEY, IPSet
+from .services import DnsServer, build_listener_status, start_dns_listeners, stop_dns_listeners
 
 logger = get_logger("core.runtime")
 
@@ -45,7 +45,7 @@ class RuntimeManager:
         self.config_path = Path(config_path)
         self._lock = asyncio.Lock()
         self._state: RuntimeState | None = None
-        self._listeners: list[UdpDnsServer | TcpDnsServer] = []
+        self._listeners: list[DnsServer] = []
         self._webui_server: ManagedUvicornServer | None = None
         self._shared_context_overrides = dict(shared_contexts or {})
         self._nested_resolve_handler = nested_resolve_handler
@@ -76,9 +76,7 @@ class RuntimeManager:
             if self._webui_server is not None:
                 await self._webui_server.stop()
                 self._webui_server = None
-            for listener in self._listeners:
-                await listener.stop()
-            self._listeners.clear()
+            await stop_dns_listeners(self._listeners)
             await close_nameserver_sessions()
 
     async def reload(self) -> RuntimeState:
@@ -107,30 +105,11 @@ class RuntimeManager:
 
     def get_status(self) -> dict[str, Any]:
         state = self.get_state()
-        listeners: list[dict[str, Any]] = []
-        for service in self._listeners:
-            address = service.bound_address()
-            listeners.append(
-                {
-                    "name": service.listener.name,
-                    "protocol": service.listener.protocol.value,
-                    "address": f"{address[0]}:{address[1]}" if address else None,
-                }
-            )
-        if not listeners:
-            for listener in state.config.listeners:
-                listeners.append(
-                    {
-                        "name": listener.name,
-                        "protocol": listener.protocol.value,
-                        "address": None,
-                    }
-                )
         return {
             "title": "dns-forwarder",
             "config_path": str(self.config_path),
             "default_group": state.config.runtime.default_upstream_group,
-            "listeners": listeners,
+            "listeners": build_listener_status(self._listeners, state.config.listeners),
             "upstreams": [item.name for item in state.config.upstreams],
             "groups": [item.name for item in state.config.groups],
             "rules": [item.name for item in state.config.rules],
@@ -195,25 +174,12 @@ class RuntimeManager:
         return shared_contexts
 
     async def _start_services(self, config: AppConfig) -> None:
-        listeners: list[UdpDnsServer | TcpDnsServer] = []
-        for listener in config.listeners:
-            if not listener.enabled:
-                continue
-            if listener.protocol is ListenerProtocol.UDP:
-                service = UdpDnsServer(listener, self)
-            else:
-                service = TcpDnsServer(listener, self)
-            await service.start()
-            listeners.append(service)
-            bound_address = service.bound_address()
-            logger.info(
-                "listener 已启动 name=%s protocol=%s address=%s:%s",
-                listener.name,
-                listener.protocol.value,
-                bound_address[0] if bound_address else listener.host,
-                bound_address[1] if bound_address else listener.port,
-            )
-        self._listeners = listeners
+        self._listeners = await start_dns_listeners(
+            config.listeners,
+            self,
+            logger=logger,
+            log_prefix="listener 已启动",
+        )
 
         if config.webui.enabled or config.webui.doh_enabled:
             app = create_webui_app(self)
@@ -285,7 +251,7 @@ def create_runtime_manager(config_path: str | Path = "config.json") -> Any:
     resolved_config_path = Path(config_path)
     config = load_config(resolved_config_path)
     if config.runtime.multiprocess.resolved_workers() > 1:
-        from .multiprocess import MultiprocessRuntimeManager
+        from .multiprocess.manager import MultiprocessRuntimeManager
 
         return MultiprocessRuntimeManager(resolved_config_path)
     return RuntimeManager(resolved_config_path)

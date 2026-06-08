@@ -2,12 +2,12 @@ from __future__ import annotations
 
 import base64
 from dataclasses import dataclass
-from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 from typing import TYPE_CHECKING
+from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 
+import dns.asyncbackend
 import dns.message
 import dns.nameserver
-import dns.asyncbackend
 
 if TYPE_CHECKING:
     from dns_forwarder.config import HTTPVersionType

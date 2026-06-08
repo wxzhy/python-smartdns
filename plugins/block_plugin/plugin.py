@@ -5,17 +5,19 @@ from ipaddress import ip_address
 import dns.message
 import dns.rdatatype
 import dns.rrset
-from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
+from pydantic import Field, field_validator, model_validator
 
 from dns_forwarder.logging import format_tags, get_logger
 from dns_forwarder.pipeline import RequestContext, build_answer_from_response
-from dns_forwarder.plugin_api import EmptyModel, Plugin, PluginRegistry
+from dns_forwarder.plugin_api import (
+    EmptyModel,
+    Plugin,
+    PluginRegistry,
+    StrictPluginModel,
+    normalize_tag_list,
+)
 
 logger = get_logger("plugins.block")
-
-
-class StrictPluginModel(BaseModel):
-    model_config = ConfigDict(extra="forbid")
 
 
 class BlockPluginRuleConfig(StrictPluginModel):
@@ -29,7 +31,7 @@ class BlockPluginRuleConfig(StrictPluginModel):
     @field_validator("match_tags", "exclude_tags", mode="before")
     @classmethod
     def normalize_tags(cls, value: list[str] | None) -> list[str]:
-        return _normalize_tags(value)
+        return normalize_tag_list(value)
 
     @field_validator("ipv4_addresses", mode="before")
     @classmethod
@@ -151,20 +153,6 @@ class BlockPlugin(Plugin):
             "AAAA",
             rule.ipv6_addresses,
         )
-
-def _normalize_tags(value: list[str] | None) -> list[str]:
-    if value is None:
-        return []
-    seen: set[str] = set()
-    normalized: list[str] = []
-    for item in value:
-        tag = str(item).strip()
-        if not tag or tag in seen:
-            continue
-        seen.add(tag)
-        normalized.append(tag)
-    return normalized
-
 
 def _normalize_addresses(value: list[str] | None, *, version: int) -> list[str]:
     if value is None:

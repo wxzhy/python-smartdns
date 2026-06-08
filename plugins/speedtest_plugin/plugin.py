@@ -12,7 +12,7 @@ from pydantic import BaseModel, Field, field_validator, model_validator
 
 from dns_forwarder.logging import format_tags, get_logger
 from dns_forwarder.pipeline import RequestContext, UpstreamResult, sync_answer_rrset_to_response
-from dns_forwarder.plugin_api import EmptyModel, Plugin, PluginRegistry
+from dns_forwarder.plugin_api import EmptyModel, Plugin, PluginRegistry, normalize_tag_list
 
 from .models import (
     SPEEDTEST_CONTEXT_KEY,
@@ -37,7 +37,7 @@ class SpeedTestFallbackRuleConfig(BaseModel):
     @field_validator("match_tags", "exclude_tags", mode="before")
     @classmethod
     def normalize_tags(cls, value: list[str] | None) -> list[str]:
-        return _normalize_tags(value)
+        return normalize_tag_list(value)
 
     @field_validator("ipv4_addresses", mode="before")
     @classmethod
@@ -74,7 +74,7 @@ class SpeedTestPluginConfig(BaseModel):
     @field_validator("skip_tags", "no_speedtest_tags", mode="before")
     @classmethod
     def normalize_global_tags(cls, value: list[str] | None) -> list[str]:
-        return _normalize_tags(value)
+        return normalize_tag_list(value)
 
 
 def get_speedtest_context(context: RequestContext) -> SpeedTestContext:
@@ -409,21 +409,6 @@ class SpeedTestPlugin(Plugin):
                 [r.ip for r in inf_results],
             )
         return candidates
-
-
-def _normalize_tags(value: list[str] | None) -> list[str]:
-    if value is None:
-        return []
-    seen: set[str] = set()
-    normalized: list[str] = []
-    for item in value:
-        tag = str(item).strip()
-        if not tag or tag in seen:
-            continue
-        seen.add(tag)
-        normalized.append(tag)
-    return normalized
-
 
 def _normalize_addresses(value: list[str] | None, *, version: int) -> list[str]:
     if value is None:

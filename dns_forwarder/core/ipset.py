@@ -1,14 +1,14 @@
 from __future__ import annotations
 
 import pickle
-from collections import defaultdict
 from dataclasses import dataclass
 from ipaddress import ip_network
-from pathlib import Path
 from typing import Any
 
 import radix
 from radix.radix import Radix as PurePythonRadix
+
+from .tag_files import load_tag_files
 
 IPSET_CONTEXT_KEY = "core.ipset"
 
@@ -29,10 +29,10 @@ class IPSet:
             self._tree = tree
             return
 
-        network_to_tags: dict[str, set[str]] = defaultdict(set)
-        for tag, networks in _load_tag_files(directory, normalize_network).items():
+        network_to_tags: dict[str, set[str]] = {}
+        for tag, networks in load_tag_files(directory, normalize_network).items():
             for network in networks:
-                network_to_tags[network].add(tag)
+                network_to_tags.setdefault(network, set()).add(tag)
 
         self._tree: Any | None
         if not network_to_tags:
@@ -94,32 +94,3 @@ def _new_radix_tree(*, prefer_native: bool = True) -> Any:
         except UnicodeDecodeError:
             pass
     return PurePythonRadix()
-
-
-def _load_tag_files(
-    directory: str | None,
-    normalizer,
-) -> dict[str, set[str]]:
-    tag_to_values: dict[str, set[str]] = defaultdict(set)
-    if directory is None:
-        return tag_to_values
-
-    path = Path(directory)
-    if not path.exists():
-        raise FileNotFoundError(f"tag 目录不存在: {path}")
-    if not path.is_dir():
-        raise NotADirectoryError(f"tag 路径不是目录: {path}")
-
-    for file_path in sorted(path.iterdir(), key=lambda item: item.name):
-        if not file_path.is_file() or file_path.name.startswith("."):
-            continue
-        tag = file_path.stem
-        if not tag:
-            continue
-        for line in file_path.read_text(encoding="utf-8").splitlines():
-            stripped = line.strip()
-            if not stripped or stripped.startswith("#"):
-                continue
-            tag_to_values[tag].add(normalizer(stripped))
-
-    return tag_to_values

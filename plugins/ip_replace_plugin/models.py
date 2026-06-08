@@ -2,11 +2,9 @@ from __future__ import annotations
 
 from ipaddress import ip_network
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
+from pydantic import Field, field_validator, model_validator
 
-
-class StrictPluginModel(BaseModel):
-    model_config = ConfigDict(extra="forbid")
+from dns_forwarder.plugin_api import StrictPluginModel, normalize_tag_list
 
 
 class IpReplaceRuleConfig(StrictPluginModel):
@@ -19,7 +17,7 @@ class IpReplaceRuleConfig(StrictPluginModel):
     @field_validator("match_tags", "exclude_tags", mode="before")
     @classmethod
     def normalize_tags(cls, value: list[str] | None) -> list[str]:
-        return _normalize_tags(value)
+        return normalize_tag_list(value)
 
     @field_validator("ipv4_targets", mode="before")
     @classmethod
@@ -45,7 +43,7 @@ class IpReplacePluginConfig(StrictPluginModel):
     @field_validator("skip_tags", mode="before")
     @classmethod
     def normalize_skip_tags(cls, value: list[str] | None) -> list[str]:
-        return _normalize_tags(value)
+        return normalize_tag_list(value)
 
 
 def _normalize_networks(value: list[str] | None, *, version: int) -> list[str]:
@@ -63,18 +61,4 @@ def _normalize_networks(value: list[str] | None, *, version: int) -> list[str]:
             continue
         seen.add(text)
         normalized.append(text)
-    return normalized
-
-
-def _normalize_tags(value: list[str] | None) -> list[str]:
-    if value is None:
-        return []
-    seen: set[str] = set()
-    normalized: list[str] = []
-    for item in value:
-        tag = str(item).strip()
-        if not tag or tag in seen:
-            continue
-        seen.add(tag)
-        normalized.append(tag)
     return normalized

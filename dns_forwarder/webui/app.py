@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-import asyncio
+import anyio
 import json
 import secrets
 from pathlib import Path
@@ -236,21 +236,17 @@ class ManagedUvicornServer:
         )
         self._server = uvicorn.Server(self._config)
         self._server.install_signal_handlers = lambda: None
-        self._task: asyncio.Task[None] | None = None
 
-    async def start(self) -> None:
-        self._task = asyncio.create_task(self._server.serve())
+    async def start(self, tg: anyio.abc.TaskGroup) -> None:
+        tg.start_soon(self._server.serve)
         while not self._server.started:
-            await asyncio.sleep(0.01)
+            await anyio.sleep(0.01)
         logger.info("HTTP server 就绪 address=%s:%s", *self.bound_address())
 
     async def stop(self) -> None:
         address = self.bound_address()
         self._server.should_exit = True
-        if self._task is not None:
-            await self._task
-            self._task = None
-            logger.info("HTTP server 已停止 address=%s:%s", *address)
+        logger.info("HTTP server 已停止 address=%s:%s", *address)
 
     def bound_address(self) -> tuple[str, int]:
         servers = getattr(self._server, "servers", None)

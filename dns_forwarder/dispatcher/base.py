@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-import asyncio
+
 from abc import ABC, abstractmethod
 from collections.abc import Callable
 from typing import TYPE_CHECKING, ClassVar
@@ -44,12 +44,7 @@ class DispatchStrategy(ABC):
             return ""
         return type(result.error).__name__
 
-    @staticmethod
-    async def _cancel_pending_tasks(tasks: list[asyncio.Task[UpstreamResult]]) -> None:
-        for task in tasks:
-            if not task.done():
-                task.cancel()
-        await asyncio.gather(*tasks, return_exceptions=True)
+
 
     @classmethod
     def pick_failure_result(

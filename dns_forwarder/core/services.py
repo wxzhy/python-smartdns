@@ -7,6 +7,8 @@ from typing import Any
 from dns_forwarder.config import ListenerConfig, ListenerProtocol
 from dns_forwarder.server import TcpDnsServer, UdpDnsServer
 
+import anyio
+
 DnsServer = UdpDnsServer | TcpDnsServer
 ListenerStatus = dict[str, str | None]
 
@@ -41,6 +43,7 @@ def build_listener_status(
 async def start_dns_listeners(
     listeners: Iterable[ListenerConfig],
     runtime_manager: Any,
+    tg: anyio.abc.TaskGroup,
     *,
     logger: Logger,
     log_prefix: str,
@@ -50,7 +53,7 @@ async def start_dns_listeners(
         if not listener.enabled:
             continue
         service = _build_dns_server(listener, runtime_manager)
-        await service.start()
+        await service.start(tg)
         services.append(service)
         bound_address = service.bound_address()
         logger.info(

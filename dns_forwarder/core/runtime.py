@@ -1,11 +1,11 @@
 from __future__ import annotations
 
 import argparse
-import asyncio
 from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
+import anyio
 
 from dns_forwarder.config import AppConfig, load_config
 from dns_forwarder.dispatcher import DispatcherRegistry
@@ -43,12 +43,14 @@ class RuntimeManager:
         nested_resolve_handler: NestedResolveHandler | None = None,
     ) -> None:
         self.config_path = Path(config_path)
-        self._lock = asyncio.Lock()
+        self._lock = anyio.Lock()
         self._state: RuntimeState | None = None
         self._listeners: list[DnsServer] = []
         self._webui_server: ManagedUvicornServer | None = None
         self._shared_context_overrides = dict(shared_contexts or {})
         self._nested_resolve_handler = nested_resolve_handler
+        self._tg_context: anyio.abc.TaskGroup | None = None
+        self._tg: anyio.abc.TaskGroup | None = None
 
     @property
     def reload_endpoint(self) -> str:
@@ -68,7 +70,11 @@ class RuntimeManager:
                 logger.debug("运行时已启动，忽略重复 start config=%s", self.config_path)
                 return
             logger.info("启动运行时 config=%s", self.config_path)
-            await self._start_services(self._state.config)
+
+            self._tg_context = anyio.create_task_group()
+            self._tg = await self._tg_context.__aenter__()
+
+            await self._start_services(self._state.config, self._tg)
 
     async def stop(self) -> None:
         async with self._lock:
@@ -78,6 +84,11 @@ class RuntimeManager:
                 self._webui_server = None
             await stop_dns_listeners(self._listeners)
             await close_nameserver_sessions()
+
+            if self._tg_context is not None:
+                await self._tg_context.__aexit__(None, None, None)
+                self._tg_context = None
+                self._tg = None
 
     async def reload(self) -> RuntimeState:
         async with self._lock:
@@ -173,10 +184,11 @@ class RuntimeManager:
                 shared_contexts[QUERY_LOG_STORE_KEY] = query_log_store
         return shared_contexts
 
-    async def _start_services(self, config: AppConfig) -> None:
+    async def _start_services(self, config: AppConfig, tg: anyio.abc.TaskGroup) -> None:
         self._listeners = await start_dns_listeners(
             config.listeners,
             self,
+            tg,
             logger=logger,
             log_prefix="listener 已启动",
         )
@@ -184,7 +196,7 @@ class RuntimeManager:
         if config.webui.enabled or config.webui.doh_enabled:
             app = create_webui_app(self)
             server = ManagedUvicornServer(app, config.webui.host, config.webui.port)
-            await server.start()
+            await server.start(tg)
             self._webui_server = server
             logger.info(
                 "http 服务已启动 address=%s:%s webui=%s doh=%s",
@@ -242,7 +254,7 @@ async def serve(config_path: Path) -> None:
     manager = create_runtime_manager(config_path)
     await manager.start()
     try:
-        await asyncio.Event().wait()
+        await anyio.sleep_forever()
     finally:
         await manager.stop()
 
@@ -284,6 +296,6 @@ def main() -> None:
         return
 
     try:
-        asyncio.run(serve(config_path))
+        anyio.run(serve, config_path)
     except KeyboardInterrupt:
         logger.info("收到退出信号，服务停止")

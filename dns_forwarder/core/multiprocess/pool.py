@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import asyncio
 import itertools
 import os
 import threading
@@ -11,6 +10,9 @@ from dataclasses import dataclass
 from multiprocessing import get_context
 from pathlib import Path
 from typing import Any
+import anyio
+import asyncio
+from functools import partial
 
 import dns.message
 
@@ -70,33 +72,29 @@ class MultiprocessWorkerPool:
         self._request_queues: list[Any] = []
         self._executor: ProcessPoolExecutor | None = None
         self._workers: list[WorkerHandle] = []
-        self._pending: dict[str, asyncio.Future[bytes | None]] = {}
+        self._pending: dict[str, tuple[anyio.Event, dict[str, Any]]] = {}
         self._request_counter = itertools.count(1)
         self._worker_counter = itertools.count()
         self._generation_counter = itertools.count(1)
-        self._loop: asyncio.AbstractEventLoop | None = None
         self._reader_thread: threading.Thread | None = None
         self._stop_reader = threading.Event()
-        self._supervisor_task: asyncio.Task[None] | None = None
         self._stopping = False
         self._restarting = False
+        self._tg: anyio.abc.TaskGroup | None = None
+        self._loop: asyncio.AbstractEventLoop | None = None
 
-    async def start(self) -> None:
-        self._loop = asyncio.get_running_loop()
+    async def start(self, tg: anyio.abc.TaskGroup) -> None:
         logger.info("worker 启动方式 start_method=%s", self._start_method)
+        self._tg = tg
+        self._loop = asyncio.get_running_loop()
         self._create_ipc_resources()
         self._create_executor()
         self._start_workers()
         self._start_result_reader()
-        self._supervisor_task = asyncio.create_task(self._supervise_workers())
+        tg.start_soon(self._supervise_workers)
 
     async def stop(self) -> None:
         self._stopping = True
-        if self._supervisor_task is not None:
-            self._supervisor_task.cancel()
-            await asyncio.gather(self._supervisor_task, return_exceptions=True)
-            self._supervisor_task = None
-
         for worker in self._workers:
             put_nowait(worker.request_queue, {"type": MSG_STOP})
         await self._stop_executor()
@@ -144,30 +142,28 @@ class MultiprocessWorkerPool:
         futures = [worker.future for worker in self._workers]
         pending: set[Future[None]] = set()
         if futures:
-            _, pending = await asyncio.to_thread(
-                wait_futures,
-                futures,
-                timeout=self.STOP_TIMEOUT_SECONDS,
+            _, pending = await anyio.to_thread.run_sync(
+                partial(wait_futures, futures, timeout=self.STOP_TIMEOUT_SECONDS)
             )
 
         forced_shutdown = False
         if pending:
             logger.warning("worker 未在超时时间内退出，准备 terminate count=%s", len(pending))
-            await asyncio.to_thread(executor.terminate_workers)
+            await anyio.to_thread.run_sync(executor.terminate_workers)
             forced_shutdown = True
-            _, pending = await asyncio.to_thread(
-                wait_futures,
-                futures,
-                timeout=self.STOP_TIMEOUT_SECONDS,
+            _, pending = await anyio.to_thread.run_sync(
+                partial(wait_futures, futures, timeout=self.STOP_TIMEOUT_SECONDS)
             )
 
         if pending:
             logger.warning("worker terminate 后仍未退出，准备 kill count=%s", len(pending))
-            await asyncio.to_thread(executor.kill_workers)
+            await anyio.to_thread.run_sync(executor.kill_workers)
             forced_shutdown = True
 
         if not forced_shutdown:
-            await asyncio.to_thread(executor.shutdown, wait=True, cancel_futures=True)
+            await anyio.to_thread.run_sync(
+                partial(executor.shutdown, wait=True, cancel_futures=True)
+            )
 
         self._executor = None
         self._workers.clear()
@@ -177,7 +173,7 @@ class MultiprocessWorkerPool:
         if self._result_queue is not None:
             put_nowait(self._result_queue, {"type": MSG_STOP_READER})
         if self._reader_thread is not None:
-            await asyncio.to_thread(self._reader_thread.join, self.STOP_TIMEOUT_SECONDS)
+            await anyio.to_thread.run_sync(self._reader_thread.join, self.STOP_TIMEOUT_SECONDS)
             self._reader_thread = None
         self._stop_reader.clear()
 
@@ -196,8 +192,9 @@ class MultiprocessWorkerPool:
         listener_name: str,
     ) -> dns.message.Message | None:
         request_id = f"{os.getpid()}-{next(self._request_counter)}"
-        future: asyncio.Future[bytes | None] = asyncio.get_running_loop().create_future()
-        self._pending[request_id] = future
+        event = anyio.Event()
+        holder = {"wire": None, "error": None}
+        self._pending[request_id] = (event, holder)
         worker = self._next_worker()
         try:
             worker.request_queue.put_nowait(
@@ -209,12 +206,16 @@ class MultiprocessWorkerPool:
                     "listener_name": listener_name,
                 }
             )
-            wire = await asyncio.wait_for(
-                future,
-                timeout=self._config.runtime.multiprocess.response_timeout,
-            )
+            with anyio.fail_after(self._config.runtime.multiprocess.response_timeout):
+                await event.wait()
+        except TimeoutError as exc:
+            raise TimeoutError("UDP query timeout") from exc
         finally:
             self._pending.pop(request_id, None)
+
+        if holder["error"]:
+            raise RuntimeError(holder["error"])
+        wire = holder["wire"]
         if wire is None:
             return None
         return dns.message.from_wire(wire)
@@ -233,8 +234,12 @@ class MultiprocessWorkerPool:
                 return
             if message.get("type") == MSG_STOP_READER:
                 return
-            if self._loop is not None:
-                self._loop.call_soon_threadsafe(self._handle_result, message)
+            try:
+                if self._loop is not None:
+                    self._loop.call_soon_threadsafe(self._handle_result, message)
+            except Exception:
+                # 线程中发生意外错误时记录日志或安全忽略，避免 reader 线程挂掉
+                logger.exception("multiprocess pool reader thread callback error")
 
     def _handle_result(self, message: dict[str, Any]) -> None:
         message_type = message.get("type")
@@ -254,22 +259,26 @@ class MultiprocessWorkerPool:
         if message_type == MSG_RESOLVE_REQUEST:
             if not self._is_current_worker_message(message):
                 return
-            asyncio.create_task(self._handle_resolve_request(message))
+            if self._tg is not None:
+                self._tg.start_soon(self._handle_resolve_request, message)
             return
         if message_type == MSG_QUERY_LOG:
             if not self._is_current_worker_message(message):
                 return
-            asyncio.create_task(self._handle_query_log(message))
+            if self._tg is not None:
+                self._tg.start_soon(self._handle_query_log, message)
 
     def _handle_query_response(self, message: dict[str, Any]) -> None:
-        future = self._pending.get(message["request_id"])
-        if future is None or future.done():
+        pending = self._pending.get(message["request_id"])
+        if pending is None:
             return
+        event, holder = pending
         error = message.get("error")
         if error:
-            future.set_exception(RuntimeError(error))
-            return
-        future.set_result(message.get("wire"))
+            holder["error"] = error
+        else:
+            holder["wire"] = message.get("wire")
+        event.set()
 
     async def _handle_resolve_request(self, message: dict[str, Any]) -> None:
         worker = self._worker_by_id(message["worker_id"])
@@ -302,8 +311,8 @@ class MultiprocessWorkerPool:
         await store.append(payload)
 
     async def _supervise_workers(self) -> None:
-        while True:
-            await asyncio.sleep(0.5)
+        while not self._stopping:
+            await anyio.sleep(0.5)
             await self._restart_finished_workers_once()
 
     async def _restart_finished_workers_once(self) -> None:
@@ -398,18 +407,18 @@ class MultiprocessWorkerPool:
         if executor is None:
             return
         try:
-            await asyncio.to_thread(executor.terminate_workers)
+            await anyio.to_thread.run_sync(executor.terminate_workers)
         except Exception:
             logger.exception("terminate worker pool 失败，尝试 kill")
             try:
-                await asyncio.to_thread(executor.kill_workers)
+                await anyio.to_thread.run_sync(executor.kill_workers)
             except Exception:
                 logger.exception("kill worker pool 失败")
         finally:
             self._executor = None
 
     def _fail_pending(self, exc: Exception) -> None:
-        for future in self._pending.values():
-            if not future.done():
-                future.set_exception(exc)
+        for event, holder in self._pending.values():
+            holder["error"] = exc
+            event.set()
         self._pending.clear()

@@ -1,8 +1,8 @@
 from __future__ import annotations
 
-import asyncio
 from pathlib import Path
 from typing import Any
+import anyio
 
 import dns.message
 import dns.rcode
@@ -28,12 +28,14 @@ class MultiprocessRuntimeManager:
     def __init__(self, config_path: str | Path = "config.json") -> None:
         self.config_path = Path(config_path)
         self._runtime = RuntimeManager(self.config_path)
-        self._lock = asyncio.Lock()
+        self._lock = anyio.Lock()
         self._listeners: list[DnsServer] = []
         self._webui_server: ManagedUvicornServer | None = None
         self._worker_pool: MultiprocessWorkerPool | None = None
         self._front_cache: FrontCache | None = None
         self._resources: SharedTreeResources | None = None
+        self._tg_context: anyio.abc.TaskGroup | None = None
+        self._tg: anyio.abc.TaskGroup | None = None
 
     @property
     def reload_endpoint(self) -> str:
@@ -52,6 +54,9 @@ class MultiprocessRuntimeManager:
             if state is None:
                 state = await self._load_unlocked()
 
+            self._tg_context = anyio.create_task_group()
+            self._tg = await self._tg_context.__aenter__()
+
             self._resources = SharedTreeResources.build(state.config, self.config_path.parent)
             try:
                 self._worker_pool = MultiprocessWorkerPool(
@@ -60,9 +65,9 @@ class MultiprocessRuntimeManager:
                     resources=self._resources,
                     manager=self,
                 )
-                await self._worker_pool.start()
+                await self._worker_pool.start(self._tg)
                 self._front_cache = FrontCache(state.config.runtime.multiprocess.front_cache_size)
-                await self._start_services(state.config)
+                await self._start_services(state.config, self._tg)
             except Exception:
                 await self._cleanup_started_services()
                 raise
@@ -82,6 +87,11 @@ class MultiprocessRuntimeManager:
                 self._resources = None
             self._front_cache = None
 
+            if self._tg_context is not None:
+                await self._tg_context.__aexit__(None, None, None)
+                self._tg_context = None
+                self._tg = None
+
     async def reload(self) -> RuntimeState:
         async with self._lock:
             old_state = self.get_state()
@@ -100,7 +110,11 @@ class MultiprocessRuntimeManager:
                     resources=new_resources,
                     manager=self,
                 )
-                await new_worker_pool.start()
+                if self._tg is not None:
+                    await new_worker_pool.start(self._tg)
+                else:
+                    # 容错：如果 start 还未被调用或 tg 丢失，则由自己开启
+                    raise RuntimeError("运行时暂未处于 start 状态")
                 new_state = await self._runtime.reload()
             except Exception:
                 if new_worker_pool is not None:
@@ -215,10 +229,11 @@ class MultiprocessRuntimeManager:
         )
         return state
 
-    async def _start_services(self, config: AppConfig) -> None:
+    async def _start_services(self, config: AppConfig, tg: anyio.abc.TaskGroup) -> None:
         self._listeners = await start_dns_listeners(
             config.listeners,
             self,
+            tg,
             logger=logger,
             log_prefix="master listener 已启动",
         )
@@ -229,7 +244,7 @@ class MultiprocessRuntimeManager:
                 config.webui.host,
                 config.webui.port,
             )
-            await server.start()
+            await server.start(tg)
             self._webui_server = server
 
     def _services_started(self) -> bool:
@@ -247,3 +262,8 @@ class MultiprocessRuntimeManager:
             self._resources.close()
             self._resources = None
         self._front_cache = None
+
+        if self._tg_context is not None:
+            await self._tg_context.__aexit__(None, None, None)
+            self._tg_context = None
+            self._tg = None

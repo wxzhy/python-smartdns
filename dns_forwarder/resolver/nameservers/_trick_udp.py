@@ -1,41 +1,18 @@
 from __future__ import annotations
 
-import asyncio
 import socket
+from collections.abc import Awaitable
+from typing import Any
+import anyio
 
 import dns.asyncbackend
 
 
-class _TrickyDatagramProtocol(asyncio.DatagramProtocol):
-    def __init__(self) -> None:
-        self.transport: asyncio.DatagramTransport | None = None
-        self._queue: asyncio.Queue[tuple[bytes, tuple[str, int]] | Exception] = asyncio.Queue()
-
-    def connection_made(self, transport: asyncio.BaseTransport) -> None:
-        self.transport = transport  # type: ignore[assignment]
-
-    def datagram_received(self, data: bytes, addr: tuple[str, int]) -> None:
-        self._queue.put_nowait((data, addr))
-
-    def error_received(self, exc: Exception) -> None:  # pragma: no cover
-        self._queue.put_nowait(exc)
-
-    def connection_lost(self, exc: Exception | None) -> None:
-        self.transport = None
-        self._queue.put_nowait(exc or EOFError("EOF"))
-
-    async def recvfrom(self, timeout: float | None) -> tuple[bytes, tuple[str, int]]:
-        if timeout is None:
-            item = await self._queue.get()
-        else:
-            item = await asyncio.wait_for(self._queue.get(), timeout=timeout)
-        if isinstance(item, Exception):
-            raise item
-        return item
-
-    def close(self) -> None:
-        if self.transport is not None:
-            self.transport.close()
+async def _wait_for(awaitable: Awaitable[Any], timeout: float | None) -> Any:
+    if timeout is None:
+        return await awaitable
+    with anyio.fail_after(timeout):
+        return await awaitable
 
 
 class TrickyDatagramSocket(dns.asyncbackend.DatagramSocket):
@@ -43,28 +20,10 @@ class TrickyDatagramSocket(dns.asyncbackend.DatagramSocket):
         super().__init__(family, sock_type)
         self._socket = socket.socket(family, sock_type)
         self._socket.setblocking(False)
-        self._protocol = _TrickyDatagramProtocol()
-        self._transport: asyncio.DatagramTransport | None = None
-        self._endpoint_lock: asyncio.Lock | None = None
         self.closed = False
 
     def bind(self, address: tuple[str, int]) -> None:
         self._socket.bind(address)
-
-    async def _ensure_endpoint(self) -> None:
-        if self._transport is not None:
-            return
-        if self._endpoint_lock is None:
-            self._endpoint_lock = asyncio.Lock()
-        async with self._endpoint_lock:
-            if self._transport is not None:
-                return
-            loop = asyncio.get_running_loop()
-            transport, _ = await loop.create_datagram_endpoint(
-                lambda: self._protocol,
-                sock=self._socket,
-            )
-            self._transport = transport  # type: ignore[assignment]
 
     async def sendto(
         self,
@@ -72,11 +31,11 @@ class TrickyDatagramSocket(dns.asyncbackend.DatagramSocket):
         where: tuple[str, int],
         timeout: float | None,
     ) -> int:
-        _ = timeout
-        await self._ensure_endpoint()
-        assert self._transport is not None
-        self._transport.sendto(what, where)
-        return len(what)
+        async def _send() -> int:
+            await anyio.wait_socket_writable(self._socket)
+            return self._socket.sendto(what, where)
+
+        return await _wait_for(_send(), timeout)
 
     async def recvfrom(
         self,
@@ -84,22 +43,23 @@ class TrickyDatagramSocket(dns.asyncbackend.DatagramSocket):
         timeout: float | None,
     ) -> tuple[bytes, tuple[str, int]]:
         _ = size
-        await self._ensure_endpoint()
-        for _ in range(5):
-            data, addr = await self._protocol.recvfrom(timeout)
-            if len(data) > 32 and data[10:12] == b"\x00\x01":
-                return data, addr
-        raise asyncio.TimeoutError("UDP recvfrom timeout")
+        async def _recv() -> tuple[bytes, tuple[str, int]]:
+            for _ in range(5):
+                await anyio.wait_socket_readable(self._socket)
+                data, addr = self._socket.recvfrom(65535)
+                if len(data) > 32 and data[10:12] == b"\x00\x01":
+                    return data, addr
+            raise anyio.FailAfterTimeout("UDP recvfrom timeout")
+
+        try:
+            return await _wait_for(_recv(), timeout)
+        except (anyio.FailAfterTimeout, TimeoutError) as exc:
+            raise TimeoutError("UDP recvfrom timeout") from exc
 
     async def close(self) -> None:
         if self.closed:
             return
         self.closed = True
-        if self._transport is not None:
-            self._protocol.close()
-            await asyncio.sleep(0)
-            self._transport = None
-            return
         self._socket.close()
 
     async def getpeername(self) -> tuple[str, int] | None:

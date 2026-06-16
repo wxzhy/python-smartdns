@@ -31,3 +31,11 @@ uv run python main.py --config config.example.json check-config
 ```bash
 uv run python main.py --config config.example.json serve
 ```
+
+## 架构文档
+
+面向后续重构的处理流程、数据流、插件结构和风险点见
+[docs/architecture.md](docs/architecture.md)。
+
+简化版需求、功能说明和主处理流程见
+[docs/requirements.md](docs/requirements.md)。

@@ -1,8 +1,8 @@
 from __future__ import annotations
 
-import asyncio
 from collections.abc import Callable
 from typing import TYPE_CHECKING
+import anyio
 
 import dns.resolver
 
@@ -28,28 +28,35 @@ class WaitAllDispatchStrategy(DispatchStrategy):
         self,
         context: RequestContext,
         group: UpstreamGroupConfig,
-        resolver_manager: "ResolverManager",
-        registry: "DispatcherRegistry",
+        resolver_manager: ResolverManager,
+        registry: DispatcherRegistry,
         on_result: Callable[[UpstreamResult], None] | None = None,
     ) -> UpstreamResult:
-        tasks = [
-            asyncio.create_task(
-                registry.dispatch_target(
-                    context,
-                    target_name,
-                    self.strategy_type,
-                    resolver_manager,
-                    on_result=on_result,
-                )
-            )
-            for target_name in group.upstreams
-        ]
+        send_stream, receive_stream = anyio.create_memory_object_stream(len(group.upstreams))
         results: list[UpstreamResult] = []
-        try:
-            for task in asyncio.as_completed(tasks):
-                results.append(await task)
-        finally:
-            await self._cancel_pending_tasks(tasks)
+
+        async def worker(target_name: str, s_stream: anyio.streams.memory.MemoryObjectSendStream[UpstreamResult]) -> None:
+            async with s_stream:
+                try:
+                    res = await registry.dispatch_target(
+                        context,
+                        target_name,
+                        self.strategy_type,
+                        resolver_manager,
+                        on_result=on_result,
+                    )
+                    await s_stream.send(res)
+                except Exception:
+                    pass
+
+        async with receive_stream:
+            async with anyio.create_task_group() as tg:
+                for target_name in group.upstreams:
+                    tg.start_soon(worker, target_name, send_stream.clone())
+                await send_stream.aclose()
+
+                async for res in receive_stream:
+                    results.append(res)
 
         successes = [result for result in results if result.answer is not None]
         if successes:

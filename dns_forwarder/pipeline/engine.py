@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import anyio
 import asyncio
 from collections.abc import Callable
 from typing import Any
@@ -91,7 +92,7 @@ class PipelineEngine:
                 self._logger.error("最终响应为空 request_id=%s，返回 SERVFAIL", context.request_id)
                 return make_error_response(request, dns.rcode.SERVFAIL)
             return clone_response_for_request(context.final_response, request)
-        except asyncio.CancelledError:
+        except (asyncio.CancelledError, anyio.get_cancelled_exc_class()):
             error_response = make_error_response(request, dns.rcode.SERVFAIL)
             context.final_response = error_response
             context.final_answer = build_answer_from_response(request, error_response)
@@ -176,14 +177,13 @@ class PipelineEngine:
         if context.final_answer is not None or context.final_response is not None:
             return False
 
-        upstream_hook_tasks: list[asyncio.Task[None]] = []
-        result = await self._dispatch_context(
-            context,
-            on_result=lambda item: upstream_hook_tasks.append(
-                asyncio.create_task(self._plugin_manager.on_upstream_response(context, item))
-            ),
-        )
-        await self._wait_upstream_hook_tasks(upstream_hook_tasks)
+        async with anyio.create_task_group() as tg:
+            result = await self._dispatch_context(
+                context,
+                on_result=lambda item: tg.start_soon(
+                    self._plugin_manager.on_upstream_response, context, item
+                ),
+            )
         self._logger.debug(
             "dispatcher 返回 request_id=%s upstream=%s success=%s error=%s tags=%s",
             context.request_id,
@@ -273,14 +273,7 @@ class PipelineEngine:
         context.upstream_results.append(result)
         return result
 
-    @staticmethod
-    async def _wait_upstream_hook_tasks(tasks: list[asyncio.Task[None]]) -> None:
-        if not tasks:
-            return
-        results = await asyncio.gather(*tasks, return_exceptions=True)
-        for item in results:
-            if isinstance(item, BaseException):
-                raise item
+
 
     async def _resolve_nested(
         self,

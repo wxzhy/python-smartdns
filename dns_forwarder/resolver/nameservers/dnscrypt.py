@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-import asyncio
+import anyio
 import ipaddress
 import socket
 import struct
@@ -180,6 +180,7 @@ class DNSCryptResolver:
 
                 if len(data) <= 52:
                     continue
+
                 pk, client_magic, serial, start, expire, _ = struct.unpack(
                     f"!32s8sIII{len(data) - 52}s",
                     data,
@@ -428,7 +429,7 @@ class DNSCryptNameserver(dns.nameserver.Nameserver):
         ignore_trailing: bool = False,
     ) -> dns.message.Message:
         _ = backend
-        return await asyncio.to_thread(
+        return await anyio.to_thread.run_sync(
             self._resolver.query,
             request,
             timeout,

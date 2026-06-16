@@ -1,7 +1,8 @@
 from __future__ import annotations
 
-import asyncio
 import time
+from typing import Any
+import anyio
 
 import dns.message
 import dns.opcode
@@ -16,8 +17,8 @@ from dns_forwarder.pipeline import build_answer_from_response, clone_response_fo
 class FrontCache:
     def __init__(self, max_size: int) -> None:
         self._cache = dns.resolver.LRUCache(max_size=max_size)
-        self._pending: dict[dns.resolver.CacheKey, asyncio.Future[bytes | None]] = {}
-        self._pending_lock = asyncio.Lock()
+        self._pending: dict[dns.resolver.CacheKey, tuple[anyio.Event, dict[str, Any]]] = {}
+        self._pending_lock = anyio.Lock()
 
     def get_response(self, request: dns.message.Message) -> dns.message.Message | None:
         key = self._make_key_from_request(request)
@@ -48,7 +49,7 @@ class FrontCache:
     async def acquire_pending(
         self,
         request: dns.message.Message,
-    ) -> tuple[dns.resolver.CacheKey | None, asyncio.Future[bytes | None] | None]:
+    ) -> tuple[dns.resolver.CacheKey | None, tuple[anyio.Event, dict[str, Any]] | None]:
         key = self._make_key_from_request(request)
         if key is None:
             return None, None
@@ -58,8 +59,10 @@ class FrontCache:
             if pending is not None:
                 return key, pending
 
-            future: asyncio.Future[bytes | None] = asyncio.get_running_loop().create_future()
-            self._pending[key] = future
+            event = anyio.Event()
+            holder = {"wire": None}
+            pending = (event, holder)
+            self._pending[key] = pending
             return key, None
 
     async def complete_pending(
@@ -74,17 +77,22 @@ class FrontCache:
 
         async with self._pending_lock:
             pending = self._pending.pop(key, None)
-        if pending is None or pending.done():
+        if pending is None:
             return
 
-        pending.set_result(None if cache_written or response is None else response.to_wire())
+        event, holder = pending
+        holder["wire"] = None if cache_written or response is None else response.to_wire()
+        event.set()
 
     @staticmethod
     async def wait_for_pending_response(
-        pending: asyncio.Future[bytes | None],
+        pending: tuple[anyio.Event, dict[str, Any]],
         request: dns.message.Message,
     ) -> dns.message.Message | None:
-        wire = await asyncio.shield(pending)
+        event, holder = pending
+        with anyio.CancelScope(shield=True):
+            await event.wait()
+        wire = holder["wire"]
         if wire is None:
             return None
         return clone_response_for_request(dns.message.from_wire(wire), request)

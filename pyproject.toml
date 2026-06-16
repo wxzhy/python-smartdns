@@ -7,6 +7,7 @@ requires-python = ">=3.14"
 dependencies = [
     "aiohappyeyeballs>=2.6.1",
     "aiodns>=4.0.0",
+    "anyio>=4.0.0",
     "async-lru>=2.0.5",
     "dnspython[doh,doq,idna]>=2.8.0",
     "fastapi[all]>=0.135.2",

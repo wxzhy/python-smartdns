@@ -1,10 +1,10 @@
 from __future__ import annotations
 
-import asyncio
 import socket
 from collections.abc import Awaitable
 from ipaddress import ip_address
 from typing import Any
+import anyio
 
 import aiohappyeyeballs
 import dns.asyncbackend
@@ -16,7 +16,8 @@ FrozenHosts = tuple[tuple[str, tuple[str, ...]], ...]
 async def _wait_for(awaitable: Awaitable[Any], timeout: float | None) -> Any:
     if timeout is None:
         return await awaitable
-    return await asyncio.wait_for(awaitable, timeout)
+    with anyio.fail_after(timeout):
+        return await awaitable
 
 
 class TrickyStreamSocket(dns.asyncbackend.StreamSocket):
@@ -57,16 +58,30 @@ class TrickyStreamSocket(dns.asyncbackend.StreamSocket):
 
     async def sendall(self, what: bytes, timeout: float | None) -> None:
         sock = self._require_socket()
-        loop = asyncio.get_running_loop()
         if self.use_tricks and len(what) > 32:
             data = what[:16] + b"\x00"
             sock.sendall(data, socket.MSG_OOB)
             what = what[16:]
-        await _wait_for(loop.sock_sendall(sock, what), timeout)
+
+        async def _send() -> None:
+            total_sent = 0
+            while total_sent < len(what):
+                await anyio.wait_socket_writable(sock)
+                sent = sock.send(what[total_sent:])
+                if sent == 0:
+                    raise OSError("Socket connection broken")
+                total_sent += sent
+
+        await _wait_for(_send(), timeout)
 
     async def recv(self, size: int, timeout: float | None) -> bytes:
-        loop = asyncio.get_running_loop()
-        return await _wait_for(loop.sock_recv(self._require_socket(), size), timeout)
+        sock = self._require_socket()
+
+        async def _recv() -> bytes:
+            await anyio.wait_socket_readable(sock)
+            return sock.recv(size)
+
+        return await _wait_for(_recv(), timeout)
 
     async def close(self) -> None:
         if self.closed:
@@ -106,10 +121,10 @@ async def _resolve_addr_infos(
     if addresses is not None:
         return [_addr_info_from_address(host, port, address) for address in addresses]
 
-    loop = asyncio.get_running_loop()
-    return await loop.getaddrinfo(
+    return await anyio.getaddrinfo(
         host,
         port,
+        family=socket.AF_UNSPEC,
         type=socket.SOCK_STREAM,
         proto=socket.IPPROTO_TCP,
     )

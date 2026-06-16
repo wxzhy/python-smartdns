@@ -1,12 +1,12 @@
 from __future__ import annotations
 
-import asyncio
 import queue
 import uuid
 from dataclasses import dataclass
 from multiprocessing import shared_memory
 from pathlib import Path
 from typing import Any
+import anyio
 
 import dns.message
 import dns.rdataclass
@@ -99,7 +99,7 @@ class WorkerNestedResolver:
         self._generation = generation
         self._result_queue = result_queue
         self._response_timeout = response_timeout
-        self._pending: dict[str, tuple[asyncio.Future[bytes], dns.message.Message]] = {}
+        self._pending: dict[str, tuple[anyio.Event, dict[str, Any], dns.message.Message]] = {}
 
     async def resolve(
         self,
@@ -117,8 +117,9 @@ class WorkerNestedResolver:
 
         resolve_id = uuid.uuid4().hex
         nested_request = dns.message.make_query(qname, qtype, rdclass=dns.rdataclass.IN)
-        future: asyncio.Future[bytes] = asyncio.get_running_loop().create_future()
-        self._pending[resolve_id] = future, nested_request
+        event = anyio.Event()
+        holder = {"wire": None, "error": None}
+        self._pending[resolve_id] = (event, holder, nested_request)
         request_message = {
             "type": MSG_RESOLVE_REQUEST,
             "worker_id": self._worker_id,
@@ -131,30 +132,39 @@ class WorkerNestedResolver:
             "nested_resolve_chain": context._nested_resolve_chain + (signature,),
         }
         try:
-            await asyncio.to_thread(self._result_queue.put, request_message)
-            wire = await asyncio.wait_for(future, timeout=self._response_timeout)
+            await anyio.to_thread.run_sync(self._result_queue.put, request_message)
+            with anyio.fail_after(self._response_timeout):
+                await event.wait()
+        except TimeoutError as exc:
+            raise TimeoutError("nested resolve timeout") from exc
         finally:
             self._pending.pop(resolve_id, None)
+
+        if holder["error"]:
+            raise holder["error"]
+        wire = holder["wire"]
+        if wire is None:
+            raise RuntimeError("内部解析未返回响应")
         return build_answer_from_response(nested_request, dns.message.from_wire(wire))
 
     def receive_response(self, message: dict[str, Any]) -> None:
         pending = self._pending.get(message["resolve_id"])
         if pending is None:
             return
-        future, _ = pending
-        if future.done():
+        event, holder, _ = pending
+        if event.is_set():
             return
 
         error_type = message.get("error_type")
         if error_type:
-            future.set_exception(deserialize_resolve_error(error_type, message.get("error", "")))
-            return
-
-        wire = message.get("wire")
-        if isinstance(wire, bytes):
-            future.set_result(wire)
+            holder["error"] = deserialize_resolve_error(error_type, message.get("error", ""))
         else:
-            future.set_exception(RuntimeError("内部解析未返回响应"))
+            wire = message.get("wire")
+            if isinstance(wire, bytes):
+                holder["wire"] = wire
+            else:
+                holder["error"] = RuntimeError("内部解析未返回响应")
+        event.set()
 
 
 class WorkerRuntime:
@@ -182,7 +192,6 @@ class WorkerRuntime:
         self._query_log_enabled = query_log_enabled
         self._query_log_max_entries = query_log_max_entries
         self._response_timeout = response_timeout
-        self._tasks: set[asyncio.Task[None]] = set()
         self._nested_resolver = WorkerNestedResolver(
             worker_id=worker_id,
             generation=generation,
@@ -205,23 +214,19 @@ class WorkerRuntime:
             }
         )
         try:
-            while True:
-                message = await asyncio.to_thread(self._request_queue.get)
-                message_type = message.get("type")
-                if message_type == MSG_STOP:
-                    break
-                if message_type == MSG_RESOLVE_RESPONSE:
-                    self._nested_resolver.receive_response(message)
-                    continue
-                if message_type == MSG_QUERY:
-                    task = asyncio.create_task(self._handle_query(manager, message))
-                    self._tasks.add(task)
-                    task.add_done_callback(self._tasks.discard)
+            async with anyio.create_task_group() as tg:
+                while True:
+                    message = await anyio.to_thread.run_sync(self._request_queue.get)
+                    message_type = message.get("type")
+                    if message_type == MSG_STOP:
+                        tg.cancel_scope.cancel()
+                        break
+                    if message_type == MSG_RESOLVE_RESPONSE:
+                        self._nested_resolver.receive_response(message)
+                        continue
+                    if message_type == MSG_QUERY:
+                        tg.start_soon(self._handle_query, manager, message)
         finally:
-            for task in self._tasks:
-                task.cancel()
-            if self._tasks:
-                await asyncio.gather(*self._tasks, return_exceptions=True)
             await manager.stop()
 
     def _build_shared_contexts(self) -> dict[str, Any]:
@@ -271,7 +276,7 @@ class WorkerRuntime:
                 "wire": None,
                 "error": f"{type(exc).__name__}: {exc}",
             }
-        await asyncio.to_thread(self._result_queue.put, response_message)
+        await anyio.to_thread.run_sync(self._result_queue.put, response_message)
 
 
 def worker_process_initializer(
@@ -319,4 +324,4 @@ def worker_entry(worker_id: int, generation: int) -> None:
         query_log_max_entries=state.query_log_max_entries,
         response_timeout=state.response_timeout,
     )
-    asyncio.run(runtime.run())
+    anyio.run(runtime.run)

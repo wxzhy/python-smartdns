@@ -50,7 +50,7 @@ class FakeAiohttpResponse:
     def __init__(self, content: bytes) -> None:
         self._content = content
 
-    async def __aenter__(self) -> "FakeAiohttpResponse":
+    async def __aenter__(self) -> FakeAiohttpResponse:
         return self
 
     async def __aexit__(self, exc_type, exc, traceback) -> None:
@@ -126,9 +126,7 @@ def test_aiodns_dns_resolver_query_dns_delegates_non_https() -> None:
 async def test_aiodns_get_resolver_configures_pycares_channel() -> None:
     aiodns_nameserver._RESOLVERS.clear()
     try:
-        with patch(
-            "dns_forwarder.resolver.nameservers.aiodns.AiodnsDNSResolver"
-        ) as resolver_cls:
+        with patch("dns_forwarder.resolver.nameservers.aiodns.AiodnsDNSResolver") as resolver_cls:
             result = aiodns_nameserver._get_resolver(
                 ("1.1.1.1", "1.0.0.1"),
                 5301,
@@ -372,19 +370,21 @@ async def test_do53_custom_async_query_uses_tricky_tcp_socket() -> None:
     backend = object()
     nameserver = Do53CustomNameserver("127.0.0.1", 53)
 
-    with patch(
-        "dns_forwarder.resolver.nameservers.do53_custom.TrickyStreamSocket.connect",
-        AsyncMock(return_value=None),
-    ) as connect_mock:
-        with patch("dns.asyncquery.tcp", AsyncMock(return_value=response)) as tcp_mock:
-            result = await nameserver.async_query(
-                request,
-                timeout=1.0,
-                source=None,
-                source_port=0,
-                max_size=True,
-                backend=backend,
-            )
+    with (
+        patch(
+            "dns_forwarder.resolver.nameservers.do53_custom.TrickyStreamSocket.connect",
+            AsyncMock(return_value=None),
+        ) as connect_mock,
+        patch("dns.asyncquery.tcp", AsyncMock(return_value=response)) as tcp_mock,
+    ):
+        result = await nameserver.async_query(
+            request,
+            timeout=1.0,
+            source=None,
+            source_port=0,
+            max_size=True,
+            backend=backend,
+        )
 
     assert result is response
     connect_mock.assert_awaited_once()
@@ -425,19 +425,21 @@ async def test_do53_custom_async_query_keeps_custom_tcp_without_tricks() -> None
         hosts={"dns.example": ["192.0.2.10"]},
     )
 
-    with patch(
-        "dns_forwarder.resolver.nameservers.do53_custom.TrickyStreamSocket.connect",
-        AsyncMock(return_value=None),
+    with (
+        patch(
+            "dns_forwarder.resolver.nameservers.do53_custom.TrickyStreamSocket.connect",
+            AsyncMock(return_value=None),
+        ),
+        patch("dns.asyncquery.tcp", AsyncMock(return_value=response)) as tcp_mock,
     ):
-        with patch("dns.asyncquery.tcp", AsyncMock(return_value=response)) as tcp_mock:
-            result = await nameserver.async_query(
-                request,
-                timeout=1.0,
-                source=None,
-                source_port=0,
-                max_size=True,
-                backend=object(),
-            )
+        result = await nameserver.async_query(
+            request,
+            timeout=1.0,
+            source=None,
+            source_port=0,
+            max_size=True,
+            backend=object(),
+        )
 
     assert result is response
     tcp_mock.assert_awaited_once()
@@ -823,9 +825,7 @@ async def test_doh_curl_cffi_get_query_uses_request_options_and_host_header() ->
         )
 
     assert result.question == request.question
-    expected_resolve_entries = (
-        "cloudflare-dns.com:443:1.1.1.1,1.0.0.1,[2606:4700:4700::1111]",
-    )
+    expected_resolve_entries = ("cloudflare-dns.com:443:1.1.1.1,1.0.0.1,[2606:4700:4700::1111]",)
     assert get_session.call_args.args == (expected_resolve_entries,)
     fake_session.request.assert_awaited_once()
     args = fake_session.request.await_args.args
@@ -868,9 +868,7 @@ async def test_doh_aiohttp_shared_session_uses_bootstrap_resolver() -> None:
 
 
 async def test_doh_aiohttp_hosts_resolver_returns_static_hosts() -> None:
-    resolver = doh_aiohttp.HostsAsyncResolver(
-        (("dns.example", ("192.0.2.10", "2001:db8::10")),)
-    )
+    resolver = doh_aiohttp.HostsAsyncResolver((("dns.example", ("192.0.2.10", "2001:db8::10")),))
     try:
         result = await resolver.resolve("DNS.EXAMPLE.", 443, socket.AF_UNSPEC)
     finally:

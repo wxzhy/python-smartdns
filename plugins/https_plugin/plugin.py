@@ -45,7 +45,8 @@ class HttpsPlugin(Plugin):
         if changed_records:
             question = context.request.question[0]
             logger.debug(
-                "HTTPS 记录已清洗 request_id=%s qname=%s changed_records=%s removed_h3_ids=%s removed_hint_params=%s",
+                "HTTPS 记录已清洗 request_id=%s qname=%s changed_records=%s "
+                "removed_h3_ids=%s removed_hint_params=%s",
                 context.request_id,
                 question.name.to_text().rstrip("."),
                 changed_records,

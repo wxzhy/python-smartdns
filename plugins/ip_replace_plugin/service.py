@@ -79,7 +79,8 @@ class IpReplaceService:
         )
         sync_answer_rrset_to_response(answer)
         logger.debug(
-            "IP 替换完成 stage=%s qname=%s qtype=%s rule=%s original_count=%s replaced_count=%s tags=%s",
+            "IP 替换完成 stage=%s qname=%s qtype=%s rule=%s "
+            "original_count=%s replaced_count=%s tags=%s",
             stage,
             answer.qname.to_text().rstrip("."),
             dns.rdatatype.to_text(answer.rdtype),

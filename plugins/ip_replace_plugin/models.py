@@ -32,7 +32,7 @@ class IpReplaceRuleConfig(StrictPluginModel):
         return _normalize_networks(value, version=6)
 
     @model_validator(mode="after")
-    def validate_targets(self) -> "IpReplaceRuleConfig":
+    def validate_targets(self) -> IpReplaceRuleConfig:
         if not self.ipv4_targets and not self.ipv6_targets:
             raise ValueError("替换规则至少需要一个 IPv4 或 IPv6 目标 CIDR")
         return self

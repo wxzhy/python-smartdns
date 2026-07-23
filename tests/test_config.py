@@ -272,9 +272,7 @@ def test_parse_config_text_normalizes_runtime_http_client_options() -> None:
     config = parse_config_dict(config_dict)
 
     assert config.runtime.bootstrap_resolver == ["1.1.1.1", "8.8.8.8"]
-    assert config.runtime.hosts == {
-        "cloudflare-dns.com": ["1.1.1.1", "2606:4700:4700::1111"]
-    }
+    assert config.runtime.hosts == {"cloudflare-dns.com": ["1.1.1.1", "2606:4700:4700::1111"]}
     assert config.runtime.fingerprint == "chrome"
 
 

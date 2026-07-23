@@ -22,14 +22,16 @@ logger = get_logger("dispatcher.wait_all")
 
 
 class WaitAllDispatchStrategy(DispatchStrategy):
+    """等待全部上游完成，选取最快成功结果；全部失败则返回最后一个失败结果。"""
+
     strategy_type = DispatchStrategyType.WAIT_ALL
 
     async def dispatch(
         self,
         context: RequestContext,
         group: UpstreamGroupConfig,
-        resolver_manager: "ResolverManager",
-        registry: "DispatcherRegistry",
+        resolver_manager: ResolverManager,
+        registry: DispatcherRegistry,
         on_result: Callable[[UpstreamResult], None] | None = None,
     ) -> UpstreamResult:
         tasks = [
@@ -44,10 +46,8 @@ class WaitAllDispatchStrategy(DispatchStrategy):
             )
             for target_name in group.upstreams
         ]
-        results: list[UpstreamResult] = []
         try:
-            for task in asyncio.as_completed(tasks):
-                results.append(await task)
+            results = [await task for task in asyncio.as_completed(tasks)]
         finally:
             await self._cancel_pending_tasks(tasks)
 
@@ -56,7 +56,8 @@ class WaitAllDispatchStrategy(DispatchStrategy):
             fastest = min(successes, key=lambda item: item.duration_ms)
             fastest.collected_results = tuple(results)
             logger.debug(
-                "等待全部调度完成 request_id=%s group=%s fastest_upstream=%s duration_ms=%.2f success_count=%s tags=%s",
+                "等待全部调度完成 request_id=%s group=%s fastest_upstream=%s "
+                "duration_ms=%.2f success_count=%s tags=%s",
                 context.request_id,
                 group.name,
                 fastest.upstream_name,

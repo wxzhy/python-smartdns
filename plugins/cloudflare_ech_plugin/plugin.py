@@ -36,7 +36,9 @@ class CloudflareEchPlugin(Plugin):
     response_order = 700
     ui_meta = {
         "title": "Cloudflare ECH Plugin",
-        "description": "按 tag 为 HTTPS 响应补充 Cloudflare ECH 参数，并在必要时通过 subquery 判定目标域名。",
+        "description": (
+            "按 tag 为 HTTPS 响应补充 Cloudflare ECH 参数，并在必要时通过 subquery 判定目标域名。"
+        ),
     }
 
     def __init__(self) -> None:
@@ -47,7 +49,6 @@ class CloudflareEchPlugin(Plugin):
     async def setup(self, registry: PluginRegistry) -> None:
         if not self.runtime_config.match_tags:
             raise ValueError("cloudflare_ech_plugin 至少需要一个 match_tags")
-        return None
 
     async def on_response(self, context: RequestContext) -> None:
         if context.request.question[0].rdtype != dns.rdatatype.HTTPS:

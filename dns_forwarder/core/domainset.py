@@ -41,10 +41,7 @@ class DomainSet:
             for domain in domains:
                 reversed_domain = reverse_domain(domain)
                 domain_to_tags[reversed_domain].add(tag)
-        return {
-            domain: frozenset(tags)
-            for domain, tags in sorted(domain_to_tags.items())
-        }
+        return {domain: frozenset(tags) for domain, tags in sorted(domain_to_tags.items())}
 
 
 def _load_tag_files(

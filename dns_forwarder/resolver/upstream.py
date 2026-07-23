@@ -20,6 +20,8 @@ logger = get_logger("resolver.upstream")
 
 
 class UpstreamResolver(BaseUpstreamResolver):
+    """基于 dnspython 的上游解析器，按配置轮询 nameserver 并校验响应。"""
+
     def __init__(
         self,
         config: UpstreamConfig,
@@ -57,7 +59,8 @@ class UpstreamResolver(BaseUpstreamResolver):
         question = context.request.question[0]
         started = time.perf_counter()
         logger.debug(
-            "发起上游查询 request_id=%s upstream=%s qname=%s qtype=%s tcp=%s nameserver_count=%s rotate=%s tags=%s",
+            "发起上游查询 request_id=%s upstream=%s qname=%s qtype=%s tcp=%s "
+            "nameserver_count=%s rotate=%s tags=%s",
             context.request_id,
             self.config.name,
             question.name.to_text().rstrip("."),
@@ -128,14 +131,17 @@ class UpstreamResolver(BaseUpstreamResolver):
     def _validate_answer(answer: dns.resolver.Answer, question) -> None:
         if answer.rdclass != dns.rdataclass.IN:
             raise ValueError(
-                f"上游响应 class 非 IN: qname={answer.qname.to_text()} rdclass={dns.rdataclass.to_text(answer.rdclass)}"
+                "上游响应 class 非 IN: qname="
+                f"{answer.qname.to_text()} rdclass={dns.rdataclass.to_text(answer.rdclass)}"
             )
         if answer.qname != question.name:
             raise ValueError(
-                f"上游响应 qname 不匹配: expected={question.name.to_text()} actual={answer.qname.to_text()}"
+                "上游响应 qname 不匹配: expected="
+                f"{question.name.to_text()} actual={answer.qname.to_text()}"
             )
         if answer.rdtype != question.rdtype:
             raise ValueError(
                 "上游响应 rdtype 不匹配: "
-                f"expected={dns.rdatatype.to_text(question.rdtype)} actual={dns.rdatatype.to_text(answer.rdtype)}"
+                f"expected={dns.rdatatype.to_text(question.rdtype)} "
+                f"actual={dns.rdatatype.to_text(answer.rdtype)}"
             )

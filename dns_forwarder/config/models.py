@@ -249,7 +249,7 @@ class DoHHttpxNameserverConfig(BaseTLSHTTPClientDoHNameserverConfig):
     protocol: Literal[NameserverProtocol.DOH_HTTPX] = NameserverProtocol.DOH_HTTPX
 
     @model_validator(mode="after")
-    def validate_http_version(self) -> "DoHHttpxNameserverConfig":
+    def validate_http_version(self) -> DoHHttpxNameserverConfig:
         if self.http_version in {HTTPVersionType.H1, HTTPVersionType.H3}:
             raise ValueError("httpx 仅支持 default / h2")
         if self.verify is not True:
@@ -261,7 +261,7 @@ class DoHAiohttpNameserverConfig(BaseTLSHTTPClientDoHNameserverConfig):
     protocol: Literal[NameserverProtocol.DOH_AIOHTTP] = NameserverProtocol.DOH_AIOHTTP
 
     @model_validator(mode="after")
-    def validate_http_version(self) -> "DoHAiohttpNameserverConfig":
+    def validate_http_version(self) -> DoHAiohttpNameserverConfig:
         if self.http_version in {HTTPVersionType.H2, HTTPVersionType.H3}:
             raise ValueError("aiohttp 仅支持 default / h1")
         return self
@@ -372,7 +372,7 @@ class RuleActionConfig(StrictConfigModel):
     dispatcher: DispatchStrategyType | None = None
 
     @model_validator(mode="after")
-    def validate_action_target(self) -> "RuleActionConfig":
+    def validate_action_target(self) -> RuleActionConfig:
         if self.upstream_group is None and self.dispatcher is None:
             raise ValueError("rule action 至少需要 upstream_group 或 dispatcher")
         return self
@@ -441,7 +441,7 @@ class AppConfig(BaseSettings):
         )
 
     @model_validator(mode="after")
-    def validate_references(self) -> "AppConfig":
+    def validate_references(self) -> AppConfig:
         self._validate_unique_names()
         nameserver_names = {item.name for item in self.nameservers}
         upstream_names = {item.name for item in self.upstreams}
@@ -529,7 +529,7 @@ class AppConfig(BaseSettings):
         def dfs(group_name: str, path: list[str]) -> None:
             if group_name in visiting:
                 cycle_start = path.index(group_name)
-                cycle = " -> ".join(path[cycle_start:] + [group_name])
+                cycle = " -> ".join([*path[cycle_start:], group_name])
                 raise ValueError(f"group 引用存在循环: {cycle}")
             if group_name in visited:
                 return

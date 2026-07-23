@@ -42,7 +42,7 @@ class BlockPluginRuleConfig(StrictPluginModel):
         return _normalize_addresses(value, version=6)
 
     @model_validator(mode="after")
-    def validate_addresses(self) -> "BlockPluginRuleConfig":
+    def validate_addresses(self) -> BlockPluginRuleConfig:
         if not self.ipv4_addresses and not self.ipv6_addresses and not self.block_other:
             raise ValueError("静态应答规则至少需要一个 IPv4、IPv6 地址或启用 block_other")
         return self
@@ -99,7 +99,8 @@ class BlockPlugin(Plugin):
         context.final_answer = build_answer_from_response(context.request, response)
         context.stop_processing = True
         logger.debug(
-            "静态应答已应用 request_id=%s phase=%s qname=%s qtype=%s tags=%s address_count=%s ttl=%s block_other=%s",
+            "静态应答已应用 request_id=%s phase=%s qname=%s qtype=%s tags=%s "
+            "address_count=%s ttl=%s block_other=%s",
             context.request_id,
             phase,
             question.name.to_text().rstrip("."),

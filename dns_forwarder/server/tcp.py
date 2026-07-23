@@ -16,7 +16,7 @@ logger = get_logger("server.tcp")
 
 
 class TcpDnsServer:
-    def __init__(self, listener: ListenerConfig, runtime_manager: "RuntimeManager") -> None:
+    def __init__(self, listener: ListenerConfig, runtime_manager: RuntimeManager) -> None:
         self.listener = listener
         self.runtime_manager = runtime_manager
         self.server: asyncio.AbstractServer | None = None

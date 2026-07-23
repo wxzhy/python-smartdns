@@ -8,8 +8,8 @@ dependencies = [
     "aiohappyeyeballs>=2.6.1",
     "aiodns>=4.0.0",
     "async-lru>=2.0.5",
-    "dnspython[doh,doq,idna]>=2.8.0",
-    "fastapi[all]>=0.135.2",
+    "dnspython[doh,idna]>=2.8.0",
+    "fastapi>=0.135.2",
     "httpx>=0.28.1",
     "icmplib>=3.0.4",
     "marisa-trie>=1.4.0",
@@ -21,14 +21,20 @@ dependencies = [
     "pynacl>=1.6.2",
     "aiohttp[speedups]>=3.13.5",
     "curl-cffi>=0.15.0",
-    "niquests[full]>=3.18.7",
+    "niquests[utls,http3]>=3.18.7",
+    "httptools>=0.8.0",
+    "loguru>=0.7.3",
+    "jinja2>=3.1.6",
+    "python-multipart>=0.0.20",
 ]
 
 [dependency-groups]
 dev = [
+    "ipykernel>=7.3.0",
     "pytest>=8.4.1",
     "pytest-asyncio>=1.2.0",
     "ruff>=0.14.0",
+    "ty>=0.0.58",
 ]
 
 [tool.ruff]
@@ -37,7 +43,60 @@ line-length = 100
 exclude = ["tags"]
 
 [tool.ruff.lint]
-select = ["E4", "E7", "E9", "F", "I"]
+select = [
+    "E",
+    "F",
+    "W",
+    "I",
+    "N",
+    "B",
+    "UP",
+    "SIM",
+    "C4",
+    "ASYNC",
+    "RUF",
+    "PT",
+    "TID",
+    "PTH",
+    "PERF",
+    "FURB",
+    "RET",
+    "TC",
+    "PL",
+    "PIE",
+]
+
+# 以下规则在本项目属于误报或风格偏好，关闭以减少噪音：
+# - PLR2004：测试与业务代码中的字面量比较可读性更好；
+# - PLR0911/0912/0913/0915：复杂度限制对既有结构改动过大，非缺陷；
+# - TC001/002/003：typing-only 导入属于可选优化，批量迁移噪音大；
+# - RUF001/002/003：中文字符（标点）被误判为歧义 unicode；
+# - PLC0415：部分模块刻意延迟导入以避免循环依赖/惰性初始化；
+# - PLW0603：单例式 global 用于全局状态管理；
+# - N811：按语义命名的导入更清晰；
+# - RUF012：插件类的 ui_meta 等只读类属性用字面量 dict 属约定写法；
+# - ASYNC109：async 函数内用 asyncio.wait_for 是合理用法。
+# - TC001/002/003：typing-only 导入属于可选优化，批量迁移噪音大。
+ignore = [
+    "PLR2004",
+    "PLR0911",
+    "PLR0912",
+    "PLR0913",
+    "PLR0915",
+    "PLC0415",
+    "PLW0603",
+    "N811",
+    "RUF012",
+    "RUF001",
+    "RUF002",
+    "RUF003",
+    "ASYNC109",
+    "TC001",
+    "TC002",
+    "TC003",
+]
 
 [tool.ruff.lint.per-file-ignores]
-"tests/conftest.py" = ["E402"]
+# 测试中允许较宽松的超时/断言写法；conftest 需先调整 sys.path 再导入。
+"tests/**/*.py" = ["PT011", "S101", "E402", "E501"]
+

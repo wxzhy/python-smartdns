@@ -71,7 +71,7 @@ def _get_shared_session(bootstrap_resolver: tuple[str, ...], hosts: FrozenHosts)
         _SHARED_HOSTS = hosts
         return _SHARED_SESSION
 
-    if _SHARED_BOOTSTRAP_RESOLVER != bootstrap_resolver or _SHARED_HOSTS != hosts:
+    if bootstrap_resolver != _SHARED_BOOTSTRAP_RESOLVER or hosts != _SHARED_HOSTS:
         raise RuntimeError("aiohttp bootstrap_resolver/hosts changed while session is active")
     return _SHARED_SESSION
 

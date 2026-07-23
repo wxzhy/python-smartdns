@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import asyncio
-from typing import Awaitable, Callable
+from collections.abc import Awaitable, Callable
 
 import dns.message
 import dns.opcode
@@ -801,7 +801,9 @@ async def test_pipeline_wait_all_calls_on_upstream_response_for_each_collected_r
     assert plugin_manager.last_context.upstream_results[0].upstream_name == "upstream-b"
 
 
-async def test_pipeline_wait_all_starts_later_upstream_hooks_without_waiting_for_earlier_hook() -> None:
+async def test_pipeline_wait_all_starts_later_upstream_hooks_without_waiting_for_earlier_hook() -> (
+    None
+):
     config = AppConfig.model_validate(
         {
             "runtime": {

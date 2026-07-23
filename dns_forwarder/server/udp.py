@@ -16,7 +16,7 @@ logger = get_logger("server.udp")
 
 
 class _DatagramHandler(asyncio.DatagramProtocol):
-    def __init__(self, server: "UdpDnsServer") -> None:
+    def __init__(self, server: UdpDnsServer) -> None:
         self.server = server
 
     def connection_made(self, transport: asyncio.BaseTransport) -> None:
@@ -29,11 +29,12 @@ class _DatagramHandler(asyncio.DatagramProtocol):
             addr,
             len(data),
         )
-        asyncio.create_task(self.server.handle_datagram(data, addr))
+        # UDP 数据报处理以 fire-and-forget 任务执行，无需持有 task 引用。
+        asyncio.create_task(self.server.handle_datagram(data, addr))  # noqa: RUF006
 
 
 class UdpDnsServer:
-    def __init__(self, listener: ListenerConfig, runtime_manager: "RuntimeManager") -> None:
+    def __init__(self, listener: ListenerConfig, runtime_manager: RuntimeManager) -> None:
         self.listener = listener
         self.runtime_manager = runtime_manager
         self.transport: asyncio.BaseTransport | None = None

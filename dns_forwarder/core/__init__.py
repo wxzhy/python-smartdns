@@ -4,8 +4,8 @@ from .runtime import RuntimeManager, main
 
 __all__ = [
     "DOMAINSET_CONTEXT_KEY",
-    "DomainSet",
     "IPSET_CONTEXT_KEY",
+    "DomainSet",
     "IPSet",
     "RuntimeManager",
     "main",

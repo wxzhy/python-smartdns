@@ -48,7 +48,7 @@ class SpeedTestFallbackRuleConfig(BaseModel):
         return _normalize_addresses(value, version=6)
 
     @model_validator(mode="after")
-    def validate_addresses(self) -> "SpeedTestFallbackRuleConfig":
+    def validate_addresses(self) -> SpeedTestFallbackRuleConfig:
         if not self.ipv4_addresses and not self.ipv6_addresses:
             raise ValueError("fallback 规则至少需要一个 IPv4 或 IPv6 地址")
         return self
@@ -87,7 +87,10 @@ class SpeedTestPlugin(Plugin):
     response_order = 600
     ui_meta = {
         "title": "SpeedTest Plugin",
-        "description": "在 upstream_response 阶段对响应 IP 执行 ICMP/TCP(80/443) 并发测速，并写入 speedtest.context。",
+        "description": (
+            "在 upstream_response 阶段对响应 IP 执行 ICMP/TCP(80/443) 并发测速，"
+            "并写入 speedtest.context。"
+        ),
     }
 
     def __init__(self) -> None:
@@ -106,7 +109,8 @@ class SpeedTestPlugin(Plugin):
         registry.register_context(SPEEDTEST_SERVICE_KEY, self._service)
         registry.register_context_factory(SPEEDTEST_CONTEXT_KEY, SpeedTestContext)
         logger.debug(
-            "测速插件初始化完成 response_ip_limit=%s response_ttl=%s skip_tags=%s fallback_rule_count=%s",
+            "测速插件初始化完成 response_ip_limit=%s response_ttl=%s "
+            "skip_tags=%s fallback_rule_count=%s",
             self.runtime_config.response_ip_limit,
             self.runtime_config.response_ttl_seconds,
             self.runtime_config.skip_tags,
@@ -207,7 +211,8 @@ class SpeedTestPlugin(Plugin):
                 if sorted_ips != current_ips:
                     self._replace_answer_ips(answer, sorted_ips)
                     logger.debug(
-                        "测速结果已应用 request_id=%s qtype=%s current_ips=%s candidate_ips=%s selected_ips=%s",
+                        "测速结果已应用 request_id=%s qtype=%s current_ips=%s "
+                        "candidate_ips=%s selected_ips=%s",
                         context.request_id,
                         dns.rdatatype.to_text(answer.rdtype),
                         current_ips,
@@ -219,7 +224,8 @@ class SpeedTestPlugin(Plugin):
                 if fallback_ips:
                     self._replace_answer_ips(answer, fallback_ips)
                     logger.debug(
-                        "测速 fallback 已应用 request_id=%s qtype=%s request_tags=%s fallback_ips=%s",
+                        "测速 fallback 已应用 request_id=%s qtype=%s "
+                        "request_tags=%s fallback_ips=%s",
                         context.request_id,
                         dns.rdatatype.to_text(answer.rdtype),
                         format_tags(context.tags),
@@ -227,7 +233,8 @@ class SpeedTestPlugin(Plugin):
                     )
                 else:
                     logger.debug(
-                        "测速未得到有效结果且无可用 fallback request_id=%s qtype=%s request_tags=%s",
+                        "测速未得到有效结果且无可用 fallback request_id=%s "
+                        "qtype=%s request_tags=%s",
                         context.request_id,
                         dns.rdatatype.to_text(answer.rdtype),
                         format_tags(context.tags),

@@ -98,7 +98,8 @@ class TagPlugin(Plugin):
         if not added_tags and not cname_domains and not has_hints:
             return
         logger.debug(
-            "结果标签已更新 request_id=%s upstream=%s added_tags=%s cname_domains=%s hint_ip_count=%s has_hint=%s",
+            "结果标签已更新 request_id=%s upstream=%s added_tags=%s "
+            "cname_domains=%s hint_ip_count=%s has_hint=%s",
             context.request_id,
             result.upstream_name,
             format_tags(added_tags),

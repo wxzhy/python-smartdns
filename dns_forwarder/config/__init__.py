@@ -62,18 +62,18 @@ def build_config_json_schema(*args, **kwargs):
 
 
 __all__ = [
-    "AppConfig",
     "AiodnsNameserverConfig",
+    "AppConfig",
     "BaseNameserverConfig",
-    "DispatchStrategyType",
     "DNSCryptNameserverConfig",
-    "Do53NameserverConfig",
+    "DispatchStrategyType",
     "Do53CustomNameserverConfig",
+    "Do53NameserverConfig",
     "DoHAiohttpNameserverConfig",
     "DoHCurlCffiNameserverConfig",
-    "DoHNameserverConfig",
     "DoHCustomNameserverConfig",
     "DoHHttpxNameserverConfig",
+    "DoHNameserverConfig",
     "DoQNameserverConfig",
     "DoTNameserverConfig",
     "ECSConfig",

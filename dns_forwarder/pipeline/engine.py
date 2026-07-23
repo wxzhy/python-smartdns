@@ -74,7 +74,8 @@ class PipelineEngine:
                 format_tags(context.upstream_results[-1].tags) if context.upstream_results else "[]"
             )
             self._logger.debug(
-                "请求处理完成 request_id=%s listener=%s rcode=%s has_answer=%s rrset_size=%s request_tags=%s result_tags=%s",
+                "请求处理完成 request_id=%s listener=%s rcode=%s has_answer=%s "
+                "rrset_size=%s request_tags=%s result_tags=%s",
                 context.request_id,
                 context.listener_name,
                 context.final_response.rcode() if context.final_response is not None else "none",
@@ -128,7 +129,8 @@ class PipelineEngine:
         question = request.question[0]
         if question.rdclass != dns.rdataclass.IN:
             self._logger.warning(
-                "收到不支持的 DNS 请求 class request_id=%s listener=%s client=%r qclass=%s qname=%s",
+                "收到不支持的 DNS 请求 class request_id=%s listener=%s "
+                "client=%r qclass=%s qname=%s",
                 request.id,
                 listener_name,
                 clientaddr,
@@ -300,7 +302,7 @@ class PipelineEngine:
             listener_name=context.listener_name,
             extensions=context.extensions,
             answer_registry_refs=context.answer_registry_refs,
-            nested_resolve_chain=context._nested_resolve_chain + (signature,),
+            nested_resolve_chain=(*context._nested_resolve_chain, signature),
         )
         self._logger.debug(
             "发起内部解析 outer_request_id=%s request_id=%s qname=%s qtype=%s depth=%s",

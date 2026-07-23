@@ -23,7 +23,9 @@ class IpReplacePlugin(Plugin):
     response_order = 500
     ui_meta = {
         "title": "IP Replace Plugin",
-        "description": "按上游结果 tags 匹配规则，并用目标 IPv4/IPv6 CIDR 对正常 A/AAAA 响应做前缀替换。",
+        "description": (
+            "按上游结果 tags 匹配规则，并用目标 IPv4/IPv6 CIDR 对正常 A/AAAA 响应做前缀替换。"
+        ),
     }
 
     def __init__(self) -> None:

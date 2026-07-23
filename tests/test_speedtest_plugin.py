@@ -364,9 +364,7 @@ async def test_speedtest_plugin_logs_each_wait_all_upstream_response(
         await asyncio.sleep(0.02)
         request = context.request
         response = dns.message.make_response(request)
-        response.answer.append(
-            dns.rrset.from_text("example.test.", 60, "IN", "A", "203.0.113.10")
-        )
+        response.answer.append(dns.rrset.from_text("example.test.", 60, "IN", "A", "203.0.113.10"))
         return UpstreamResult(
             upstream_name="resolver-a",
             duration_ms=15.0,
@@ -377,9 +375,7 @@ async def test_speedtest_plugin_logs_each_wait_all_upstream_response(
         await asyncio.sleep(0.01)
         request = context.request
         response = dns.message.make_response(request)
-        response.answer.append(
-            dns.rrset.from_text("example.test.", 60, "IN", "A", "203.0.113.20")
-        )
+        response.answer.append(dns.rrset.from_text("example.test.", 60, "IN", "A", "203.0.113.20"))
         return UpstreamResult(
             upstream_name="resolver-b",
             duration_ms=5.0,
@@ -478,9 +474,7 @@ async def test_speedtest_plugin_measures_replaced_ips_after_response_ip_replace(
         listener_name="udp",
         extensions=manager.build_context_extensions(),
         final_answer=answer,
-        upstream_results=[
-            UpstreamResult(upstream_name="default", duration_ms=1.0, tags={"proxy"})
-        ],
+        upstream_results=[UpstreamResult(upstream_name="default", duration_ms=1.0, tags={"proxy"})],
     )
 
     await manager.on_response(context)
@@ -556,9 +550,7 @@ async def test_speedtest_plugin_limits_replaced_ipv4_targets_by_rtt() -> None:
 
     request = dns.message.make_query("example.test", "A")
     response = dns.message.make_response(request)
-    response.answer.append(
-        dns.rrset.from_text("example.test.", 60, "IN", "A", "198.51.100.20")
-    )
+    response.answer.append(dns.rrset.from_text("example.test.", 60, "IN", "A", "198.51.100.20"))
     answer = build_answer_from_response(request, response)
     context = RequestContext(
         request=request,
@@ -605,9 +597,7 @@ async def test_speedtest_plugin_limits_replaced_ipv6_targets_by_rtt() -> None:
 
     request = dns.message.make_query("example.test", "AAAA")
     response = dns.message.make_response(request)
-    response.answer.append(
-        dns.rrset.from_text("example.test.", 60, "IN", "AAAA", "2001:db8::20")
-    )
+    response.answer.append(dns.rrset.from_text("example.test.", 60, "IN", "AAAA", "2001:db8::20"))
     answer = build_answer_from_response(request, response)
     context = RequestContext(
         request=request,
@@ -633,7 +623,9 @@ async def test_speedtest_plugin_limits_replaced_ipv6_targets_by_rtt() -> None:
     assert speedtest_plugin._service.calls == ["fd10::1", "fd10::2", "fd10::3"]
 
 
-async def test_speedtest_plugin_on_response_prefers_replaced_ip_from_other_wait_all_result() -> None:
+async def test_speedtest_plugin_on_response_prefers_replaced_ip_from_other_wait_all_result() -> (
+    None
+):
     config = build_wait_all_config()
     speedtest_plugin = SpeedTestPlugin()
     speedtest_plugin.bind(
@@ -652,9 +644,7 @@ async def test_speedtest_plugin_on_response_prefers_replaced_ip_from_other_wait_
         await asyncio.sleep(0.01)
         request = context.request
         response = dns.message.make_response(request)
-        response.answer.append(
-            dns.rrset.from_text("example.test.", 60, "IN", "A", "203.0.113.10")
-        )
+        response.answer.append(dns.rrset.from_text("example.test.", 60, "IN", "A", "203.0.113.10"))
         return UpstreamResult(
             upstream_name="resolver-a",
             duration_ms=5.0,
@@ -666,9 +656,7 @@ async def test_speedtest_plugin_on_response_prefers_replaced_ip_from_other_wait_
         await asyncio.sleep(0.02)
         request = context.request
         response = dns.message.make_response(request)
-        response.answer.append(
-            dns.rrset.from_text("example.test.", 60, "IN", "A", "198.51.100.20")
-        )
+        response.answer.append(dns.rrset.from_text("example.test.", 60, "IN", "A", "198.51.100.20"))
         return UpstreamResult(
             upstream_name="resolver-b",
             duration_ms=10.0,

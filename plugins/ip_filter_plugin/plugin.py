@@ -38,7 +38,6 @@ class IpFilterPlugin(Plugin):
     async def setup(self, registry: PluginRegistry) -> None:
         if not self.runtime_config.whitelist_tags and not self.runtime_config.blacklist_tags:
             raise ValueError("ip_filter_plugin 至少需要 whitelist_tags 或 blacklist_tags")
-        return None
 
     async def on_upstream_response(self, context: RequestContext, result: UpstreamResult) -> None:
         if context.request.question[0].rdtype not in ADDRESS_TYPES:
@@ -59,7 +58,8 @@ class IpFilterPlugin(Plugin):
         original_count, kept_count = self._filter_answer(answer, get_ipset(context))
         if original_count != kept_count:
             logger.debug(
-                "IP 过滤已应用 request_id=%s upstream=%s qtype=%s original_count=%s kept_count=%s request_tags=%s",
+                "IP 过滤已应用 request_id=%s upstream=%s qtype=%s "
+                "original_count=%s kept_count=%s request_tags=%s",
                 context.request_id,
                 result.upstream_name,
                 dns.rdatatype.to_text(answer.rdtype),
@@ -107,7 +107,7 @@ class IpFilterPlugin(Plugin):
             ip_tags, self.runtime_config.whitelist_tags
         ):
             return False
-        if self._has_any_tag(ip_tags, self.runtime_config.blacklist_tags):
+        if self._has_any_tag(ip_tags, self.runtime_config.blacklist_tags):  # noqa: SIM103
             return False
         return True
 

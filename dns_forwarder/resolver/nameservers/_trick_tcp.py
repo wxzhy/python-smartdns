@@ -89,7 +89,6 @@ class TrickyStreamSocket(dns.asyncbackend.StreamSocket):
 
     async def getpeercert(self, timeout: float | None) -> None:
         _ = timeout
-        return None
 
     def _require_socket(self) -> socket.socket:
         if self._socket is None:

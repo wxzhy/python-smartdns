@@ -26,17 +26,19 @@ def iter_static_plugin_module_names() -> tuple[str, ...]:
 def _load_all_static_plugin_modules() -> dict[str, ModuleType]:
     # Keep the built-in plugin list explicit, but delay the imports until runtime
     # so plugin_api can finish initializing before plugins import it back.
-    import plugins.block_plugin as block_plugin
-    import plugins.cache_plugin as cache_plugin
-    import plugins.cloudflare_ech_plugin as cloudflare_ech_plugin
-    import plugins.https_plugin as https_plugin
-    import plugins.ip_filter_plugin as ip_filter_plugin
-    import plugins.ip_replace_plugin as ip_replace_plugin
-    import plugins.query_log_plugin as query_log_plugin
-    import plugins.redirect_plugin as redirect_plugin
-    import plugins.sample_plugin as sample_plugin
-    import plugins.speedtest_plugin as speedtest_plugin
-    import plugins.tag_plugin as tag_plugin
+    from plugins import (
+        block_plugin,
+        cache_plugin,
+        cloudflare_ech_plugin,
+        https_plugin,
+        ip_filter_plugin,
+        ip_replace_plugin,
+        query_log_plugin,
+        redirect_plugin,
+        sample_plugin,
+        speedtest_plugin,
+        tag_plugin,
+    )
 
     return {
         "block_plugin": block_plugin,

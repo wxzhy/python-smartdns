@@ -31,7 +31,7 @@ class UpstreamResult:
     answer: dns.resolver.Answer | None = None
     error: Exception | None = None
     tags: set[str] = field(default_factory=set)
-    collected_results: tuple["UpstreamResult", ...] = field(
+    collected_results: tuple[UpstreamResult, ...] = field(
         default_factory=tuple, repr=False, compare=False
     )
 

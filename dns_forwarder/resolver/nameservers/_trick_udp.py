@@ -89,7 +89,7 @@ class TrickyDatagramSocket(dns.asyncbackend.DatagramSocket):
             data, addr = await self._protocol.recvfrom(timeout)
             if len(data) > 32 and data[10:12] == b"\x00\x01":
                 return data, addr
-        raise asyncio.TimeoutError("UDP recvfrom timeout")
+        raise TimeoutError("UDP recvfrom timeout")
 
     async def close(self) -> None:
         if self.closed:
@@ -113,4 +113,3 @@ class TrickyDatagramSocket(dns.asyncbackend.DatagramSocket):
 
     async def getpeercert(self, timeout: float | None) -> None:
         _ = timeout
-        return None

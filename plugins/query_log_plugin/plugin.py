@@ -38,7 +38,11 @@ class QueryLogPlugin(Plugin):
 
     async def setup(self, registry: PluginRegistry) -> None:
         existing = registry.context_registry.get(QUERY_LOG_STORE_KEY)
-        if existing is not None and existing.factory is None and isinstance(existing.value, QueryLogStore):
+        if (
+            existing is not None
+            and existing.factory is None
+            and isinstance(existing.value, QueryLogStore)
+        ):
             existing.value.resize(self.runtime_config.max_entries)
             self._store = existing.value
             return
@@ -58,8 +62,12 @@ class QueryLogPlugin(Plugin):
             listener=context.listener_name,
             rcode=dns.rcode.to_text(context.final_response.rcode()),
             result_summary=self._build_result_summary(context.final_answer, context.final_response),
-            upstream=context.upstream_results[-1].upstream_name if context.upstream_results else None,
-            duration_ms=context.upstream_results[-1].duration_ms if context.upstream_results else None,
+            upstream=context.upstream_results[-1].upstream_name
+            if context.upstream_results
+            else None,
+            duration_ms=context.upstream_results[-1].duration_ms
+            if context.upstream_results
+            else None,
         )
         entry = await self._store.append(payload)
         logger.debug(

@@ -28,8 +28,8 @@ class RaceDispatchStrategy(DispatchStrategy):
         self,
         context: RequestContext,
         group: UpstreamGroupConfig,
-        resolver_manager: "ResolverManager",
-        registry: "DispatcherRegistry",
+        resolver_manager: ResolverManager,
+        registry: DispatcherRegistry,
         on_result: Callable[[UpstreamResult], None] | None = None,
     ) -> UpstreamResult:
         tasks = [

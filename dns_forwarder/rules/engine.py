@@ -1,7 +1,7 @@
 from __future__ import annotations
 
+from collections.abc import Iterable
 from dataclasses import dataclass
-from typing import Iterable
 
 import dns.rdatatype
 
@@ -48,6 +48,6 @@ class RuleEngine:
             return False
         if match.match_tags and not any(tag in tags for tag in match.match_tags):
             return False
-        if match.qtypes and qtype not in match.qtypes:
+        if match.qtypes and qtype not in match.qtypes:  # noqa: SIM103
             return False
         return True

@@ -23,6 +23,11 @@ from .ipset import IPSET_CONTEXT_KEY, IPSet
 logger = get_logger("core.runtime")
 
 
+def _format_address(address: tuple[str, int] | None) -> str | None:
+    """将 ``(host, port)`` 形式的地址格式化为 ``host:port``，无地址时返回 None。"""
+    return f"{address[0]}:{address[1]}" if address else None
+
+
 @dataclass(slots=True)
 class RuntimeState:
     config: AppConfig
@@ -75,13 +80,15 @@ class RuntimeManager:
         async with self._lock:
             logger.info("开始 reload config=%s", self.config_path)
             new_state = await self._build_state()
-            if self._state is not None and self._services_started():
-                if self._service_signature(self._state.config) != self._service_signature(
-                    new_state.config
-                ):
-                    message = "listener 或 webui 地址变更需要重启进程"
-                    logger.error("reload 失败 config=%s error=%s", self.config_path, message)
-                    raise RuntimeError(message)
+            if (
+                self._state is not None
+                and self._services_started()
+                and self._service_signature(self._state.config)
+                != self._service_signature(new_state.config)
+            ):
+                message = "listener 或 webui 地址变更需要重启进程"
+                logger.error("reload 失败 config=%s error=%s", self.config_path, message)
+                raise RuntimeError(message)
             self._state = new_state
             logger.info("reload 完成 config=%s", self.config_path)
             return new_state
@@ -97,30 +104,29 @@ class RuntimeManager:
 
     def get_status(self) -> dict[str, Any]:
         state = self.get_state()
-        listeners: list[dict[str, Any]] = []
-        for service in self._listeners:
-            address = service.bound_address()
-            listeners.append(
+        # 优先返回已绑定监听器的实际地址；若服务尚未启动则回退到配置项。
+        listener_rows: list[dict[str, Any]] = [
+            {
+                "name": service.listener.name,
+                "protocol": service.listener.protocol.value,
+                "address": _format_address(service.bound_address()),
+            }
+            for service in self._listeners
+        ]
+        if not listener_rows:
+            listener_rows = [
                 {
-                    "name": service.listener.name,
-                    "protocol": service.listener.protocol.value,
-                    "address": f"{address[0]}:{address[1]}" if address else None,
+                    "name": listener.name,
+                    "protocol": listener.protocol.value,
+                    "address": None,
                 }
-            )
-        if not listeners:
-            for listener in state.config.listeners:
-                listeners.append(
-                    {
-                        "name": listener.name,
-                        "protocol": listener.protocol.value,
-                        "address": None,
-                    }
-                )
+                for listener in state.config.listeners
+            ]
         return {
             "title": "dns-forwarder",
             "config_path": str(self.config_path),
             "default_group": state.config.runtime.default_upstream_group,
-            "listeners": listeners,
+            "listeners": listener_rows,
             "upstreams": [item.name for item in state.config.upstreams],
             "groups": [item.name for item in state.config.groups],
             "rules": [item.name for item in state.config.rules],
@@ -231,12 +237,12 @@ class RuntimeManager:
     @staticmethod
     def _is_query_log_plugin_enabled(config: AppConfig) -> bool:
         return any(
-            plugin.enabled and plugin.module == "query_log_plugin"
-            for plugin in config.plugins
+            plugin.enabled and plugin.module == "query_log_plugin" for plugin in config.plugins
         )
 
 
 def install_loop_policy(loop_policy: str) -> None:
+    """根据配置安装事件循环策略（asyncio / winuvloop，auto 时按可用性回退）。"""
     if loop_policy not in {"auto", "winuvloop", "asyncio"}:
         raise ValueError(f"未知 loop_policy: {loop_policy}")
     if loop_policy == "asyncio":
@@ -256,6 +262,7 @@ def install_loop_policy(loop_policy: str) -> None:
 
 
 async def serve(config_path: Path) -> None:
+    """启动运行时服务并阻塞直至收到中断信号，随后优雅停止。"""
     manager = RuntimeManager(config_path)
     await manager.start()
     try:
@@ -265,6 +272,7 @@ async def serve(config_path: Path) -> None:
 
 
 def build_parser() -> argparse.ArgumentParser:
+    """构建命令行参数解析器。"""
     parser = argparse.ArgumentParser(description="dns-forwarder skeleton")
     parser.add_argument("--config", default="config.json", help="配置文件路径")
     parser.add_argument("command", nargs="?", default="serve", choices=["serve", "check-config"])
@@ -272,6 +280,7 @@ def build_parser() -> argparse.ArgumentParser:
 
 
 def main() -> None:
+    """命令行入口：解析参数并执行 serve 或 check-config。"""
     parser = build_parser()
     args = parser.parse_args()
     config_path = Path(args.config)

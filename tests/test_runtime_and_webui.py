@@ -15,7 +15,7 @@ from dns_forwarder.webui import WEBUI_RELOAD_ENDPOINT, ManagedUvicornServer, cre
 
 
 def _basic_auth_headers(username: str = "admin", password: str = "change-me") -> dict[str, str]:
-    token = base64.b64encode(f"{username}:{password}".encode("utf-8")).decode("ascii")
+    token = base64.b64encode(f"{username}:{password}".encode()).decode("ascii")
     return {"Authorization": f"Basic {token}"}
 
 
@@ -289,7 +289,9 @@ async def test_webui_query_logs_stream_replays_entries_after_id(tmp_path: Path) 
         )
 
     route = next(
-        item for item in app.router.routes if getattr(item, "path", None) == "/api/query-logs/stream"
+        item
+        for item in app.router.routes
+        if getattr(item, "path", None) == "/api/query-logs/stream"
     )
 
     async def receive():
@@ -320,10 +322,7 @@ async def test_webui_query_logs_stream_replays_entries_after_id(tmp_path: Path) 
             break
     await body_iterator.aclose()
 
-    received = [
-        json.loads(chunk.split("data: ", 1)[1].strip())
-        for chunk in chunks
-    ]
+    received = [json.loads(chunk.split("data: ", 1)[1].strip()) for chunk in chunks]
     assert [item["id"] for item in received] == [2, 3]
 
 

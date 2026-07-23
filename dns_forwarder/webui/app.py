@@ -34,11 +34,12 @@ if TYPE_CHECKING:
     from dns_forwarder.core.runtime import RuntimeManager
 
 
-def create_webui_app(runtime_manager: "RuntimeManager") -> FastAPI:
+def create_webui_app(runtime_manager: RuntimeManager) -> FastAPI:
     security = HTTPBasic()
 
     def authorize_webui(
-        credentials: HTTPBasicCredentials = Depends(security),
+        # FastAPI 的依赖注入惯用法：在参数默认值中调用 Depends。
+        credentials: HTTPBasicCredentials = Depends(security),  # noqa: B008
     ) -> None:
         webui_config = runtime_manager.get_state().config.webui
         expected_username = webui_config.username.encode("utf-8")
@@ -240,7 +241,8 @@ class ManagedUvicornServer:
 
     async def start(self) -> None:
         self._task = asyncio.create_task(self._server.serve())
-        while not self._server.started:
+        # uvicorn 未暴露就绪事件，这里轮询其内部 started 标志。
+        while not self._server.started:  # noqa: ASYNC110
             await asyncio.sleep(0.01)
         logger.info("HTTP server 就绪 address=%s:%s", *self.bound_address())
 

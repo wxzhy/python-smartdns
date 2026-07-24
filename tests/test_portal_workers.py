@@ -274,3 +274,57 @@ async def test_reload_closes_shared_sessions_before_rebuild(tmp_path: Path) -> N
     finally:
         await anyio.to_thread.run_sync(worker.stop)
         upstream_transport.close()
+
+
+async def test_reload_preflight_failure_keeps_all_workers_on_old_config(tmp_path: Path) -> None:
+    """新配置构建失败时，任何 worker 都不应被切换（避免半新半旧）。"""
+    upstream_transport, upstream_port = await start_fake_upstream("203.0.113.10")
+    config_path = tmp_path / "config.json"
+    write_worker_config(config_path, upstream_port, workers=2)
+    manager = RuntimeManager(config_path)
+    await manager.start()
+    try:
+        states_before = [worker.state for worker in manager._workers]
+        # 写入非法配置使 build_runtime_state 失败。
+        config_path.write_text("{ not json", encoding="utf-8")
+        with pytest.raises(Exception):
+            await manager.reload()
+        states_after = [worker.state for worker in manager._workers]
+        assert states_after == states_before
+        assert manager.get_state() is states_before[0]
+        # 恢复合法配置后服务仍可用。
+        write_worker_config(config_path, upstream_port, workers=2)
+        await manager.reload()
+    finally:
+        await manager.stop()
+        upstream_transport.close()
+
+
+async def test_reload_failure_on_second_worker_rolls_back_state(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    upstream_transport, upstream_port = await start_fake_upstream("203.0.113.10")
+    config_path = tmp_path / "config.json"
+    write_worker_config(config_path, upstream_port, workers=2)
+    manager = RuntimeManager(config_path)
+    await manager.start()
+    try:
+        state_before = manager.get_state()
+        original_run_sync = anyio.to_thread.run_sync
+        failing_worker = manager._workers[1]
+
+        async def run_sync_with_failure(func, *args):
+            if func == failing_worker.reload:
+                raise RuntimeError("模拟 worker 1 重建失败")
+            return await original_run_sync(func, *args)
+
+        monkeypatch.setattr(
+            "dns_forwarder.core.runtime.anyio.to_thread.run_sync", run_sync_with_failure
+        )
+        with pytest.raises(RuntimeError, match="模拟 worker 1 重建失败"):
+            await manager.reload()
+        # 原子语义：失败后对外暴露的 state 仍是切换前的。
+        assert manager.get_state() is state_before
+    finally:
+        await manager.stop()
+        upstream_transport.close()

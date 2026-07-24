@@ -91,14 +91,26 @@ class RuntimeManager:
                 raise RuntimeError(message)
             if self._workers:
                 shared_contexts = self._build_shared_contexts(config)
+                # 预检：先在主侧临时 portal 完整构建一次新状态，确认配置可行；
+                # 失败则抛异常且所有 worker 保持旧配置，避免半新半旧。
+                preflight_state = await anyio.to_thread.run_sync(
+                    self._build_preflight_state, shared_contexts
+                )
+                del preflight_state  # 预检状态仅用于验证可构建性，随即丢弃
                 # 串行重建各 worker 状态，避免并发读取同一域名集/IP集文件。
-                # 主侧状态与 worker 0 保持一致（webui 读取 config/plugin 描述用）。
-                first = True
-                for worker in self._workers:
-                    new_state = await anyio.to_thread.run_sync(worker.reload, shared_contexts)
-                    if first:
-                        self._state = new_state
-                        first = False
+                new_states: list[RuntimeState] = []
+                try:
+                    for worker in self._workers:
+                        new_states.append(
+                            await anyio.to_thread.run_sync(worker.reload, shared_contexts)
+                        )
+                except BaseException:
+                    # 预检已通过但仍失败（极少见，如文件在预检后被改坏）：
+                    # 保持 self._state 指向切换前的状态，避免对外暴露混合配置。
+                    logger.exception("reload 中途失败，保持原 state config=%s", self.config_path)
+                    raise
+                # 全部 worker 切换完成后才更新主侧状态（webui 读取用）。
+                self._state = new_states[0]
             else:
                 self._state = await self._build_worker_state(config)
             logger.info("reload 完成 config=%s", self.config_path)
@@ -196,6 +208,25 @@ class RuntimeManager:
     async def _build_worker_state(self, config: AppConfig) -> RuntimeState:
         """构建一份主侧 RuntimeState（仅在 worker 尚未启动的 load 阶段使用）。"""
         return await build_runtime_state(self.config_path, self._build_shared_contexts(config))
+
+    def _build_preflight_state(self, shared_contexts: dict[str, Any]) -> RuntimeState:
+        """在临时 blocking portal 中构建一次新 RuntimeState 以预检配置（同步，供 to_thread 调用）。
+
+        构建过程中若创建了按 loop 缓存的共享 nameserver 会话，在 portal 退出前
+        于同一 loop 内关闭，避免泄漏。
+        """
+        from anyio.from_thread import start_blocking_portal
+
+        from dns_forwarder.resolver.nameservers import close_shared_sessions
+
+        with start_blocking_portal(backend="asyncio") as portal:
+            try:
+                return portal.call(build_runtime_state, self.config_path, shared_contexts)
+            finally:
+                try:
+                    portal.call(close_shared_sessions)
+                except Exception:
+                    logger.exception("reload 预检会话清理失败")
 
     def _log_config_loaded(self, config: AppConfig) -> None:
         logger.info(

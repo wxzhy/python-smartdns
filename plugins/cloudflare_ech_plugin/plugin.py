@@ -44,6 +44,12 @@ class CloudflareEchPlugin(Plugin):
         self._logger = get_logger("plugins.cloudflare_ech")
         self._cloudflare_resolvers: dict[object, object] = {}
 
+        @alru_cache(maxsize=1, ttl=300)
+        async def load_cached(resolve_key: object) -> tuple[bytes, int] | None:
+            return await self._load_cloudflare_ech_uncached(resolve_key)
+
+        self._load_cloudflare_ech_cached = load_cached
+
     async def setup(self, registry: PluginRegistry) -> None:
         if not self.runtime_config.match_tags:
             raise ValueError("cloudflare_ech_plugin 至少需要一个 match_tags")
@@ -186,10 +192,9 @@ class CloudflareEchPlugin(Plugin):
         if resolve_key is None:
             return None
         self._cloudflare_resolvers[resolve_key] = context.resolve
-        return await self._load_cloudflare_ech(resolve_key)
+        return await self._load_cloudflare_ech_cached(resolve_key)
 
-    @alru_cache(maxsize=1, ttl=300)
-    async def _load_cloudflare_ech(self, resolve_key: object) -> tuple[bytes, int] | None:
+    async def _load_cloudflare_ech_uncached(self, resolve_key: object) -> tuple[bytes, int] | None:
         resolve = self._cloudflare_resolvers.get(resolve_key)
         if resolve is None:
             return None

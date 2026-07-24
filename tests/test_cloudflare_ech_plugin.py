@@ -227,7 +227,7 @@ async def test_cloudflare_ech_plugin_injects_ech_when_result_tags_match() -> Non
     rdata = next(iter(answer.rrset))
     assert rdata.params[HTTPS_PARAM_KEY.ECH].ech == b"\x00"
     assert recorder.calls == [("cloudflare-ech.com", "HTTPS")]
-    plugin._load_cloudflare_ech.cache_clear()
+    plugin._load_cloudflare_ech_cached.cache_clear()
 
 
 async def test_cloudflare_ech_plugin_injects_service_mode_record_into_empty_noerror_answer() -> (
@@ -259,7 +259,7 @@ async def test_cloudflare_ech_plugin_injects_service_mode_record_into_empty_noer
     assert rdata.target.to_text() == "."
     assert rdata.params[HTTPS_PARAM_KEY.ECH].ech == b"\x00"
     assert recorder.calls == [("cloudflare-ech.com", "HTTPS")]
-    plugin._load_cloudflare_ech.cache_clear()
+    plugin._load_cloudflare_ech_cached.cache_clear()
 
 
 async def test_cloudflare_ech_plugin_caches_cloudflare_ech_between_responses() -> None:
@@ -285,7 +285,7 @@ async def test_cloudflare_ech_plugin_caches_cloudflare_ech_between_responses() -
         await plugin.on_response(context)
 
     assert recorder.calls == [("cloudflare-ech.com", "HTTPS")]
-    plugin._load_cloudflare_ech.cache_clear()
+    plugin._load_cloudflare_ech_cached.cache_clear()
 
 
 async def test_cloudflare_ech_plugin_skips_non_https_nxdomain_and_existing_ech() -> None:
@@ -446,7 +446,7 @@ async def test_cloudflare_ech_plugin_uses_hint_tags_without_a_subquery() -> None
     rdata = next(iter(answer.rrset))
     assert rdata.params[HTTPS_PARAM_KEY.ECH].ech == b"\x00"
     assert recorder.calls == [("cloudflare-ech.com", "HTTPS")]
-    plugin._load_cloudflare_ech.cache_clear()
+    plugin._load_cloudflare_ech_cached.cache_clear()
 
 
 async def test_cloudflare_ech_plugin_skips_hint_miss_without_a_subquery() -> None:
@@ -497,7 +497,7 @@ async def test_cloudflare_ech_plugin_uses_a_subquery_when_no_hints(tmp_path: Pat
     rdata = next(iter(answer.rrset))
     assert rdata.params[HTTPS_PARAM_KEY.ECH].ech == b"\x00"
     assert recorder.calls == [("example.test", "A"), ("cloudflare-ech.com", "HTTPS")]
-    plugin._load_cloudflare_ech.cache_clear()
+    plugin._load_cloudflare_ech_cached.cache_clear()
 
 
 async def test_cloudflare_ech_plugin_skips_when_a_subquery_misses_or_fails(tmp_path: Path) -> None:
@@ -557,7 +557,7 @@ async def test_cloudflare_ech_plugin_skips_when_cloudflare_query_fails_or_has_no
     )
     await plugin_no_ech.on_response(no_ech_context)
     assert HTTPS_PARAM_KEY.ECH not in next(iter(no_ech_answer.rrset)).params
-    plugin_no_ech._load_cloudflare_ech.cache_clear()
+    plugin_no_ech._load_cloudflare_ech_cached.cache_clear()
 
     plugin_fail = build_plugin(match_tags=["cf"])
     fail_request = dns.message.make_query("fail-ech.test", "HTTPS")
@@ -571,7 +571,7 @@ async def test_cloudflare_ech_plugin_skips_when_cloudflare_query_fails_or_has_no
     )
     await plugin_fail.on_response(fail_context)
     assert HTTPS_PARAM_KEY.ECH not in next(iter(fail_answer.rrset)).params
-    plugin_fail._load_cloudflare_ech.cache_clear()
+    plugin_fail._load_cloudflare_ech_cached.cache_clear()
 
 
 async def test_cloudflare_ech_plugin_injects_all_service_mode_records_and_keeps_alias_mode() -> (
@@ -606,7 +606,7 @@ async def test_cloudflare_ech_plugin_injects_all_service_mode_records_and_keeps_
     assert HTTPS_PARAM_KEY.ECH not in rdatas[0].params
     assert rdatas[1].params[HTTPS_PARAM_KEY.ECH].ech == b"\x00"
     assert rdatas[2].params[HTTPS_PARAM_KEY.ECH].ech == b"\x00"
-    plugin._load_cloudflare_ech.cache_clear()
+    plugin._load_cloudflare_ech_cached.cache_clear()
 
 
 async def test_cloudflare_ech_plugin_runs_before_https_and_cache_plugins() -> None:
@@ -668,7 +668,7 @@ async def test_cloudflare_ech_plugin_runs_before_https_and_cache_plugins() -> No
         ("example.test", "HTTPS"),
         ("cloudflare-ech.com", "HTTPS"),
     ]
-    cloudflare_plugin._load_cloudflare_ech.cache_clear()
+    cloudflare_plugin._load_cloudflare_ech_cached.cache_clear()
 
 
 async def test_cloudflare_ech_plugin_handles_empty_noerror_answers_before_https_and_cache_plugins() -> (
@@ -731,4 +731,13 @@ async def test_cloudflare_ech_plugin_handles_empty_noerror_answers_before_https_
         ("empty.test", "HTTPS"),
         ("cloudflare-ech.com", "HTTPS"),
     ]
-    cloudflare_plugin._load_cloudflare_ech.cache_clear()
+    cloudflare_plugin._load_cloudflare_ech_cached.cache_clear()
+
+
+async def test_ech_cache_is_per_instance() -> None:
+    """类级 alru_cache 会被所有 worker 实例共享并跨 loop 清空；实例级则各自独立。"""
+    from plugins.cloudflare_ech_plugin.plugin import CloudflareEchPlugin
+
+    plugin_a = CloudflareEchPlugin()
+    plugin_b = CloudflareEchPlugin()
+    assert plugin_a._load_cloudflare_ech_cached is not plugin_b._load_cloudflare_ech_cached

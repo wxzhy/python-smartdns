@@ -1,15 +1,12 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import TYPE_CHECKING
+from typing import Iterable
 
 import dns.rdatatype
 
-if TYPE_CHECKING:
-    from collections.abc import Iterable
-
-    from dns_forwarder.config import DispatchStrategyType, RuleConfig
-    from dns_forwarder.pipeline.context import RequestContext
+from dns_forwarder.config import DispatchStrategyType, RuleConfig
+from dns_forwarder.pipeline.context import RequestContext
 
 
 @dataclass(frozen=True, slots=True)
@@ -51,6 +48,6 @@ class RuleEngine:
             return False
         if match.match_tags and not any(tag in tags for tag in match.match_tags):
             return False
-        if match.qtypes and qtype not in match.qtypes:  # noqa: SIM103
+        if match.qtypes and qtype not in match.qtypes:
             return False
         return True

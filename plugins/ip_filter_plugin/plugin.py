@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
-
 import dns.rcode
 import dns.rdatatype
 import dns.resolver
@@ -9,12 +7,10 @@ import dns.rrset
 
 from dns_forwarder.core import IPSET_CONTEXT_KEY, IPSet
 from dns_forwarder.logging import format_tags, get_logger
+from dns_forwarder.pipeline import RequestContext, UpstreamResult
 from dns_forwarder.plugin_api import EmptyModel, Plugin, PluginRegistry
 
 from .models import IpFilterPluginConfig
-
-if TYPE_CHECKING:
-    from dns_forwarder.pipeline import RequestContext, UpstreamResult
 
 logger = get_logger("plugins.ip_filter")
 
@@ -34,7 +30,7 @@ class IpFilterPlugin(Plugin):
     config_model = IpFilterPluginConfig
     variables_model = EmptyModel
     upstream_response_order = 50
-    ui_meta = {  # noqa: RUF012  # read-only frozen-style plugin metadata
+    ui_meta = {
         "title": "IP Filter Plugin",
         "description": "按请求 tags 与 IPSet tags 过滤 A/AAAA 响应中的地址。",
     }
@@ -42,6 +38,7 @@ class IpFilterPlugin(Plugin):
     async def setup(self, registry: PluginRegistry) -> None:
         if not self.runtime_config.whitelist_tags and not self.runtime_config.blacklist_tags:
             raise ValueError("ip_filter_plugin 至少需要 whitelist_tags 或 blacklist_tags")
+        return None
 
     async def on_upstream_response(self, context: RequestContext, result: UpstreamResult) -> None:
         if context.request.question[0].rdtype not in ADDRESS_TYPES:
@@ -62,8 +59,7 @@ class IpFilterPlugin(Plugin):
         original_count, kept_count = self._filter_answer(answer, get_ipset(context))
         if original_count != kept_count:
             logger.debug(
-                "IP 过滤已应用 request_id=%s upstream=%s qtype=%s "
-                "original_count=%s kept_count=%s request_tags=%s",
+                "IP 过滤已应用 request_id=%s upstream=%s qtype=%s original_count=%s kept_count=%s request_tags=%s",
                 context.request_id,
                 result.upstream_name,
                 dns.rdatatype.to_text(answer.rdtype),
@@ -111,13 +107,8 @@ class IpFilterPlugin(Plugin):
             ip_tags, self.runtime_config.whitelist_tags
         ):
             return False
-        if self._has_any_tag(ip_tags, self.runtime_config.blacklist_tags):  # noqa: SIM103
+        if self._has_any_tag(ip_tags, self.runtime_config.blacklist_tags):
             return False
         return True
-
-    @staticmethod
-    def _has_any_tag(current_tags: set[str], configured_tags: list[str]) -> bool:
-        return bool(current_tags.intersection(configured_tags))
-
 
 plugin = IpFilterPlugin()

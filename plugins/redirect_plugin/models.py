@@ -1,17 +1,9 @@
 from __future__ import annotations
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import Field, field_validator
 
-
-def normalize_domain(value: str) -> str:
-    domain = str(value).strip().rstrip(".").lower()
-    if not domain:
-        raise ValueError("域名不能为空")
-    return domain
-
-
-class StrictPluginModel(BaseModel):
-    model_config = ConfigDict(extra="forbid")
+from dns_forwarder.core.domainset import normalize_domain
+from dns_forwarder.plugin_api import StrictPluginModel
 
 
 class RedirectPluginConfig(StrictPluginModel):

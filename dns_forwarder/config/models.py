@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import multiprocessing
 import os
 from enum import StrEnum
 from ipaddress import IPv4Network, IPv6Network, ip_address, ip_network
@@ -62,16 +63,70 @@ class StrictConfigModel(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
 
+WorkerCount = Annotated[int, Field(ge=1)] | Literal["auto"]
+MultiprocessStartMethod = Literal["auto", "spawn", "forkserver", "fork"]
+
+
+class MultiprocessConfig(StrictConfigModel):
+    workers: WorkerCount = 1
+    start_method: MultiprocessStartMethod = "auto"
+    queue_size: int = Field(default=1024, ge=1)
+    response_timeout: float = Field(default=10.0, gt=0)
+    front_cache_size: int = Field(default=100000, ge=1)
+
+    @field_validator("workers", mode="before")
+    @classmethod
+    def normalize_workers(cls, value: Any) -> Any:
+        if isinstance(value, str):
+            stripped = value.strip().lower()
+            return "auto" if stripped == "auto" else value
+        return value
+
+    @field_validator("start_method", mode="before")
+    @classmethod
+    def normalize_start_method(cls, value: Any) -> Any:
+        if isinstance(value, str):
+            return value.strip().lower()
+        return value
+
+    def resolved_workers(self) -> int:
+        if self.workers != "auto":
+            return self.workers
+        process_cpu_count = getattr(os, "process_cpu_count", None)
+        count = process_cpu_count() if callable(process_cpu_count) else os.cpu_count()
+        return max(1, count or 1)
+
+    def resolved_start_method(self, available_methods: list[str] | None = None) -> str:
+        methods = (
+            list(available_methods)
+            if available_methods is not None
+            else multiprocessing.get_all_start_methods()
+        )
+        if self.start_method == "auto":
+            if "forkserver" in methods:
+                return "forkserver"
+            if "spawn" in methods:
+                return "spawn"
+            return methods[0]
+        if self.start_method not in methods:
+            available = ", ".join(methods)
+            raise ValueError(
+                "当前平台不支持 multiprocessing start_method="
+                f"{self.start_method}，可用: {available}"
+            )
+        return self.start_method
+
+
 class RuntimeConfig(StrictConfigModel):
     plugin_dirs: list[str] = Field(default_factory=lambda: ["plugins"])
     loop_policy: str = "auto"
-    workers: int = Field(default_factory=lambda: os.cpu_count() or 1, ge=1, le=64)
     default_upstream_group: str = "default"
     default_upstream_policy: DispatchStrategyType = DispatchStrategyType.RACE
     bootstrap_resolver: list[str] = Field(default_factory=list)
     hosts: dict[str, list[str]] = Field(default_factory=dict)
     fingerprint: str | None = None
     log_level: str = "INFO"
+    multiprocess: MultiprocessConfig = Field(default_factory=MultiprocessConfig)
 
     @field_validator("plugin_dirs")
     @classmethod
@@ -251,7 +306,7 @@ class DoHHttpxNameserverConfig(BaseTLSHTTPClientDoHNameserverConfig):
     protocol: Literal[NameserverProtocol.DOH_HTTPX] = NameserverProtocol.DOH_HTTPX
 
     @model_validator(mode="after")
-    def validate_http_version(self) -> DoHHttpxNameserverConfig:
+    def validate_http_version(self) -> "DoHHttpxNameserverConfig":
         if self.http_version in {HTTPVersionType.H1, HTTPVersionType.H3}:
             raise ValueError("httpx 仅支持 default / h2")
         if self.verify is not True:
@@ -263,7 +318,7 @@ class DoHAiohttpNameserverConfig(BaseTLSHTTPClientDoHNameserverConfig):
     protocol: Literal[NameserverProtocol.DOH_AIOHTTP] = NameserverProtocol.DOH_AIOHTTP
 
     @model_validator(mode="after")
-    def validate_http_version(self) -> DoHAiohttpNameserverConfig:
+    def validate_http_version(self) -> "DoHAiohttpNameserverConfig":
         if self.http_version in {HTTPVersionType.H2, HTTPVersionType.H3}:
             raise ValueError("aiohttp 仅支持 default / h1")
         return self
@@ -374,7 +429,7 @@ class RuleActionConfig(StrictConfigModel):
     dispatcher: DispatchStrategyType | None = None
 
     @model_validator(mode="after")
-    def validate_action_target(self) -> RuleActionConfig:
+    def validate_action_target(self) -> "RuleActionConfig":
         if self.upstream_group is None and self.dispatcher is None:
             raise ValueError("rule action 至少需要 upstream_group 或 dispatcher")
         return self
@@ -443,7 +498,7 @@ class AppConfig(BaseSettings):
         )
 
     @model_validator(mode="after")
-    def validate_references(self) -> AppConfig:
+    def validate_references(self) -> "AppConfig":
         self._validate_unique_names()
         nameserver_names = {item.name for item in self.nameservers}
         upstream_names = {item.name for item in self.upstreams}
@@ -531,7 +586,7 @@ class AppConfig(BaseSettings):
         def dfs(group_name: str, path: list[str]) -> None:
             if group_name in visiting:
                 cycle_start = path.index(group_name)
-                cycle = " -> ".join([*path[cycle_start:], group_name])
+                cycle = " -> ".join(path[cycle_start:] + [group_name])
                 raise ValueError(f"group 引用存在循环: {cycle}")
             if group_name in visited:
                 return

@@ -1,10 +1,8 @@
 from __future__ import annotations
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import Field, field_validator
 
-
-class StrictPluginModel(BaseModel):
-    model_config = ConfigDict(extra="forbid")
+from dns_forwarder.plugin_api import StrictPluginModel, normalize_tag_list
 
 
 class IpFilterPluginConfig(StrictPluginModel):
@@ -22,14 +20,4 @@ class IpFilterPluginConfig(StrictPluginModel):
     )
     @classmethod
     def normalize_tags(cls, value: list[str] | None) -> list[str]:
-        if value is None:
-            return []
-        seen: set[str] = set()
-        normalized: list[str] = []
-        for item in value:
-            tag = str(item).strip()
-            if not tag or tag in seen:
-                continue
-            seen.add(tag)
-            normalized.append(tag)
-        return normalized
+        return normalize_tag_list(value)

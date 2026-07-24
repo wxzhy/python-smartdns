@@ -32,54 +32,48 @@ from .models import (
 
 
 def load_config(*args, **kwargs):
-    from .loader import load_config as _load_config  # noqa: PLC0415 - lazy to avoid circular import
+    from .loader import load_config as _load_config
 
     return _load_config(*args, **kwargs)
 
 
 def parse_config_text(*args, **kwargs):
-    from .loader import (  # noqa: PLC0415 - lazy to avoid circular import
-        parse_config_text as _parse_config_text,
-    )
+    from .loader import parse_config_text as _parse_config_text
 
     return _parse_config_text(*args, **kwargs)
 
 
 def dump_config_text(*args, **kwargs):
-    from .loader import (  # noqa: PLC0415 - lazy to avoid circular import
-        dump_config_text as _dump_config_text,
-    )
+    from .loader import dump_config_text as _dump_config_text
 
     return _dump_config_text(*args, **kwargs)
 
 
 def save_config(*args, **kwargs):
-    from .loader import save_config as _save_config  # noqa: PLC0415 - lazy to avoid circular import
+    from .loader import save_config as _save_config
 
     return _save_config(*args, **kwargs)
 
 
 def build_config_json_schema(*args, **kwargs):
-    from .loader import (  # noqa: PLC0415 - lazy to avoid circular import
-        build_config_json_schema as _build_config_json_schema,
-    )
+    from .loader import build_config_json_schema as _build_config_json_schema
 
     return _build_config_json_schema(*args, **kwargs)
 
 
 __all__ = [
-    "AiodnsNameserverConfig",
     "AppConfig",
+    "AiodnsNameserverConfig",
     "BaseNameserverConfig",
-    "DNSCryptNameserverConfig",
     "DispatchStrategyType",
-    "Do53CustomNameserverConfig",
+    "DNSCryptNameserverConfig",
     "Do53NameserverConfig",
+    "Do53CustomNameserverConfig",
     "DoHAiohttpNameserverConfig",
     "DoHCurlCffiNameserverConfig",
+    "DoHNameserverConfig",
     "DoHCustomNameserverConfig",
     "DoHHttpxNameserverConfig",
-    "DoHNameserverConfig",
     "DoQNameserverConfig",
     "DoTNameserverConfig",
     "ECSConfig",

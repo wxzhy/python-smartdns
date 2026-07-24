@@ -17,7 +17,14 @@
       ]
     },
     "fingerprint": "chrome",
-    "log_level": "INFO"
+    "log_level": "INFO",
+    "multiprocess": {
+      "workers": "auto",
+      "start_method": "auto",
+      "queue_size": 1024,
+      "response_timeout": 10.0,
+      "front_cache_size": 100000
+    }
   },
   "tree_root": {
     "domain_dir": "examples/tags/domains",
@@ -303,6 +310,10 @@
         "ping_privileged": false,
         "response_ip_limit": 2,
         "response_ttl_seconds": 600,
+        "rtt_gap_threshold_ms": 20.0,
+        "no_speedtest_tags": [
+          "private"
+        ],
         "skip_tags": [
           "direct",
           "local"

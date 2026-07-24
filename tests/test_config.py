@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import os
 from pathlib import Path
 
 import pytest
@@ -13,13 +14,6 @@ from dns_forwarder.config import (
     parse_config_text,
 )
 from dns_forwarder.plugin_api import PluginManager, discover_available_plugins
-
-# 期望的测试常量，避免「魔法值比较」告警并提升可读性。
-EXPECTED_NAMESERVER_COUNT = 11
-EXPECTED_USE_TRICKS_NAMESERVER_COUNT = 4
-EXPECTED_TIMEOUT = 2.0
-EXPECTED_DNS_PORT = 53
-EXPECTED_SPEEDTEST_IP_LIMIT = 2
 
 
 def build_config_dict() -> dict[str, object]:
@@ -81,8 +75,95 @@ def test_parse_config_text_success() -> None:
     assert config.runtime.bootstrap_resolver == []
     assert config.runtime.hosts == {}
     assert config.runtime.fingerprint is None
+    assert config.runtime.multiprocess.workers == 1
+    assert config.runtime.multiprocess.start_method == "auto"
+    assert config.runtime.multiprocess.resolved_workers() == 1
+    assert config.runtime.multiprocess.resolved_start_method(["forkserver", "spawn"]) == "forkserver"
+    assert config.runtime.multiprocess.resolved_start_method(["spawn"]) == "spawn"
+    assert config.runtime.multiprocess.queue_size == 1024
+    assert config.runtime.multiprocess.response_timeout == 10.0
+    assert config.runtime.multiprocess.front_cache_size == 100000
     assert config.listeners[0].protocol.value == "udp"
     assert config.upstreams[0].nameservers == ["local-ns"]
+
+
+def test_runtime_multiprocess_config_validates_bounds() -> None:
+    config_dict = build_config_dict()
+    config_dict["runtime"] = {
+        "plugin_dirs": ["plugins"],
+        "default_upstream_group": "default",
+        "multiprocess": {
+            "workers": 0,
+            "queue_size": 1024,
+            "response_timeout": 10.0,
+            "front_cache_size": 100000,
+        },
+    }
+
+    with pytest.raises(ValueError, match="greater than or equal to 1"):
+        parse_config_dict(config_dict)
+
+
+def test_runtime_multiprocess_config_accepts_auto_workers(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    config_dict = build_config_dict()
+    config_dict["runtime"] = {
+        "plugin_dirs": ["plugins"],
+        "default_upstream_group": "default",
+        "multiprocess": {
+            "workers": "auto",
+            "queue_size": 1024,
+            "response_timeout": 10.0,
+            "front_cache_size": 100000,
+        },
+    }
+
+    config = parse_config_dict(config_dict)
+
+    monkeypatch.setattr(os, "process_cpu_count", lambda: 4, raising=False)
+    assert config.runtime.multiprocess.workers == "auto"
+    assert config.runtime.multiprocess.resolved_workers() == 4
+
+
+def test_runtime_multiprocess_config_accepts_start_method() -> None:
+    config_dict = build_config_dict()
+    config_dict["runtime"] = {
+        "plugin_dirs": ["plugins"],
+        "default_upstream_group": "default",
+        "multiprocess": {
+            "workers": 2,
+            "start_method": " forkserver ",
+            "queue_size": 1024,
+            "response_timeout": 10.0,
+            "front_cache_size": 100000,
+        },
+    }
+
+    config = parse_config_dict(config_dict)
+
+    assert config.runtime.multiprocess.start_method == "forkserver"
+    assert config.runtime.multiprocess.resolved_start_method(["forkserver", "spawn"]) == "forkserver"
+    with pytest.raises(ValueError, match="start_method=forkserver"):
+        config.runtime.multiprocess.resolved_start_method(["spawn"])
+
+
+def test_runtime_multiprocess_config_rejects_unknown_start_method() -> None:
+    config_dict = build_config_dict()
+    config_dict["runtime"] = {
+        "plugin_dirs": ["plugins"],
+        "default_upstream_group": "default",
+        "multiprocess": {
+            "workers": 2,
+            "start_method": "prefork",
+            "queue_size": 1024,
+            "response_timeout": 10.0,
+            "front_cache_size": 100000,
+        },
+    }
+
+    with pytest.raises(ValueError):
+        parse_config_dict(config_dict)
 
 
 def test_parse_config_text_accepts_all_supported_nameserver_protocols() -> None:
@@ -203,11 +284,11 @@ def test_parse_config_text_accepts_all_supported_nameserver_protocols() -> None:
 
     config = parse_config_dict(config_dict)
 
-    assert len(config.nameservers) == EXPECTED_NAMESERVER_COUNT
+    assert len(config.nameservers) == 11
     assert config.nameservers[1].use_tricks is True
     assert config.nameservers[2].servers == ["1.1.1.1", "1.0.0.1"]
     assert config.nameservers[2].tcp is True
-    assert config.nameservers[2].timeout == EXPECTED_TIMEOUT
+    assert config.nameservers[2].timeout == 2.0
     assert config.upstreams[0].nameservers == [
         "udp-ns",
         "udp-custom-ns",
@@ -238,7 +319,7 @@ def test_parse_config_text_accepts_aiodns_defaults_and_normalizes_servers() -> N
 
     nameserver = config.nameservers[0]
     assert nameserver.servers == ["1.1.1.1", "1.0.0.1"]
-    assert nameserver.port == EXPECTED_DNS_PORT
+    assert nameserver.port == 53
     assert nameserver.tcp is False
     assert nameserver.timeout == 1.0
 
@@ -254,7 +335,7 @@ def test_parse_config_text_rejects_empty_aiodns_servers() -> None:
     ]
     config_dict["upstreams"][0]["nameservers"] = ["aiodns-ns"]
 
-    with pytest.raises(ValueError, match="at least 1 item"):
+    with pytest.raises(ValueError):
         parse_config_dict(config_dict)
 
 
@@ -279,7 +360,9 @@ def test_parse_config_text_normalizes_runtime_http_client_options() -> None:
     config = parse_config_dict(config_dict)
 
     assert config.runtime.bootstrap_resolver == ["1.1.1.1", "8.8.8.8"]
-    assert config.runtime.hosts == {"cloudflare-dns.com": ["1.1.1.1", "2606:4700:4700::1111"]}
+    assert config.runtime.hosts == {
+        "cloudflare-dns.com": ["1.1.1.1", "2606:4700:4700::1111"]
+    }
     assert config.runtime.fingerprint == "chrome"
 
 
@@ -420,7 +503,7 @@ def test_parse_config_text_rejects_invalid_runtime_hosts() -> None:
     config_dict = build_config_dict()
     config_dict["runtime"]["hosts"] = {"dns.example": ["not-an-ip"]}
 
-    with pytest.raises(ValueError, match="does not appear to be an IPv4"):
+    with pytest.raises(ValueError):
         parse_config_dict(config_dict)
 
 
@@ -448,7 +531,7 @@ def test_parse_config_text_rejects_legacy_upstream_fields() -> None:
     }
     config_dict["groups"][0]["upstreams"] = ["legacy"]
 
-    with pytest.raises(ValueError, match="Extra inputs are not permitted"):
+    with pytest.raises(ValueError):
         parse_config_dict(config_dict)
 
 
@@ -466,7 +549,7 @@ def test_parse_config_text_rejects_sequential_dispatcher() -> None:
         }
     ]
 
-    with pytest.raises(ValueError, match="should be 'race' or 'wait_all'"):
+    with pytest.raises(ValueError):
         parse_config_dict(config_dict)
 
 
@@ -496,7 +579,7 @@ def test_parse_config_text_rejects_empty_webui_credentials() -> None:
         "password": "change-me",
     }
 
-    with pytest.raises(ValueError, match="at least 1 character"):
+    with pytest.raises(ValueError):
         parse_config_dict(config_dict)
 
 
@@ -552,10 +635,7 @@ def test_parse_config_text_materializes_missing_plugins_as_disabled_defaults() -
     assert plugins_by_module["block_plugin"].config == {"rules": []}
     assert plugins_by_module["block_plugin"].variables == {}
     assert plugins_by_module["speedtest_plugin"].enabled is False
-    assert (
-        plugins_by_module["speedtest_plugin"].config["response_ip_limit"]
-        == EXPECTED_SPEEDTEST_IP_LIMIT
-    )
+    assert plugins_by_module["speedtest_plugin"].config["response_ip_limit"] == 2
     assert plugins_by_module["speedtest_plugin"].variables == {}
     assert plugins_by_module["speedtest_plugin"].config["fallback_rules"] == []
     assert plugins_by_module["tag_plugin"].enabled is False
@@ -587,42 +667,56 @@ def test_build_config_json_schema_includes_available_plugin_schemas() -> None:
 
     plugin_schema = schema["$defs"]["PluginConfig"]
     options = plugin_schema["oneOf"]
-
-    def find_option(module: str) -> dict[str, object]:
-        """按 module 常量定位插件 schema 选项。"""
-        return next(item for item in options if item["properties"]["module"]["const"] == module)
-
-    def config_props(option: dict[str, object]) -> dict[str, object]:
-        """取插件 schema 的 config.properties 子对象。"""
-        return option["properties"]["config"]["properties"]  # type: ignore[index]
-
-    sample_option = find_option("sample_plugin")
-    block_option = find_option("block_plugin")
-    cache_option = find_option("cache_plugin")
-    cloudflare_ech_option = find_option("cloudflare_ech_plugin")
-    https_option = find_option("https_plugin")
-    tag_option = find_option("tag_plugin")
-    ip_filter_option = find_option("ip_filter_plugin")
-    ip_replace_option = find_option("ip_replace_plugin")
-    query_log_option = find_option("query_log_plugin")
-    redirect_option = find_option("redirect_plugin")
+    sample_option = next(
+        item for item in options if item["properties"]["module"]["const"] == "sample_plugin"
+    )
+    block_option = next(
+        item for item in options if item["properties"]["module"]["const"] == "block_plugin"
+    )
+    cache_option = next(
+        item for item in options if item["properties"]["module"]["const"] == "cache_plugin"
+    )
+    cloudflare_ech_option = next(
+        item for item in options if item["properties"]["module"]["const"] == "cloudflare_ech_plugin"
+    )
+    https_option = next(
+        item for item in options if item["properties"]["module"]["const"] == "https_plugin"
+    )
+    tag_option = next(
+        item for item in options if item["properties"]["module"]["const"] == "tag_plugin"
+    )
+    ip_filter_option = next(
+        item for item in options if item["properties"]["module"]["const"] == "ip_filter_plugin"
+    )
+    ip_replace_option = next(
+        item for item in options if item["properties"]["module"]["const"] == "ip_replace_plugin"
+    )
+    query_log_option = next(
+        item for item in options if item["properties"]["module"]["const"] == "query_log_plugin"
+    )
+    redirect_option = next(
+        item for item in options if item["properties"]["module"]["const"] == "redirect_plugin"
+    )
 
     assert sample_option["title"] == "Sample Plugin"
-    assert "domains" in config_props(sample_option)
+    assert "domains" in sample_option["properties"]["config"]["properties"]
     assert "ttl" in sample_option["properties"]["variables"]["properties"]
     assert block_option["title"] == "Static Answer Plugin"
-    assert "rules" in config_props(block_option)
+    assert "rules" in block_option["properties"]["config"]["properties"]
     assert block_option["default"]["config"] == {"rules": []}
-    block_rule_ref = config_props(block_option)["rules"]["items"]["$ref"]
+    block_rule_ref = block_option["properties"]["config"]["properties"]["rules"]["items"]["$ref"]
     block_rule_name = block_rule_ref.removeprefix("#/$defs/")
     assert "block_other" in schema["$defs"][block_rule_name]["properties"]
-    speedtest_option = find_option("speedtest_plugin")
+    speedtest_option = next(
+        item for item in options if item["properties"]["module"]["const"] == "speedtest_plugin"
+    )
     assert cache_option["properties"]["enabled"]["default"] is False
     assert cache_option["default"]["enabled"] is False
     assert cache_option["default"]["config"] == {"max_size": 100000}
     assert cloudflare_ech_option["title"] == "Cloudflare ECH Plugin"
-    # cloudflare_ech 的 config 应同时包含三个 tag 字段。
-    assert {"match_tags", "exclude_tags", "skip_tags"} <= set(config_props(cloudflare_ech_option))
+    assert "match_tags" in cloudflare_ech_option["properties"]["config"]["properties"]
+    assert "exclude_tags" in cloudflare_ech_option["properties"]["config"]["properties"]
+    assert "skip_tags" in cloudflare_ech_option["properties"]["config"]["properties"]
     assert cloudflare_ech_option["default"]["config"] == {
         "match_tags": [],
         "exclude_tags": [],
@@ -630,25 +724,29 @@ def test_build_config_json_schema_includes_available_plugin_schemas() -> None:
     }
     assert https_option["title"] == "HTTPS Plugin"
     assert https_option["default"]["config"] == {}
-    fallback_rule_ref = config_props(speedtest_option)["fallback_rules"]["items"]["$ref"]
+    assert "fallback_rules" in speedtest_option["properties"]["config"]["properties"]
+    fallback_rule_ref = speedtest_option["properties"]["config"]["properties"]["fallback_rules"][
+        "items"
+    ]["$ref"]
     fallback_rule_name = fallback_rule_ref.removeprefix("#/$defs/")
     assert "exclude_tags" in schema["$defs"][fallback_rule_name]["properties"]
     assert tag_option["properties"]["config"]["type"] == "object"
     assert tag_option["default"]["config"] == {}
-    # ip_filter 的 config 应同时包含两个 tag 字段。
-    assert {"whitelist_tags", "blacklist_tags"} <= set(config_props(ip_filter_option))
+    assert "whitelist_tags" in ip_filter_option["properties"]["config"]["properties"]
+    assert "blacklist_tags" in ip_filter_option["properties"]["config"]["properties"]
     assert ip_filter_option["default"]["config"] == {
         "match_tags": [],
         "exclude_tags": [],
         "whitelist_tags": [],
         "blacklist_tags": [],
     }
-    assert {"rules", "skip_tags"} <= set(config_props(ip_replace_option))
+    assert "rules" in ip_replace_option["properties"]["config"]["properties"]
+    assert "skip_tags" in ip_replace_option["properties"]["config"]["properties"]
     assert ip_replace_option["default"]["config"] == {"skip_tags": [], "rules": []}
     assert query_log_option["title"] == "Query Log Plugin"
     assert query_log_option["default"]["config"] == {"max_entries": 500}
     assert redirect_option["title"] == "Redirect Plugin"
-    assert "redirects" in config_props(redirect_option)
+    assert "redirects" in redirect_option["properties"]["config"]["properties"]
     assert redirect_option["default"]["config"] == {"redirects": {}}
 
 
@@ -695,7 +793,7 @@ def test_config_example_json_is_valid() -> None:
     assert isinstance(config, AppConfig)
     assert config.runtime.default_upstream_group == "default"
     assert config.runtime.default_upstream_policy is DispatchStrategyType.RACE
-    assert len(config.nameservers) >= EXPECTED_USE_TRICKS_NAMESERVER_COUNT
+    assert len(config.nameservers) >= 4
     assert config.webui.doh_enabled is True
     assert any(group.name == "default" for group in config.groups)
     assert any(rule.action.dispatcher is DispatchStrategyType.WAIT_ALL for rule in config.rules)

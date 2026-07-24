@@ -35,12 +35,9 @@ class CachePlugin(Plugin):
     config_model = CachePluginConfig
     variables_model = EmptyModel
     response_order = 1000
-    ui_meta = {  # noqa: RUF012  # read-only frozen-style plugin metadata
+    ui_meta = {
         "title": "Cache Plugin",
-        "description": (
-            "在 request 阶段查 dnspython 缓存，并合并相同 cache key 的并发请求；"
-            "在 response 阶段最后写入 NOERROR 响应。"
-        ),
+        "description": "在 request 阶段查 dnspython 缓存，并合并相同 cache key 的并发请求；在 response 阶段最后写入 NOERROR 响应。",
     }
 
     def __init__(self) -> None:

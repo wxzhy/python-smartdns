@@ -1,17 +1,13 @@
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
-
 import dns.rdatatype
 
 from dns_forwarder.logging import format_tags, get_logger
+from dns_forwarder.pipeline import RequestContext, UpstreamResult
 from dns_forwarder.plugin_api import EmptyModel, Plugin, PluginRegistry
 
 from .models import IpReplacePluginConfig
 from .service import IpReplaceService
-
-if TYPE_CHECKING:
-    from dns_forwarder.pipeline import RequestContext, UpstreamResult
 
 logger = get_logger("plugins.ip_replace")
 
@@ -25,11 +21,9 @@ class IpReplacePlugin(Plugin):
     variables_model = EmptyModel
     upstream_response_order = 100
     response_order = 500
-    ui_meta = {  # noqa: RUF012  # read-only frozen-style plugin metadata
+    ui_meta = {
         "title": "IP Replace Plugin",
-        "description": (
-            "按上游结果 tags 匹配规则，并用目标 IPv4/IPv6 CIDR 对正常 A/AAAA 响应做前缀替换。"
-        ),
+        "description": "按上游结果 tags 匹配规则，并用目标 IPv4/IPv6 CIDR 对正常 A/AAAA 响应做前缀替换。",
     }
 
     def __init__(self) -> None:

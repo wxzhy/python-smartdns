@@ -1,6 +1,8 @@
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
+from collections.abc import Iterable
+
+import dns.nameserver
 
 from dns_forwarder.config import (
     AiodnsNameserverConfig,
@@ -50,13 +52,8 @@ from .doh_httpx import (
 from .doq import build_nameserver as build_doq_nameserver
 from .dot import build_nameserver as build_dot_nameserver
 
-if TYPE_CHECKING:
-    from collections.abc import Iterable
 
-    import dns.nameserver
-
-
-def build_nameserver(  # noqa: PLR0911 -- dispatch over config types, one return per branch is natural
+def build_nameserver(
     config: NameserverConfig,
     bootstrap_resolver: list[str] | None = None,
     fingerprint: str | None = None,

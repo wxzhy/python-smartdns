@@ -5,19 +5,19 @@ from ipaddress import ip_address
 import dns.message
 import dns.rdatatype
 import dns.rrset
-from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
+from pydantic import Field, field_validator, model_validator
 
 from dns_forwarder.logging import format_tags, get_logger
 from dns_forwarder.pipeline import RequestContext, build_answer_from_response
-from dns_forwarder.plugin_api import EmptyModel, Plugin, PluginRegistry
+from dns_forwarder.plugin_api import (
+    EmptyModel,
+    Plugin,
+    PluginRegistry,
+    StrictPluginModel,
+    normalize_tag_list,
+)
 
 logger = get_logger("plugins.block")
-
-IPV4_VERSION = 4
-
-
-class StrictPluginModel(BaseModel):
-    model_config = ConfigDict(extra="forbid")
 
 
 class BlockPluginRuleConfig(StrictPluginModel):
@@ -31,7 +31,7 @@ class BlockPluginRuleConfig(StrictPluginModel):
     @field_validator("match_tags", "exclude_tags", mode="before")
     @classmethod
     def normalize_tags(cls, value: list[str] | None) -> list[str]:
-        return _normalize_tags(value)
+        return normalize_tag_list(value)
 
     @field_validator("ipv4_addresses", mode="before")
     @classmethod
@@ -44,7 +44,7 @@ class BlockPluginRuleConfig(StrictPluginModel):
         return _normalize_addresses(value, version=6)
 
     @model_validator(mode="after")
-    def validate_addresses(self) -> BlockPluginRuleConfig:
+    def validate_addresses(self) -> "BlockPluginRuleConfig":
         if not self.ipv4_addresses and not self.ipv6_addresses and not self.block_other:
             raise ValueError("静态应答规则至少需要一个 IPv4、IPv6 地址或启用 block_other")
         return self
@@ -60,7 +60,7 @@ class BlockPlugin(Plugin):
     variables_model = EmptyModel
     request_order = -50
     response_order = 900
-    ui_meta = {  # noqa: RUF012  # read-only frozen-style plugin metadata
+    ui_meta = {
         "title": "Static Answer Plugin",
         "description": "按 tag 返回静态 A/AAAA 结果，或对非 A/AAAA 查询直接返回空的 NOERROR。",
     }
@@ -89,20 +89,21 @@ class BlockPlugin(Plugin):
         addresses: list[str] = []
         if question.rdtype == dns.rdatatype.A:
             addresses = rule.ipv4_addresses
-            response.answer.append(
-                self._build_record(question.name.to_text(), question.rdtype, rule)
-            )
+            if addresses:
+                response.answer.append(
+                    self._build_record(question.name.to_text(), question.rdtype, rule)
+                )
         elif question.rdtype == dns.rdatatype.AAAA:
             addresses = rule.ipv6_addresses
-            response.answer.append(
-                self._build_record(question.name.to_text(), question.rdtype, rule)
-            )
+            if addresses:
+                response.answer.append(
+                    self._build_record(question.name.to_text(), question.rdtype, rule)
+                )
         context.final_response = response
         context.final_answer = build_answer_from_response(context.request, response)
         context.stop_processing = True
         logger.debug(
-            "静态应答已应用 request_id=%s phase=%s qname=%s qtype=%s tags=%s "
-            "address_count=%s ttl=%s block_other=%s",
+            "静态应答已应用 request_id=%s phase=%s qname=%s qtype=%s tags=%s address_count=%s ttl=%s block_other=%s",
             context.request_id,
             phase,
             question.name.to_text().rstrip("."),
@@ -153,25 +154,6 @@ class BlockPlugin(Plugin):
             rule.ipv6_addresses,
         )
 
-    @staticmethod
-    def _has_any_tag(current_tags: set[str], configured_tags: list[str]) -> bool:
-        return bool(current_tags.intersection(configured_tags))
-
-
-def _normalize_tags(value: list[str] | None) -> list[str]:
-    if value is None:
-        return []
-    seen: set[str] = set()
-    normalized: list[str] = []
-    for item in value:
-        tag = str(item).strip()
-        if not tag or tag in seen:
-            continue
-        seen.add(tag)
-        normalized.append(tag)
-    return normalized
-
-
 def _normalize_addresses(value: list[str] | None, *, version: int) -> list[str]:
     if value is None:
         return []
@@ -180,7 +162,7 @@ def _normalize_addresses(value: list[str] | None, *, version: int) -> list[str]:
     for item in value:
         address = ip_address(str(item).strip())
         if address.version != version:
-            family = "IPv4" if version == IPV4_VERSION else "IPv6"
+            family = "IPv4" if version == 4 else "IPv6"
             raise ValueError(f"静态应答地址必须是 {family}")
         text = address.compressed
         if text in seen:

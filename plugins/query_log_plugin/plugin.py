@@ -1,20 +1,17 @@
 from __future__ import annotations
 
 import time
-from typing import TYPE_CHECKING
 
 import dns.rcode
 import dns.rdatatype
 import dns.resolver
 
 from dns_forwarder.logging import get_logger
+from dns_forwarder.pipeline import RequestContext
 from dns_forwarder.plugin_api import EmptyModel, Plugin, PluginRegistry
 
 from .models import QUERY_LOG_STORE_KEY, QueryLogPayload, QueryLogPluginConfig
 from .service import QueryLogStore
-
-if TYPE_CHECKING:
-    from dns_forwarder.pipeline import RequestContext
 
 logger = get_logger("plugins.query_log")
 
@@ -30,7 +27,7 @@ class QueryLogPlugin(Plugin):
     name = "query-log-plugin"
     config_model = QueryLogPluginConfig
     variables_model = EmptyModel
-    ui_meta = {  # noqa: RUF012  # read-only frozen-style plugin metadata
+    ui_meta = {
         "title": "Query Log Plugin",
         "description": "记录外部查询的时间、类型和结果摘要，并供 WebUI 实时观测。",
     }
@@ -41,11 +38,7 @@ class QueryLogPlugin(Plugin):
 
     async def setup(self, registry: PluginRegistry) -> None:
         existing = registry.context_registry.get(QUERY_LOG_STORE_KEY)
-        if (
-            existing is not None
-            and existing.factory is None
-            and isinstance(existing.value, QueryLogStore)
-        ):
+        if existing is not None and existing.factory is None and isinstance(existing.value, QueryLogStore):
             existing.value.resize(self.runtime_config.max_entries)
             self._store = existing.value
             return
@@ -65,12 +58,8 @@ class QueryLogPlugin(Plugin):
             listener=context.listener_name,
             rcode=dns.rcode.to_text(context.final_response.rcode()),
             result_summary=self._build_result_summary(context.final_answer, context.final_response),
-            upstream=context.upstream_results[-1].upstream_name
-            if context.upstream_results
-            else None,
-            duration_ms=context.upstream_results[-1].duration_ms
-            if context.upstream_results
-            else None,
+            upstream=context.upstream_results[-1].upstream_name if context.upstream_results else None,
+            duration_ms=context.upstream_results[-1].duration_ms if context.upstream_results else None,
         )
         entry = await self._store.append(payload)
         logger.debug(
@@ -95,27 +84,23 @@ class QueryLogPlugin(Plugin):
             return "NOERROR empty"
 
         if answer.rdtype in {dns.rdatatype.A, dns.rdatatype.AAAA}:
-            return QueryLogPlugin._format_address_summary(answer)
+            addresses = [
+                record.address
+                for record in answer.rrset
+                if getattr(record, "address", None) is not None
+            ]
+            if not addresses:
+                return f"{dns.rdatatype.to_text(answer.rdtype)} x{len(answer.rrset)}"
+            display = ", ".join(addresses[:3])
+            extra = len(addresses) - 3
+            if extra > 0:
+                return f"{dns.rdatatype.to_text(answer.rdtype)} {display} +{extra}"
+            return f"{dns.rdatatype.to_text(answer.rdtype)} {display}"
 
         if answer.rdtype == dns.rdatatype.HTTPS:
             return f"HTTPS x{len(answer.rrset)}"
 
         return f"{dns.rdatatype.to_text(answer.rdtype)} x{len(answer.rrset)}"
-
-    @staticmethod
-    def _format_address_summary(answer: dns.resolver.Answer) -> str:
-        addresses = [
-            record.address
-            for record in answer.rrset
-            if getattr(record, "address", None) is not None
-        ]
-        if not addresses:
-            return f"{dns.rdatatype.to_text(answer.rdtype)} x{len(answer.rrset)}"
-        display = ", ".join(addresses[:3])
-        extra = len(addresses) - 3
-        if extra > 0:
-            return f"{dns.rdatatype.to_text(answer.rdtype)} {display} +{extra}"
-        return f"{dns.rdatatype.to_text(answer.rdtype)} {display}"
 
 
 plugin = QueryLogPlugin()

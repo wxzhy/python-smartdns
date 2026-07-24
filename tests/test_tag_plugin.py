@@ -1,7 +1,7 @@
 from __future__ import annotations
 
+from pathlib import Path
 from types import SimpleNamespace
-from typing import TYPE_CHECKING
 
 import dns.message
 import dns.rdataclass
@@ -12,9 +12,6 @@ from dns_forwarder.core import DOMAINSET_CONTEXT_KEY, IPSET_CONTEXT_KEY, DomainS
 from dns_forwarder.pipeline import RequestContext, UpstreamResult, build_answer_from_response
 from dns_forwarder.plugin_api import PluginManager, PluginRegistry
 from plugins.tag_plugin import HAS_HINT_TAG, TagPlugin, get_domainset, get_ipset
-
-if TYPE_CHECKING:
-    from pathlib import Path
 
 
 def _write_lines(path: Path, lines: list[str]) -> None:
@@ -38,6 +35,18 @@ def test_domainset_merges_same_tag_files_and_domain_suffix_matches(tmp_path: Pat
     assert domainset.lookup("api.another.example.org") == {"proxy"}
     assert domainset.lookup("a.b.c.com") == {"deep", "suffix"}
     assert domainset.lookup("example.net") == set()
+
+
+def test_domainset_normalizes_geosite_plus_dot_suffix(tmp_path: Path) -> None:
+    domain_dir = tmp_path / "domains"
+    domain_dir.mkdir()
+    _write_lines(domain_dir / "proxy.list", ["+.anthropic.com"])
+
+    domainset = DomainSet(str(domain_dir))
+
+    assert domainset.lookup("anthropic.com") == {"proxy"}
+    assert domainset.lookup("api.anthropic.com") == {"proxy"}
+    assert domainset.lookup("notanthropic.com") == set()
 
 
 def test_ipset_unions_covering_ip_prefix_tags(tmp_path: Path) -> None:
@@ -64,6 +73,19 @@ def test_domainset_allows_same_domain_in_multiple_tags(tmp_path: Path) -> None:
     assert domainset.lookup("example.org") == {"proxy", "domestic"}
 
 
+def test_domainset_snapshot_uses_mmap_and_preserves_suffix_matches(tmp_path: Path) -> None:
+    domain_dir = tmp_path / "domains"
+    domain_dir.mkdir()
+    _write_lines(domain_dir / "proxy.list", ["example.org"])
+    _write_lines(domain_dir / "domestic.list", ["www.example.org"])
+
+    domainset = DomainSet(str(domain_dir))
+    restored = DomainSet.from_snapshot(domainset.save_mmap(tmp_path / "domainset.marisa"))
+
+    assert restored.lookup("www.example.org") == {"proxy", "domestic"}
+    assert restored.lookup("api.example.org") == {"proxy"}
+
+
 def test_ipset_allows_same_network_in_multiple_tags(tmp_path: Path) -> None:
     ip_dir = tmp_path / "ips"
     ip_dir.mkdir()
@@ -73,6 +95,19 @@ def test_ipset_allows_same_network_in_multiple_tags(tmp_path: Path) -> None:
     ipset = IPSet(str(ip_dir))
 
     assert ipset.lookup("203.0.113.8") == {"proxy", "domestic"}
+
+
+def test_ipset_snapshot_preserves_covering_prefix_tags(tmp_path: Path) -> None:
+    ip_dir = tmp_path / "ips"
+    ip_dir.mkdir()
+    _write_lines(ip_dir / "proxy.list", ["203.0.112.0/20", "203.0.113.8/32"])
+    _write_lines(ip_dir / "domestic.list", ["203.0.113.0/25"])
+
+    ipset = IPSet(str(ip_dir))
+    restored = IPSet.from_snapshot(ipset.to_snapshot())
+
+    assert restored.lookup("203.0.113.8") == {"proxy", "domestic"}
+    assert restored.lookup("198.51.100.8") == set()
 
 
 async def test_tag_plugin_uses_shared_domainset_and_ipset(tmp_path: Path) -> None:

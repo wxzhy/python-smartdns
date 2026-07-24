@@ -1,7 +1,9 @@
 from __future__ import annotations
 
+import anyio
 import asyncio
-from typing import TYPE_CHECKING, Any
+from collections.abc import Callable
+from typing import Any
 
 import dns.message
 import dns.opcode
@@ -10,8 +12,11 @@ import dns.rdataclass
 import dns.rdatatype
 import dns.resolver
 
+from dns_forwarder.config import AppConfig
+from dns_forwarder.dispatcher import DispatcherRegistry
 from dns_forwarder.logging import format_tags, get_logger
 from dns_forwarder.pipeline.context import (
+    NestedResolveHandler,
     NestedResolveRecursionError,
     RequestContext,
     UpstreamResult,
@@ -20,15 +25,9 @@ from dns_forwarder.pipeline.context import (
     make_error_response,
     sync_answer_response,
 )
+from dns_forwarder.plugin_api import PluginManager
+from dns_forwarder.resolver import ResolverManager
 from dns_forwarder.rules import RuleEngine
-
-if TYPE_CHECKING:
-    from collections.abc import Callable
-
-    from dns_forwarder.config import AppConfig
-    from dns_forwarder.dispatcher import DispatcherRegistry
-    from dns_forwarder.plugin_api import PluginManager
-    from dns_forwarder.resolver import ResolverManager
 
 
 class PipelineEngine:
@@ -40,10 +39,12 @@ class PipelineEngine:
         resolver_manager: ResolverManager,
         dispatcher_registry: DispatcherRegistry,
         plugin_manager: PluginManager,
+        nested_resolve_handler: NestedResolveHandler | None = None,
     ) -> None:
         self._resolver_manager = resolver_manager
         self._dispatcher_registry = dispatcher_registry
         self._plugin_manager = plugin_manager
+        self._nested_resolve_handler = nested_resolve_handler
         self._rule_engine = RuleEngine(config.rules, config.runtime.default_upstream_group)
         self._default_dispatcher = config.runtime.default_upstream_policy
         self._logger = get_logger("pipeline.engine")
@@ -77,8 +78,7 @@ class PipelineEngine:
                 format_tags(context.upstream_results[-1].tags) if context.upstream_results else "[]"
             )
             self._logger.debug(
-                "请求处理完成 request_id=%s listener=%s rcode=%s has_answer=%s "
-                "rrset_size=%s request_tags=%s result_tags=%s",
+                "请求处理完成 request_id=%s listener=%s rcode=%s has_answer=%s rrset_size=%s request_tags=%s result_tags=%s",
                 context.request_id,
                 context.listener_name,
                 context.final_response.rcode() if context.final_response is not None else "none",
@@ -92,7 +92,7 @@ class PipelineEngine:
                 self._logger.error("最终响应为空 request_id=%s，返回 SERVFAIL", context.request_id)
                 return make_error_response(request, dns.rcode.SERVFAIL)
             return clone_response_for_request(context.final_response, request)
-        except asyncio.CancelledError:
+        except (asyncio.CancelledError, anyio.get_cancelled_exc_class()):
             error_response = make_error_response(request, dns.rcode.SERVFAIL)
             context.final_response = error_response
             context.final_answer = build_answer_from_response(request, error_response)
@@ -132,8 +132,7 @@ class PipelineEngine:
         question = request.question[0]
         if question.rdclass != dns.rdataclass.IN:
             self._logger.warning(
-                "收到不支持的 DNS 请求 class request_id=%s listener=%s "
-                "client=%r qclass=%s qname=%s",
+                "收到不支持的 DNS 请求 class request_id=%s listener=%s client=%r qclass=%s qname=%s",
                 request.id,
                 listener_name,
                 clientaddr,
@@ -178,14 +177,13 @@ class PipelineEngine:
         if context.final_answer is not None or context.final_response is not None:
             return False
 
-        upstream_hook_tasks: list[asyncio.Task[None]] = []
-        result = await self._dispatch_context(
-            context,
-            on_result=lambda item: upstream_hook_tasks.append(
-                asyncio.create_task(self._plugin_manager.on_upstream_response(context, item))
-            ),
-        )
-        await self._wait_upstream_hook_tasks(upstream_hook_tasks)
+        async with anyio.create_task_group() as tg:
+            result = await self._dispatch_context(
+                context,
+                on_result=lambda item: tg.start_soon(
+                    self._plugin_manager.on_upstream_response, context, item
+                ),
+            )
         self._logger.debug(
             "dispatcher 返回 request_id=%s upstream=%s success=%s error=%s tags=%s",
             context.request_id,
@@ -223,16 +221,10 @@ class PipelineEngine:
         clientaddr: Any,
         listener_name: str,
         *,
-        nested_state: tuple[
-            dict[str, Any] | None,
-            dict[str, Any] | None,
-            tuple[tuple[str, str], ...],
-        ]
-        | None = None,
+        extensions: dict[str, Any] | None = None,
+        answer_registry_refs: dict[str, Any] | None = None,
+        nested_resolve_chain: tuple[tuple[str, str], ...] = (),
     ) -> RequestContext:
-        extensions, answer_registry_refs, nested_resolve_chain = (
-            nested_state if nested_state is not None else (None, None, ())
-        )
         return RequestContext(
             request=request,
             clientaddr=clientaddr,
@@ -247,7 +239,7 @@ class PipelineEngine:
                 if answer_registry_refs is None
                 else dict(answer_registry_refs)
             ),
-            _resolve_handler=self._resolve_nested,
+            _resolve_handler=self._nested_resolve_handler or self._resolve_nested,
             _nested_resolve_chain=nested_resolve_chain,
             _nested_resolve_max_depth=self.MAX_NESTED_RESOLVE_DEPTH,
         )
@@ -281,14 +273,7 @@ class PipelineEngine:
         context.upstream_results.append(result)
         return result
 
-    @staticmethod
-    async def _wait_upstream_hook_tasks(tasks: list[asyncio.Task[None]]) -> None:
-        if not tasks:
-            return
-        results = await asyncio.gather(*tasks, return_exceptions=True)
-        for item in results:
-            if isinstance(item, BaseException):
-                raise item
+
 
     async def _resolve_nested(
         self,
@@ -309,11 +294,9 @@ class PipelineEngine:
             request=nested_request,
             clientaddr=context.clientaddr,
             listener_name=context.listener_name,
-            nested_state=(
-                context.extensions,
-                context.answer_registry_refs,
-                (*context._nested_resolve_chain, signature),
-            ),
+            extensions=context.extensions,
+            answer_registry_refs=context.answer_registry_refs,
+            nested_resolve_chain=context._nested_resolve_chain + (signature,),
         )
         self._logger.debug(
             "发起内部解析 outer_request_id=%s request_id=%s qname=%s qtype=%s depth=%s",
@@ -324,10 +307,44 @@ class PipelineEngine:
             len(nested_context._nested_resolve_chain),
         )
         result = await self._dispatch_context(nested_context)
+        return self._answer_from_nested_result(context, nested_context, result)
+
+    async def resolve_nested_query(
+        self,
+        qname: str,
+        qtype: str,
+        clientaddr: Any,
+        listener_name: str,
+        nested_resolve_chain: tuple[tuple[str, str], ...],
+    ) -> dns.resolver.Answer:
+        nested_request = dns.message.make_query(qname, qtype, rdclass=dns.rdataclass.IN)
+        nested_context = self._build_context(
+            request=nested_request,
+            clientaddr=clientaddr,
+            listener_name=listener_name,
+            nested_resolve_chain=nested_resolve_chain,
+        )
+        self._logger.debug(
+            "发起 IPC 内部解析 request_id=%s qname=%s qtype=%s depth=%s",
+            nested_context.request_id,
+            qname,
+            qtype,
+            len(nested_context._nested_resolve_chain),
+        )
+        result = await self._dispatch_context(nested_context)
+        return self._answer_from_nested_result(None, nested_context, result)
+
+    def _answer_from_nested_result(
+        self,
+        outer_context: RequestContext | None,
+        nested_context: RequestContext,
+        result: UpstreamResult,
+    ) -> dns.resolver.Answer:
+        outer_request_id = outer_context.request_id if outer_context is not None else "ipc"
         if result.answer is not None:
             self._logger.debug(
                 "内部解析成功 outer_request_id=%s request_id=%s upstream=%s duration_ms=%.2f",
-                context.request_id,
+                outer_request_id,
                 nested_context.request_id,
                 result.upstream_name,
                 result.duration_ms,
@@ -336,13 +353,18 @@ class PipelineEngine:
         if result.error is not None:
             self._logger.debug(
                 "内部解析失败 outer_request_id=%s request_id=%s upstream=%s error=%s",
-                context.request_id,
+                outer_request_id,
                 nested_context.request_id,
                 result.upstream_name,
                 type(result.error).__name__,
             )
             raise result.error
-        raise RuntimeError(f"内部解析未返回有效答案 qname={qname} qtype={qtype}")
+        question = nested_context.request.question[0]
+        raise RuntimeError(
+            "内部解析未返回有效答案 "
+            f"qname={question.name.to_text().rstrip('.')} "
+            f"qtype={dns.rdatatype.to_text(question.rdtype)}"
+        )
 
     def _finalize_context(self, context: RequestContext) -> None:
         if context.final_answer is None and context.final_response is not None:

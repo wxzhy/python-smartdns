@@ -10,6 +10,13 @@
       "114.114.114.114",
       "119.29.29.29"
     ],
+    "multiprocess": {
+      "workers": "auto",
+      "start_method": "auto",
+      "queue_size": 1024,
+      "response_timeout": 10.0,
+      "front_cache_size": 100000
+    },
     "hosts": {
       "jxl61mtx82.cloudflare-gateway.com": [
         "162.159.38.0",
@@ -66,6 +73,16 @@
       "servers": [
         "114.114.114.114",
         "114.114.115.115"
+      ]
+    },
+    {
+      "name": "isp",
+      "protocol": "aiodns",
+      "servers": [
+        "218.2.2.2",
+        "218.4.4.4",
+        "240e:5a::6666",
+        "240e:5b::6666"
       ]
     },
     {
@@ -208,6 +225,12 @@
       ]
     },
     {
+      "name": "isp",
+      "nameservers": [
+        "isp"
+      ]
+    },
+    {
       "name": "alidns",
       "nameservers": [
         "alidns"
@@ -315,6 +338,7 @@
         "alidns",
         "dnspod",
         "trafficroute",
+        "isp",
         "google-v4",
         "google-v6",
         "cf",
@@ -330,7 +354,8 @@
         "114dns",
         "alidns",
         "dnspod",
-        "trafficroute"
+        "trafficroute",
+        "isp"
       ]
     },
     {
@@ -473,6 +498,9 @@
         "response_ip_limit": 2,
         "response_ttl_seconds": 600,
         "skip_tags": [],
+        "no_speedtest_tags": [
+          "private"
+        ],
         "fallback_rules": [
           {
             "match_tags": [

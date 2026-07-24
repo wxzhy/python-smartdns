@@ -1,18 +1,16 @@
 from __future__ import annotations
 
-from collections.abc import Callable
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING, Any
+from types import ModuleType
+from typing import TYPE_CHECKING, Any, Callable
 
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict
 
 from dns_forwarder.logging import get_logger
 
 from .static_plugins import load_static_plugin_module
 
 if TYPE_CHECKING:
-    from types import ModuleType
-
     import dns.message
 
     from dns_forwarder.config.models import PluginConfig
@@ -25,14 +23,30 @@ class EmptyModel(BaseModel):
     """默认的空插件配置模型。"""
 
 
+class StrictPluginModel(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+
+def normalize_tag_list(value: list[str] | None) -> list[str]:
+    if value is None:
+        return []
+    seen: set[str] = set()
+    normalized: list[str] = []
+    for item in value:
+        tag = str(item).strip()
+        if not tag or tag in seen:
+            continue
+        seen.add(tag)
+        normalized.append(tag)
+    return normalized
+
+
 AnswerBuilder = Callable[["RequestContext"], "dns.message.Message"]
 ContextFactory = Callable[[], Any]
 
 
 @dataclass(frozen=True, slots=True)
 class ContextRegistration:
-    """上下文注册项：可以是固定值，也可以是惰性 factory（按需构建）。"""
-
     value: Any = None
     factory: ContextFactory | None = None
 
@@ -44,8 +58,6 @@ class ContextRegistration:
 
 @dataclass(slots=True)
 class PluginRegistry:
-    """插件共享注册表，聚合 context / resolver / answer 三类注册项。"""
-
     context_registry: dict[str, ContextRegistration] = field(default_factory=dict)
     resolver_registry: dict[str, Any] = field(default_factory=dict)
     answer_registry: dict[str, AnswerBuilder] = field(default_factory=dict)
@@ -70,18 +82,20 @@ class PluginRegistry:
 
 
 class Plugin:
-    """插件基类：定义名称、配置模型、各阶段执行顺序与可覆盖的钩子方法。"""
-
     name = "plugin"
     config_model: type[BaseModel] = EmptyModel
     variables_model: type[BaseModel] = EmptyModel
-    ui_meta: dict[str, Any] = {}  # noqa: RUF012 - read-only class-level metadata default
+    ui_meta: dict[str, Any] = {}
     request_order: int = 0
     upstream_response_order: int = 0
     response_order: int = 0
     observe_order: int = 0
     runtime_config: BaseModel = EmptyModel()
     runtime_variables: BaseModel = EmptyModel()
+
+    @staticmethod
+    def _has_any_tag(current_tags: set[str], configured_tags: list[str]) -> bool:
+        return bool(current_tags.intersection(configured_tags))
 
     def bind(self, config: BaseModel, variables: BaseModel) -> None:
         self.runtime_config = config
@@ -90,26 +104,26 @@ class Plugin:
     async def setup(self, registry: PluginRegistry) -> None:
         return None
 
-    async def on_request(self, context: RequestContext) -> None:
+    async def on_request(self, context: "RequestContext") -> None:
         return None
 
-    async def on_upstream_response(self, context: RequestContext, result: UpstreamResult) -> None:
+    async def on_upstream_response(
+        self, context: "RequestContext", result: "UpstreamResult"
+    ) -> None:
         return None
 
-    async def on_response(self, context: RequestContext) -> None:
+    async def on_response(self, context: "RequestContext") -> None:
         return None
 
-    async def on_observe(self, context: RequestContext) -> None:
+    async def on_observe(self, context: "RequestContext") -> None:
         return None
 
-    async def on_finish(self, context: RequestContext) -> None:
+    async def on_finish(self, context: "RequestContext") -> None:
         return None
 
 
 @dataclass(slots=True)
 class LoadedPlugin:
-    """已加载插件：实例及其物化后的配置、变量与原始配置。"""
-
     instance: Plugin
     config: BaseModel
     variables: BaseModel
@@ -117,8 +131,6 @@ class LoadedPlugin:
 
 
 class PluginManager:
-    """插件管理器：持有已加载插件列表与共享注册表，负责按阶段分发调用。"""
-
     def __init__(self, loaded_plugins: list[LoadedPlugin], registry: PluginRegistry) -> None:
         self.loaded_plugins = loaded_plugins
         self.registry = registry
@@ -129,7 +141,7 @@ class PluginManager:
         plugin_configs: list[PluginConfig],
         plugin_dirs: list[str],
         shared_contexts: dict[str, Any] | None = None,
-    ) -> PluginManager:
+    ) -> "PluginManager":
         registry = PluginRegistry()
         if shared_contexts is not None:
             for name, value in shared_contexts.items():
@@ -184,28 +196,30 @@ class PluginManager:
     def _ordered_plugins(self, order_attr: str) -> list[LoadedPlugin]:
         return sorted(self.loaded_plugins, key=lambda item: getattr(item.instance, order_attr))
 
-    async def on_request(self, context: RequestContext) -> None:
+    async def on_request(self, context: "RequestContext") -> None:
         for plugin in self._ordered_plugins("request_order"):
             context.metadata.setdefault("plugin_order", []).append(plugin.instance.name)
             await plugin.instance.on_request(context)
             if context.drop_request or context.stop_processing:
                 break
 
-    async def on_upstream_response(self, context: RequestContext, result: UpstreamResult) -> None:
+    async def on_upstream_response(
+        self, context: "RequestContext", result: "UpstreamResult"
+    ) -> None:
         for plugin in self._ordered_plugins("upstream_response_order"):
             await plugin.instance.on_upstream_response(context, result)
 
-    async def on_response(self, context: RequestContext) -> None:
+    async def on_response(self, context: "RequestContext") -> None:
         for plugin in self._ordered_plugins("response_order"):
             await plugin.instance.on_response(context)
             if context.drop_request or context.stop_processing:
                 break
 
-    async def on_observe(self, context: RequestContext) -> None:
+    async def on_observe(self, context: "RequestContext") -> None:
         for plugin in self._ordered_plugins("observe_order"):
             await plugin.instance.on_observe(context)
 
-    async def on_finish(self, context: RequestContext) -> None:
+    async def on_finish(self, context: "RequestContext") -> None:
         for plugin in self.loaded_plugins:
             try:
                 await plugin.instance.on_finish(context)
@@ -217,15 +231,16 @@ class PluginManager:
                 )
 
     def describe(self) -> list[dict[str, Any]]:
-        """汇总所有已加载插件的可展示元信息，供 WebUI 渲染。"""
-        return [
-            {
-                "name": plugin.raw_config.name,
-                "module": plugin.raw_config.module,
-                "plugin_name": plugin.instance.name,
-                "ui_meta": plugin.instance.ui_meta,
-                "config_schema": plugin.config.model_json_schema(),
-                "variables_schema": plugin.variables.model_json_schema(),
-            }
-            for plugin in self.loaded_plugins
-        ]
+        result: list[dict[str, Any]] = []
+        for plugin in self.loaded_plugins:
+            result.append(
+                {
+                    "name": plugin.raw_config.name,
+                    "module": plugin.raw_config.module,
+                    "plugin_name": plugin.instance.name,
+                    "ui_meta": plugin.instance.ui_meta,
+                    "config_schema": plugin.config.model_json_schema(),
+                    "variables_schema": plugin.variables.model_json_schema(),
+                }
+            )
+        return result

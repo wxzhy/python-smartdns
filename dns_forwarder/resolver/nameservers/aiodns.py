@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import asyncio
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Any
+from typing import Any
 
 import aiodns
 import dns.asyncbackend
@@ -18,23 +18,22 @@ import dns.rrset
 import dns.wire
 import pycares
 from aiodns import error as aiodns_error
-from dns.rdtypes.ANY.CAA import CAA as CAAData  # noqa: N811  # dnspython rdata 类按库 API 命名
-from dns.rdtypes.ANY.CNAME import CNAME as CNAMEData  # noqa: N811
-from dns.rdtypes.ANY.MX import MX as MXData  # noqa: N811
-from dns.rdtypes.ANY.NS import NS as NSData  # noqa: N811
-from dns.rdtypes.ANY.PTR import PTR as PTRData  # noqa: N811
-from dns.rdtypes.ANY.SOA import SOA as SOAData  # noqa: N811
-from dns.rdtypes.ANY.TLSA import TLSA as TLSAData  # noqa: N811
-from dns.rdtypes.ANY.TXT import TXT as TXTData  # noqa: N811
-from dns.rdtypes.ANY.URI import URI as URIData  # noqa: N811
+from dns.rdtypes.ANY.CAA import CAA as CAAData
+from dns.rdtypes.ANY.CNAME import CNAME as CNAMEData
+from dns.rdtypes.ANY.MX import MX as MXData
+from dns.rdtypes.ANY.NS import NS as NSData
+from dns.rdtypes.ANY.PTR import PTR as PTRData
+from dns.rdtypes.ANY.SOA import SOA as SOAData
+from dns.rdtypes.ANY.TLSA import TLSA as TLSAData
+from dns.rdtypes.ANY.TXT import TXT as TXTData
+from dns.rdtypes.ANY.URI import URI as URIData
 from dns.rdtypes.IN.A import A as AData
-from dns.rdtypes.IN.AAAA import AAAA as AAAAData  # noqa: N811
-from dns.rdtypes.IN.HTTPS import HTTPS as HTTPSData  # noqa: N811
-from dns.rdtypes.IN.NAPTR import NAPTR as NAPTRData  # noqa: N811
-from dns.rdtypes.IN.SRV import SRV as SRVData  # noqa: N811
+from dns.rdtypes.IN.AAAA import AAAA as AAAAData
+from dns.rdtypes.IN.HTTPS import HTTPS as HTTPSData
+from dns.rdtypes.IN.NAPTR import NAPTR as NAPTRData
+from dns.rdtypes.IN.SRV import SRV as SRVData
 
-if TYPE_CHECKING:
-    from dns_forwarder.config import AiodnsNameserverConfig
+from dns_forwarder.config import AiodnsNameserverConfig
 
 
 class AiodnsDNSResolver(aiodns.DNSResolver):
@@ -102,11 +101,9 @@ def _get_resolver(
 
 
 async def close_shared_sessions() -> None:
-    # 仅关闭当前 loop 的 resolver，与其他 nameserver 模块行为一致。
-    current_loop_id = id(asyncio.get_running_loop())
-    stale_keys = [key for key in _RESOLVERS if key.loop_id == current_loop_id]
-    for key in stale_keys:
-        resolver = _RESOLVERS.pop(key)
+    resolvers = list(_RESOLVERS.values())
+    _RESOLVERS.clear()
+    for resolver in resolvers:
         await resolver.close()
 
 
@@ -139,7 +136,7 @@ class AiodnsNameserver(dns.nameserver.Nameserver):
     def answer_port(self) -> int:
         return self.port
 
-    def query(  # noqa: PLR0913  # 形参与 dnspython Nameserver 接口一致
+    def query(
         self,
         request: dns.message.QueryMessage,
         timeout: float,
@@ -151,10 +148,10 @@ class AiodnsNameserver(dns.nameserver.Nameserver):
     ) -> dns.message.Message:
         raise NotImplementedError("aiodns nameserver only supports async queries")
 
-    async def async_query(  # noqa: PLR0913  # 形参与 dnspython Nameserver 接口一致
+    async def async_query(
         self,
         request: dns.message.QueryMessage,
-        timeout: float,  # noqa: ASYNC109  # timeout 属 dnspython/socket 接口契约
+        timeout: float,
         source: str | None,
         source_port: int,
         max_size: bool,
@@ -236,7 +233,7 @@ def _append_records(
         rrset.add(rdata, record.ttl)
 
 
-def _record_data_to_rdata(  # noqa: PLR0911, PLR0912  # 按 pycares 数据类型分发，分支数取决于记录类型
+def _record_data_to_rdata(
     data: Any,
     rdclass: dns.rdataclass.RdataClass,
     rdtype: dns.rdatatype.RdataType,

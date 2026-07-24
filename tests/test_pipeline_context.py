@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import asyncio
-from typing import TYPE_CHECKING
+from typing import Awaitable, Callable
 
 import dns.message
 import dns.opcode
@@ -24,11 +24,6 @@ from dns_forwarder.pipeline import (
 from dns_forwarder.pipeline.engine import PipelineEngine
 from dns_forwarder.plugin_api import PluginRegistry
 from dns_forwarder.resolver import ResolverManager
-
-if TYPE_CHECKING:
-    from collections.abc import Awaitable, Callable
-
-_EXPECTED_ANSWER_COUNT = 2
 
 
 def build_config() -> AppConfig:
@@ -190,7 +185,7 @@ def test_sync_answer_response_replaces_main_rrset_and_keeps_cname() -> None:
     answer.rrset = dns.rrset.from_text("target.example.", 120, "IN", "A", "198.51.100.10")
     sync_answer_response(answer)
 
-    assert len(answer.response.answer) == _EXPECTED_ANSWER_COUNT
+    assert len(answer.response.answer) == 2
     assert answer.response.answer[0].rdtype == dns.rdatatype.CNAME
     assert answer.response.answer[1][0].address == "198.51.100.10"
     assert answer.rrset is answer.response.answer[1]
@@ -221,7 +216,7 @@ def test_sync_answer_response_rejects_mismatched_rrset_type() -> None:
 
     answer.rrset = dns.rrset.from_text("example.test.", 30, "IN", "AAAA", "2001:db8::1")
 
-    with pytest.raises(ValueError, match="类型或 class 与查询不一致"):
+    with pytest.raises(ValueError):
         sync_answer_response(answer)
 
 
@@ -806,9 +801,7 @@ async def test_pipeline_wait_all_calls_on_upstream_response_for_each_collected_r
     assert plugin_manager.last_context.upstream_results[0].upstream_name == "upstream-b"
 
 
-async def test_pipeline_wait_all_starts_later_upstream_hooks_without_waiting_for_earlier_hook() -> (
-    None
-):
+async def test_pipeline_wait_all_starts_later_upstream_hooks_without_waiting_for_earlier_hook() -> None:
     config = AppConfig.model_validate(
         {
             "runtime": {

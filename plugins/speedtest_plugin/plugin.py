@@ -3,30 +3,26 @@ from __future__ import annotations
 import asyncio
 import ipaddress
 import time
-from typing import TYPE_CHECKING
 
+import dns.rcode
 import dns.rdatatype
 import dns.resolver
 import dns.rrset
 from pydantic import BaseModel, Field, field_validator, model_validator
 
 from dns_forwarder.logging import format_tags, get_logger
-from dns_forwarder.pipeline import sync_answer_rrset_to_response
-from dns_forwarder.plugin_api import EmptyModel, Plugin, PluginRegistry
+from dns_forwarder.pipeline import RequestContext, UpstreamResult, sync_answer_rrset_to_response
+from dns_forwarder.plugin_api import EmptyModel, Plugin, PluginRegistry, normalize_tag_list
 
 from .models import (
     SPEEDTEST_CONTEXT_KEY,
     SPEEDTEST_SERVICE_KEY,
+    IpRttResult,
     SpeedTestContext,
 )
 from .service import SpeedTestService
 
-if TYPE_CHECKING:
-    from dns_forwarder.pipeline import RequestContext, UpstreamResult
-
 logger = get_logger("plugins.speedtest")
-
-IPV4_VERSION = 4
 
 
 ADDRESS_TYPES = {dns.rdatatype.A, dns.rdatatype.AAAA}
@@ -41,7 +37,7 @@ class SpeedTestFallbackRuleConfig(BaseModel):
     @field_validator("match_tags", "exclude_tags", mode="before")
     @classmethod
     def normalize_tags(cls, value: list[str] | None) -> list[str]:
-        return _normalize_tags(value)
+        return normalize_tag_list(value)
 
     @field_validator("ipv4_addresses", mode="before")
     @classmethod
@@ -54,7 +50,7 @@ class SpeedTestFallbackRuleConfig(BaseModel):
         return _normalize_addresses(value, version=6)
 
     @model_validator(mode="after")
-    def validate_addresses(self) -> SpeedTestFallbackRuleConfig:
+    def validate_addresses(self) -> "SpeedTestFallbackRuleConfig":
         if not self.ipv4_addresses and not self.ipv6_addresses:
             raise ValueError("fallback 规则至少需要一个 IPv4 或 IPv6 地址")
         return self
@@ -69,13 +65,16 @@ class SpeedTestPluginConfig(BaseModel):
     ping_privileged: bool = False
     response_ip_limit: int = Field(default=2, ge=1)
     response_ttl_seconds: int = Field(default=60, ge=1)
+    rtt_tolerance_ms: float = Field(default=50.0, ge=0.0)
+    rtt_gap_threshold_ms: float = Field(default=20.0, ge=0.0)
     skip_tags: list[str] = Field(default_factory=list)
+    no_speedtest_tags: list[str] = Field(default_factory=list)
     fallback_rules: list[SpeedTestFallbackRuleConfig] = Field(default_factory=list)
 
-    @field_validator("skip_tags", mode="before")
+    @field_validator("skip_tags", "no_speedtest_tags", mode="before")
     @classmethod
     def normalize_global_tags(cls, value: list[str] | None) -> list[str]:
-        return _normalize_tags(value)
+        return normalize_tag_list(value)
 
 
 def get_speedtest_context(context: RequestContext) -> SpeedTestContext:
@@ -91,12 +90,9 @@ class SpeedTestPlugin(Plugin):
     variables_model = EmptyModel
     upstream_response_order = 200
     response_order = 600
-    ui_meta = {  # noqa: RUF012  # read-only frozen-style plugin metadata
+    ui_meta = {
         "title": "SpeedTest Plugin",
-        "description": (
-            "在 upstream_response 阶段对响应 IP 执行 ICMP/TCP(80/443) 并发测速，"
-            "并写入 speedtest.context。"
-        ),
+        "description": "在 upstream_response 阶段对响应 IP 执行 ICMP/TCP(80/443) 并发测速，并写入 speedtest.context。",
     }
 
     def __init__(self) -> None:
@@ -115,11 +111,11 @@ class SpeedTestPlugin(Plugin):
         registry.register_context(SPEEDTEST_SERVICE_KEY, self._service)
         registry.register_context_factory(SPEEDTEST_CONTEXT_KEY, SpeedTestContext)
         logger.debug(
-            "测速插件初始化完成 response_ip_limit=%s response_ttl=%s "
-            "skip_tags=%s fallback_rule_count=%s",
+            "测速插件初始化完成 response_ip_limit=%s response_ttl=%s skip_tags=%s no_speedtest_tags=%s fallback_rule_count=%s",
             self.runtime_config.response_ip_limit,
             self.runtime_config.response_ttl_seconds,
             self.runtime_config.skip_tags,
+            self.runtime_config.no_speedtest_tags,
             len(self.runtime_config.fallback_rules),
         )
 
@@ -144,6 +140,21 @@ class SpeedTestPlugin(Plugin):
             response_ips,
         )
         speedtest_context = get_speedtest_context(context)
+
+        # 对命中 no_speedtest_tags 的上游结果，其 IP 直接标记为 inf，不实际测速
+        if self._has_any_tag(result.tags, self.runtime_config.no_speedtest_tags):
+            inf_results = self._make_inf_results(response_ips)
+            if inf_results:
+                await speedtest_context.reserve_ips(response_ips)
+                await speedtest_context.add_results(inf_results)
+                logger.debug(
+                    "测速跳过 request_id=%s stage=upstream_response reason=no_speedtest_tags result_tags=%s ips=%s",
+                    context.request_id,
+                    format_tags(result.tags),
+                    response_ips,
+                )
+            return
+
         await self._measure_new_ips(
             context.request_id,
             speedtest_context,
@@ -182,12 +193,12 @@ class SpeedTestPlugin(Plugin):
         answer = context.final_answer
         if (
             answer is not None
-            and answer.rrset is not None
             and answer.rdtype in {dns.rdatatype.A, dns.rdatatype.AAAA}
+            and answer.response.rcode() == dns.rcode.NOERROR
         ):
             speedtest_context = get_speedtest_context(context)
             current_ips = self._extract_unique_ips(answer)
-            candidate_ips = self._collect_candidate_ips(context, answer)
+            candidate_ips = self._collect_candidate_ips(context, answer, speedtest_context)
             if candidate_ips:
                 await self._measure_new_ips(
                     context.request_id,
@@ -203,22 +214,55 @@ class SpeedTestPlugin(Plugin):
             }
             if measured_results:
                 original_order = {ip: index for index, ip in enumerate(candidate_ips)}
-                sorted_ips = [
-                    item.ip
-                    for item in sorted(
-                        measured_results.values(),
-                        key=lambda item: (
-                            item.best_ms if item.best_ms is not None else float("inf"),
-                            original_order[item.ip],
-                        ),
-                    )
-                ]
+                sorted_items = sorted(
+                    measured_results.values(),
+                    key=lambda item: (
+                        item.best_ms if item.best_ms is not None else float("inf"),
+                        original_order[item.ip],
+                    ),
+                )
+                
+                # Apply RTT tolerance to filter out slower IPs
+                filtered_items = []
+                best_ms = None
+                for item in sorted_items:
+                    if item.best_ms is None:
+                        continue
+                    if best_ms is None:
+                        best_ms = item.best_ms
+                    
+                    if item.best_ms - best_ms <= self.runtime_config.rtt_tolerance_ms:
+                        filtered_items.append(item)
+                    else:
+                        break
+                
+                # Fallback to sorted_items if all valid items are filtered out (shouldn't happen)
+                if not filtered_items:
+                    filtered_items = sorted_items
+                
+                truncated_items = []
+                for i, item in enumerate(filtered_items):
+                    if i > 0:
+                        prev_item = filtered_items[i - 1]
+                        if (
+                            item.best_ms is not None
+                            and prev_item.best_ms is not None
+                            and item.best_ms - prev_item.best_ms > self.runtime_config.rtt_gap_threshold_ms
+                        ):
+                            logger.debug(
+                                "测速相邻 IP RTT 差距过大，进行截断 rtt_gap=%.2fms threshold=%.2fms",
+                                item.best_ms - prev_item.best_ms,
+                                self.runtime_config.rtt_gap_threshold_ms,
+                            )
+                            break
+                    truncated_items.append(item)
+
+                sorted_ips = [item.ip for item in truncated_items]
                 sorted_ips = sorted_ips[: self.runtime_config.response_ip_limit]
                 if sorted_ips != current_ips:
                     self._replace_answer_ips(answer, sorted_ips)
                     logger.debug(
-                        "测速结果已应用 request_id=%s qtype=%s current_ips=%s "
-                        "candidate_ips=%s selected_ips=%s",
+                        "测速结果已应用 request_id=%s qtype=%s current_ips=%s candidate_ips=%s selected_ips=%s",
                         context.request_id,
                         dns.rdatatype.to_text(answer.rdtype),
                         current_ips,
@@ -230,8 +274,7 @@ class SpeedTestPlugin(Plugin):
                 if fallback_ips:
                     self._replace_answer_ips(answer, fallback_ips)
                     logger.debug(
-                        "测速 fallback 已应用 request_id=%s qtype=%s "
-                        "request_tags=%s fallback_ips=%s",
+                        "测速 fallback 已应用 request_id=%s qtype=%s request_tags=%s fallback_ips=%s",
                         context.request_id,
                         dns.rdatatype.to_text(answer.rdtype),
                         format_tags(context.tags),
@@ -239,8 +282,7 @@ class SpeedTestPlugin(Plugin):
                     )
                 else:
                     logger.debug(
-                        "测速未得到有效结果且无可用 fallback request_id=%s "
-                        "qtype=%s request_tags=%s",
+                        "测速未得到有效结果且无可用 fallback request_id=%s qtype=%s request_tags=%s",
                         context.request_id,
                         dns.rdatatype.to_text(answer.rdtype),
                         format_tags(context.tags),
@@ -291,10 +333,18 @@ class SpeedTestPlugin(Plugin):
             len(successful_results),
         )
 
+    @staticmethod
+    def _make_inf_results(ips: list[str]) -> list[IpRttResult]:
+        return [IpRttResult(ip=ip, best_ms=float("inf")) for ip in ips]
+
     def _replace_answer_ips(self, answer: dns.resolver.Answer, ips: list[str]) -> None:
-        ttl = max(answer.rrset.ttl, self.runtime_config.response_ttl_seconds)
+        ttl = self.runtime_config.response_ttl_seconds
+        rrset_name = answer.canonical_name
+        if answer.rrset is not None:
+            ttl = max(answer.rrset.ttl, ttl)
+            rrset_name = answer.rrset.name
         answer.rrset = dns.rrset.from_text_list(
-            answer.rrset.name,
+            rrset_name,
             ttl,
             answer.rdclass,
             answer.rdtype,
@@ -318,16 +368,25 @@ class SpeedTestPlugin(Plugin):
         self,
         context: RequestContext,
         answer: dns.resolver.Answer,
+        speedtest_context: SpeedTestContext,
     ) -> list[str]:
         candidates: list[str] = []
         seen: set[str] = set()
+        no_speedtest_tags = self.runtime_config.no_speedtest_tags
+        inf_results: list[IpRttResult] = []
 
-        def add_answer_ips(item: dns.resolver.Answer | None) -> None:
+        def add_answer_ips(
+            item: dns.resolver.Answer | None,
+            *,
+            mark_inf: bool = False,
+        ) -> None:
             for ip in self._extract_unique_ips(item) if item is not None else []:
                 if ip in seen:
                     continue
                 seen.add(ip)
                 candidates.append(ip)
+                if mark_inf:
+                    inf_results.append(IpRttResult(ip=ip, best_ms=float("inf")))
 
         add_answer_ips(answer)
         if not context.upstream_results:
@@ -339,27 +398,17 @@ class SpeedTestPlugin(Plugin):
             key=lambda item: (item.duration_ms, item.upstream_name),
         )
         for result in collected_results:
-            add_answer_ips(result.answer)
+            should_inf = self._has_any_tag(result.tags, no_speedtest_tags)
+            add_answer_ips(result.answer, mark_inf=should_inf)
+
+        # 将 no_speedtest_tags 命中的 IP 的 inf 结果写入 context（同步安全，此处无并发）
+        if inf_results:
+            speedtest_context.ip_rtt_results.extend(inf_results)
+            logger.debug(
+                "测速标记 inf ips=%s reason=no_speedtest_tags",
+                [r.ip for r in inf_results],
+            )
         return candidates
-
-    @staticmethod
-    def _has_any_tag(current_tags: set[str], configured_tags: list[str]) -> bool:
-        return bool(current_tags.intersection(configured_tags))
-
-
-def _normalize_tags(value: list[str] | None) -> list[str]:
-    if value is None:
-        return []
-    seen: set[str] = set()
-    normalized: list[str] = []
-    for item in value:
-        tag = str(item).strip()
-        if not tag or tag in seen:
-            continue
-        seen.add(tag)
-        normalized.append(tag)
-    return normalized
-
 
 def _normalize_addresses(value: list[str] | None, *, version: int) -> list[str]:
     if value is None:
@@ -369,7 +418,7 @@ def _normalize_addresses(value: list[str] | None, *, version: int) -> list[str]:
     for item in value:
         address = ipaddress.ip_address(str(item).strip())
         if address.version != version:
-            family = "IPv4" if version == IPV4_VERSION else "IPv6"
+            family = "IPv4" if version == 4 else "IPv6"
             raise ValueError(f"fallback 地址必须是 {family}")
         text = address.compressed
         if text in seen:

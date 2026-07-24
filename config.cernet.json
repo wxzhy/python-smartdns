@@ -1,0 +1,762 @@
+{
+  "runtime": {
+    "plugin_dirs": [
+      "plugins"
+    ],
+    "loop_policy": "auto",
+    "default_upstream_group": "default",
+    "default_upstream_policy": "race",
+    "bootstrap_resolver": [
+      "114.114.114.114",
+      "119.29.29.29"
+    ],
+    "multiprocess": {
+      "workers": "auto",
+      "start_method": "auto",
+      "queue_size": 1024,
+      "response_timeout": 10.0,
+      "front_cache_size": 100000
+    },
+    "hosts": {
+      "jxl61mtx82.cloudflare-gateway.com": [
+        "162.159.38.0",
+        "162.159.39.0",
+        "162.159.44.0",
+        "162.159.45.0",
+        "172.64.52.0",
+        "172.64.53.0",
+        "108.162.198.0",
+        "2606:4700:52::",
+        "2606:4700:57::",
+        "2606:4700:5a::"
+      ],
+      "v.recipes": [
+        "162.159.38.0",
+        "162.159.39.0",
+        "162.159.44.0",
+        "162.159.45.0",
+        "172.64.52.0",
+        "172.64.53.0",
+        "108.162.198.0",
+        "2606:4700:52::",
+        "2606:4700:57::",
+        "2606:4700:5a::"
+      ]
+    },
+    "fingerprint": "chrome",
+    "log_level": "DEBUG"
+  },
+  "tree_root": {
+    "domain_dir": "tags/geosite",
+    "ip_dir": "tags/geoip"
+  },
+  "listeners": [
+    {
+      "name": "udp-default",
+      "protocol": "udp",
+      "host": "127.0.0.1",
+      "port": 5300,
+      "enabled": true
+    },
+    {
+      "name": "tcp-default",
+      "protocol": "tcp",
+      "host": "127.0.0.1",
+      "port": 5300,
+      "enabled": true
+    }
+  ],
+  "nameservers": [
+    {
+      "name": "114dns",
+      "protocol": "aiodns",
+      "servers": [
+        "114.114.114.114",
+        "114.114.115.115"
+      ]
+    },
+    {
+      "name": "isp",
+      "protocol": "aiodns",
+      "servers": [
+        "218.2.2.2",
+        "218.4.4.4",
+        "240e:5a::6666",
+        "240e:5b::6666"
+      ]
+    },
+    {
+      "name": "cmcc",
+      "protocol": "aiodns",
+      "servers": [
+        "221.131.143.69",
+        "112.4.0.55"
+      ]
+    },
+    {
+      "name": "unicom",
+      "protocol": "aiodns",
+      "servers": [
+        "221.6.4.66",
+        "221.6.4.67"
+      ]
+    },
+    {
+      "name": "alidns",
+      "protocol": "aiodns",
+      "servers": [
+        "223.5.5.5",
+        "223.6.6.6",
+        "2400:3200::1",
+        "2400:3200:baba::1"
+      ]
+    },
+    {
+      "name": "dnspod",
+      "protocol": "aiodns",
+      "servers": [
+        "119.29.29.29",
+        "119.28.28.28"
+      ]
+    },
+    {
+      "name": "trafficroute",
+      "protocol": "aiodns",
+      "servers": [
+        "180.184.1.1",
+        "180.184.2.2"
+      ]
+    },
+    {
+      "name": "cf",
+      "protocol": "curl",
+      "url": "https://jxl61mtx82.cloudflare-gateway.com/dns-query",
+      "verify": true
+    },
+    {
+      "name": "google-a",
+      "protocol": "do53_custom",
+      "address": "8.8.8.8"
+    },
+    {
+      "name": "google-b",
+      "protocol": "do53_custom",
+      "address": "8.8.4.4"
+    },
+    {
+      "name": "google-c",
+      "protocol": "do53_custom",
+      "address": "2001:4860:4860::8888"
+    },
+    {
+      "name": "google-d",
+      "protocol": "do53_custom",
+      "address": "2001:4860:4860::8844"
+    },
+    {
+      "name": "google-e",
+      "protocol": "do53_custom",
+      "address": "2001:4860:4860::64"
+    },
+    {
+      "name": "v-opt",
+      "protocol": "curl",
+      "url": "https://v.recipes/dns-cn"
+    },
+    {
+      "name": "v-ecs",
+      "protocol": "curl",
+      "url": "https://v.recipes/dns-ecs"
+    },
+    {
+      "name": "hinet-a",
+      "protocol": "curl",
+      "url": "https://[2001:b000:168::1]/dns-query",
+      "verify": false
+    },
+    {
+      "name": "hinet-b",
+      "protocol": "curl",
+      "url": "https://[2001:b000:168::2]/dns-query",
+      "verify": false
+    },
+    {
+      "name": "hinet-c",
+      "protocol": "curl",
+      "url": "https://168.95.192.1/dns-query",
+      "verify": false
+    },
+    {
+      "name": "hinet-d",
+      "protocol": "curl",
+      "url": "https://168.95.1.1/dns-query",
+      "verify": false
+    },
+    {
+      "name": "iij-a",
+      "protocol": "curl",
+      "url": "https://[2001:300::5]/dns-query",
+      "verify": false
+    },
+    {
+      "name": "iij-b",
+      "protocol": "curl",
+      "url": "https://[2001:300::6]/dns-query",
+      "verify": false
+    },
+    {
+      "name": "iij-c",
+      "protocol": "curl",
+      "url": "https://103.2.57.5/dns-query",
+      "verify": false
+    },
+    {
+      "name": "iij-d",
+      "protocol": "curl",
+      "url": "https://103.2.57.6/dns-query",
+      "verify": false
+    },
+    {
+      "name": "opennic-a",
+      "protocol": "do53_custom",
+      "address": "2400:8905::f03c:95ff:fe0b:9ffe"
+    },
+    {
+      "name": "opennic-b",
+      "protocol": "do53_custom",
+      "address": "172.233.66.93"
+    }
+  ],
+  "upstreams": [
+    {
+      "name": "cf",
+      "nameservers": [
+        "cf"
+      ]
+    },
+    {
+      "name": "114dns",
+      "nameservers": [
+        "114dns"
+      ]
+    },
+    {
+      "name": "isp",
+      "nameservers": [
+        "isp"
+      ]
+    },
+    {
+      "name": "cmcc",
+      "nameservers": [
+        "cmcc"
+      ]
+    },
+    {
+      "name": "unicom",
+      "nameservers": [
+        "unicom"
+      ]
+    },
+    {
+      "name": "alidns",
+      "nameservers": [
+        "alidns"
+      ]
+    },
+    {
+      "name": "dnspod",
+      "nameservers": [
+        "dnspod"
+      ]
+    },
+    {
+      "name": "trafficroute",
+      "nameservers": [
+        "trafficroute"
+      ]
+    },
+    {
+      "name": "google-v4",
+      "nameservers": [
+        "google-a",
+        "google-b"
+      ],
+      "use_tcp": true
+    },
+    {
+      "name": "google-v6",
+      "nameservers": [
+        "google-c",
+        "google-d",
+        "google-e"
+      ],
+      "use_tcp": true
+    },
+    {
+      "name": "google-cn",
+      "nameservers": [
+        "google-a",
+        "google-b",
+        "google-c",
+        "google-d",
+        "google-e"
+      ],
+      "use_tcp": true,
+      "ecs": "2409:8020:2000::/48"
+    },
+    {
+      "name": "v-ecs-g",
+      "nameservers": [
+        "v-ecs"
+      ],
+      "ecs": "2409:8020:2000::/48"
+    },
+    {
+      "name": "cf-g",
+      "nameservers": [
+        "cf"
+      ],
+      "ecs": "2409:8020:2000::/48"
+    },
+    {
+      "name": "v-opt",
+      "nameservers": [
+        "v-opt"
+      ]
+    },
+    {
+      "name": "v-ecs",
+      "nameservers": [
+        "v-ecs"
+      ]
+    },
+    {
+      "name": "hinet",
+      "nameservers": [
+        "hinet-a",
+        "hinet-b",
+        "hinet-c",
+        "hinet-d"
+      ]
+    },
+    {
+      "name": "iij",
+      "nameservers": [
+        "iij-a",
+        "iij-b",
+        "iij-c",
+        "iij-d"
+      ]
+    },
+    {
+      "name": "opennic",
+      "nameservers": [
+        "opennic-a",
+        "opennic-b"
+      ],
+      "use_tcp": true
+    }
+  ],
+  "groups": [
+    {
+      "name": "default",
+      "upstreams": [
+        "114dns",
+        "alidns",
+        "dnspod",
+        "trafficroute",
+        "isp",
+        "cmcc",
+        "unicom",
+        "google-v4",
+        "google-v6",
+        "cf",
+        "v-opt",
+        "v-ecs",
+        "hinet",
+        "iij"
+      ]
+    },
+    {
+      "name": "cn",
+      "upstreams": [
+        "114dns",
+        "alidns",
+        "dnspod",
+        "trafficroute",
+        "isp",
+        "cmcc",
+        "unicom"
+      ]
+    },
+    {
+      "name": "global",
+      "upstreams": [
+        "google-v4",
+        "google-v6",
+        "cf",
+        "v-opt",
+        "v-ecs",
+        "hinet",
+        "iij"
+      ]
+    },
+    {
+      "name": "open",
+      "upstreams": [
+        "opennic"
+      ]
+    },
+    {
+      "name": "gws",
+      "upstreams": [
+        "google-cn",
+        "cf-g",
+        "v-ecs-g"
+      ]
+    }
+  ],
+  "rules": [
+    {
+      "name": "google-cn",
+      "enabled": true,
+      "match": {
+        "match_tags": [
+          "google-cn"
+        ],
+        "exclude_tags": []
+      },
+      "action": {
+        "upstream_group": "gws",
+        "dispatcher": "wait_all"
+      }
+    },
+    {
+      "name": "cn",
+      "enabled": true,
+      "match": {
+        "match_tags": [
+          "cn",
+          "google-cn"
+        ],
+        "exclude_tags": []
+      },
+      "action": {
+        "upstream_group": "cn",
+        "dispatcher": "wait_all"
+      }
+    },
+    {
+      "name": "global",
+      "enabled": true,
+      "match": {
+        "match_tags": [
+          "gfw",
+          "google"
+        ],
+        "exclude_tags": [
+          "cn"
+        ]
+      },
+      "action": {
+        "upstream_group": "global",
+        "dispatcher": "wait_all"
+      }
+    },
+    {
+      "name": "opennic",
+      "enabled": true,
+      "match": {
+        "match_tags": [
+          "opennic"
+        ],
+        "exclude_tags": []
+      },
+      "action": {
+        "upstream_group": "open",
+        "dispatcher": "wait_all"
+      }
+    },
+    {
+      "name": "all",
+      "enabled": true,
+      "match": {
+        "qtypes": [
+          "A",
+          "AAAA"
+        ]
+      },
+      "action": {
+        "upstream_group": "default",
+        "dispatcher": "wait_all"
+      }
+    },
+    {
+      "name": "https",
+      "enabled": true,
+      "match": {
+        "qtypes": [
+          "HTTPS"
+        ]
+      },
+      "action": {
+        "upstream_group": "global",
+        "dispatcher": "race"
+      }
+    }
+  ],
+  "plugins": [
+    {
+      "name": "cache_plugin",
+      "module": "cache_plugin",
+      "enabled": true,
+      "config": {
+        "max_size": 100000
+      },
+      "variables": {}
+    },
+    {
+      "name": "speedtest_plugin",
+      "module": "speedtest_plugin",
+      "enabled": true,
+      "config": {
+        "cache_ttl_seconds": 1800,
+        "cache_maxsize": 4096,
+        "max_concurrency": 64,
+        "probe_timeout": 0.75,
+        "ping_count": 1,
+        "ping_privileged": true,
+        "response_ip_limit": 2,
+        "response_ttl_seconds": 600,
+        "skip_tags": [],
+        "no_speedtest_tags": [
+          "private"
+        ],
+        "fallback_rules": [
+          {
+            "match_tags": [
+              "google"
+            ],
+            "exclude_tags": [
+              "cn",
+              "ads",
+              "noredir"
+            ],
+            "ipv4_addresses": [
+              "9.0.0.0"
+            ],
+            "ipv6_addresses": [
+              "2620::"
+            ]
+          }
+        ]
+      },
+      "variables": {}
+    },
+    {
+      "name": "block_plugin",
+      "module": "block_plugin",
+      "enabled": true,
+      "config": {
+        "rules": [
+          {
+            "match_tags": [
+              "ads"
+            ],
+            "exclude_tags": [],
+            "ipv4_addresses": [
+              "127.0.0.1"
+            ],
+            "ipv6_addresses": [
+              "::1"
+            ],
+            "block_other": false,
+            "response_ttl_seconds": 86400
+          },
+          {
+            "match_tags": [
+              "ai"
+            ],
+            "exclude_tags": [
+              "cn",
+              "ads",
+              "noredir"
+            ],
+            "ipv4_addresses": [
+              "9.0.0.1"
+            ],
+            "ipv6_addresses": [
+              "2620::1"
+            ],
+            "block_other": false,
+            "response_ttl_seconds": 86400
+          }
+        ]
+      },
+      "variables": {}
+    },
+    {
+      "name": "tag_plugin",
+      "module": "tag_plugin",
+      "enabled": true,
+      "config": {},
+      "variables": {}
+    },
+    {
+      "name": "cloudflare_ech_plugin",
+      "module": "cloudflare_ech_plugin",
+      "enabled": true,
+      "config": {
+        "match_tags": [
+          "cloudflare"
+        ],
+        "exclude_tags": [
+          "cn",
+          "ads"
+        ],
+        "skip_tags": [
+          "cn",
+          "ads",
+          "private",
+          "ntp",
+          "google"
+        ]
+      },
+      "variables": {}
+    },
+    {
+      "name": "https_plugin",
+      "module": "https_plugin",
+      "enabled": true,
+      "config": {},
+      "variables": {}
+    },
+    {
+      "name": "ip_replace_plugin",
+      "module": "ip_replace_plugin",
+      "enabled": false,
+      "config": {
+        "skip_tags": [
+          "cn",
+          "ads",
+          "private",
+          "ntp",
+          "google",
+          "noredir"
+        ],
+        "rules": [
+          {
+            "name": "cloudflare",
+            "match_tags": [
+              "cloudflare"
+            ],
+            "exclude_tags": [],
+            "ipv4_targets": [
+              "162.159.38.0/32",
+              "162.159.39.0/32",
+              "162.159.44.0/32",
+              "162.159.45.0/32",
+              "172.64.52.0/32",
+              "172.64.53.0/32",
+              "108.162.198.0/32"
+            ],
+            "ipv6_targets": [
+              "2606:4700:52::/128",
+              "2606:4700:57::/128",
+              "2606:4700:5a::/128"
+            ]
+          },
+          {
+            "name": "cloudfront",
+            "match_tags": [
+              "cloudfront"
+            ],
+            "exclude_tags": [],
+            "ipv4_targets": [
+              "13.33.100.0/32",
+              "108.156.136.0/32",
+              "3.165.79.0/32",
+              "13.33.89.0/32",
+              "13.33.77.0/32",
+              "108.156.142.0/32",
+              "3.165.78.0/32"
+            ],
+            "ipv6_targets": [
+              "2600:f0f0:602::/128",
+              "2600:f0f0:601::/128",
+              "2600:9000:271a::/128",
+              "2600:9000:2721::/128",
+              "2600:9000:2178::/128"
+            ]
+          },
+          {
+            "name": "fastly",
+            "match_tags": [
+              "fastly"
+            ],
+            "exclude_tags": [],
+            "ipv4_targets": [
+              "146.75.48.0/22"
+            ],
+            "ipv6_targets": [
+              "2a04:4e42:7c::/64"
+            ]
+          }
+        ]
+      },
+      "variables": {}
+    },
+    {
+      "name": "cloudflare-ech",
+      "module": "cloudflare_ech_plugin",
+      "enabled": true,
+      "config": {
+        "match_tags": [
+          "cloudflare"
+        ],
+        "exclude_tags": [
+          "cn",
+          "ads",
+          "private",
+          "ntp",
+          "google",
+          "noredir"
+        ],
+        "skip_tags": [
+          "cn",
+          "ads",
+          "private",
+          "ntp",
+          "google",
+          "noredir"
+        ]
+      },
+      "variables": {}
+    },
+    {
+      "name": "https-sanitize",
+      "module": "https_plugin",
+      "enabled": true,
+      "config": {},
+      "variables": {}
+    },
+    {
+      "name": "query-log",
+      "module": "query_log_plugin",
+      "enabled": true,
+      "config": {
+        "max_entries": 500
+      },
+      "variables": {}
+    }
+  ],
+  "webui": {
+    "enabled": true,
+    "doh_enabled": true,
+    "host": "127.0.0.1",
+    "port": 8080,
+    "username": "admin",
+    "password": "admin"
+  }
+}

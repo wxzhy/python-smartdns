@@ -9,9 +9,9 @@ from .plugin import (
 from .service import SpeedTestService
 
 __all__ = [
+    "IpRttResult",
     "SPEEDTEST_CONTEXT_KEY",
     "SPEEDTEST_SERVICE_KEY",
-    "IpRttResult",
     "SpeedTestContext",
     "SpeedTestFallbackRuleConfig",
     "SpeedTestPlugin",

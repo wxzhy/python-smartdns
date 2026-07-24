@@ -77,12 +77,6 @@ def make_loaded_plugin(instance) -> LoadedPlugin:
     )
 
 
-_HTTPS_RECORD = (
-    '1 . mandatory="alpn,ipv4hint,ech" alpn="h3,h2" ipv4hint="203.0.113.10" '
-    'ech="AA==" ipv6hint="2001:db8::10"'
-)
-
-
 def make_https_answer(request: dns.message.Message):
     response = dns.message.make_response(request)
     response.answer.append(
@@ -91,7 +85,7 @@ def make_https_answer(request: dns.message.Message):
             60,
             "IN",
             "HTTPS",
-            _HTTPS_RECORD,
+            '1 . mandatory="alpn,ipv4hint,ech" alpn="h3,h2" ipv4hint="203.0.113.10" ech="AA==" ipv6hint="2001:db8::10"',
         )
     )
     return build_answer_from_response(request, response)

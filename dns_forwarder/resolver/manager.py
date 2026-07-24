@@ -1,19 +1,15 @@
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
+import dns.nameserver
 
+from dns_forwarder.config import AppConfig, UpstreamConfig, UpstreamGroupConfig
 from dns_forwarder.logging import get_logger
+from dns_forwarder.pipeline.context import RequestContext, UpstreamResult
+from dns_forwarder.plugin_api import PluginRegistry
 
 from .base import BaseUpstreamResolver
 from .nameservers import build_nameserver_map
 from .upstream import UpstreamResolver
-
-if TYPE_CHECKING:
-    import dns.nameserver
-
-    from dns_forwarder.config import AppConfig, UpstreamConfig, UpstreamGroupConfig
-    from dns_forwarder.pipeline.context import RequestContext, UpstreamResult
-    from dns_forwarder.plugin_api import PluginRegistry
 
 logger = get_logger("resolver.manager")
 

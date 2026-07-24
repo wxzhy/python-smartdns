@@ -23,9 +23,8 @@ logger = get_logger("server.doh")
 
 
 def register_doh_routes(
-    app: FastAPI, runtime_manager: RuntimeManager, listener_name: str = "doh"
+    app: FastAPI, runtime_manager: "RuntimeManager", listener_name: str = "doh"
 ) -> None:
-    """向 FastAPI 注册 DoH GET/POST 查询路由（RFC 8484）。"""
     router = APIRouter()
 
     @router.get(DOH_DNS_QUERY_PATH, response_class=Response)
@@ -58,14 +57,13 @@ def register_doh_routes(
 
 
 async def _handle_doh_wire(
-    runtime_manager: RuntimeManager,
+    runtime_manager: "RuntimeManager",
     listener_name: str,
     request: Request,
     wire: bytes,
     *,
     is_get: bool,
 ) -> Response:
-    """解析 wire 报文为 DNS 消息并交由运行时处理，返回 DoH 响应。"""
     _ensure_accepts_dns_message(request.headers.get("accept"))
 
     try:
@@ -97,7 +95,6 @@ async def _handle_doh_wire(
 
 
 def _decode_doh_query(value: str) -> bytes:
-    """将 URL 安全 base64 的 dns 查询参数解码为 wire 字节，失败返回 400。"""
     padded = value + "=" * (-len(value) % 4)
     try:
         return base64.b64decode(padded.encode("ascii"), altchars=b"-_", validate=True)
@@ -108,14 +105,12 @@ def _decode_doh_query(value: str) -> bytes:
 
 
 def _normalize_media_type(value: str | None) -> str | None:
-    """去除 ``;`` 参数后归一化媒体类型为小写，如 ``application/dns-message``。"""
     if value is None:
         return None
     return value.split(";", 1)[0].strip().lower()
 
 
 def _ensure_accepts_dns_message(value: str | None) -> None:
-    """校验 Accept 头是否接受 DoH 媒体类型，否则返回 406。"""
     if value is None or not value.strip():
         return
     media_types = {
@@ -129,25 +124,22 @@ def _ensure_accepts_dns_message(value: str | None) -> None:
 
 
 def _cache_control_header(response: dns.message.Message) -> str:
-    """根据响应 TTL 生成 ``Cache-Control: max-age=N``，无可用 TTL 时返回 no-store。"""
     answer_ttls = [rrset.ttl for rrset in response.answer]
     if answer_ttls:
         return f"max-age={min(answer_ttls)}"
 
-    # 从 SOA 权威记录中取最小 TTL，用于 HTTP 缓存建议。
-    authority_ttls = [
-        min(rrset.ttl, record.minimum)
-        for rrset in response.authority
-        if rrset.rdclass == dns.rdataclass.IN and rrset.rdtype == dns.rdatatype.SOA
-        for record in rrset
-    ]
+    authority_ttls: list[int] = []
+    for rrset in response.authority:
+        if rrset.rdclass != dns.rdataclass.IN or rrset.rdtype != dns.rdatatype.SOA:
+            continue
+        for record in rrset:
+            authority_ttls.append(min(rrset.ttl, record.minimum))
     if authority_ttls:
         return f"max-age={min(authority_ttls)}"
     return "no-store"
 
 
 def _client_address(request: Request) -> tuple[str, int]:
-    """从请求中提取客户端 (host, port)，缺失时返回占位地址。"""
     if request.client is None:
         return "0.0.0.0", 0
     return request.client.host, request.client.port

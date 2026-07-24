@@ -1,7 +1,6 @@
 from __future__ import annotations
 
-import asyncio
-from typing import TYPE_CHECKING, Any
+from typing import Any
 
 import dns.asyncbackend
 import dns.asyncquery
@@ -9,10 +8,9 @@ import dns.message
 import dns.nameserver
 import dns.query
 
-from .doh import HTTP_VERSION_MAP
+from dns_forwarder.config import DoHCustomNameserverConfig
 
-if TYPE_CHECKING:
-    from dns_forwarder.config import DoHCustomNameserverConfig
+from .doh import HTTP_VERSION_MAP
 
 try:  # pragma: no cover - guarded for environments without DoH extras
     import httpx
@@ -20,21 +18,11 @@ except ImportError:  # pragma: no cover
     httpx = None  # type: ignore[assignment]
 
 
-# 共享客户端以 (loop id, verify) 为键：每个事件循环（含 portal worker 线程）持有
-# 独立客户端，避免跨 loop 复用；无运行中 loop 时 loop 部分回退为 None。
-_SHARED_CLIENTS: dict[tuple[int | None, bool], Any] = {}
-
-
-def _loop_key() -> int | None:
-    try:
-        return id(asyncio.get_running_loop())
-    except RuntimeError:
-        return None
+_SHARED_CLIENTS: dict[bool, Any] = {}
 
 
 def _get_shared_client(verify: bool = True) -> Any:
-    key = (_loop_key(), verify)
-    client = _SHARED_CLIENTS.get(key)
+    client = _SHARED_CLIENTS.get(verify)
     if client is None:
         if httpx is None:  # pragma: no cover
             raise RuntimeError("httpx is required for doh_custom shared client")
@@ -47,16 +35,15 @@ def _get_shared_client(verify: bool = True) -> Any:
             ),
             verify=verify,
         )
-        _SHARED_CLIENTS[key] = client
+        _SHARED_CLIENTS[verify] = client
     return client
 
 
 async def close_shared_sessions() -> None:
-    # 仅关闭并移除当前运行 loop 的客户端，保证在持有它的 loop 内完成关闭。
-    loop_key = _loop_key()
-    keys = [key for key in _SHARED_CLIENTS if key[0] == loop_key]
-    for key in keys:
-        await _SHARED_CLIENTS.pop(key).aclose()
+    clients = list(_SHARED_CLIENTS.values())
+    _SHARED_CLIENTS.clear()
+    for client in clients:
+        await client.aclose()
 
 
 class DoHCustomNameserver(dns.nameserver.DoHNameserver):
@@ -73,10 +60,10 @@ class DoHCustomNameserver(dns.nameserver.DoHNameserver):
             }
         )
 
-    async def async_query(  # noqa: PLR0913  # 形参与 dnspython Nameserver 接口一致
+    async def async_query(
         self,
         request: dns.message.QueryMessage,
-        timeout: float,  # noqa: ASYNC109  # timeout 属 dnspython/socket 接口契约
+        timeout: float,
         source: str | None,
         source_port: int,
         max_size: bool,

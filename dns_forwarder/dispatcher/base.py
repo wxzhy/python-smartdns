@@ -1,17 +1,16 @@
 from __future__ import annotations
 
-import asyncio
+
 from abc import ABC, abstractmethod
+from collections.abc import Callable
 from typing import TYPE_CHECKING, ClassVar
 
 import dns.resolver
 
+from dns_forwarder.config import DispatchStrategyType, UpstreamGroupConfig
 from dns_forwarder.pipeline.context import RequestContext, UpstreamResult
 
 if TYPE_CHECKING:
-    from collections.abc import Callable
-
-    from dns_forwarder.config import DispatchStrategyType, UpstreamGroupConfig
     from dns_forwarder.resolver import ResolverManager
 
     from .registry import DispatcherRegistry
@@ -25,8 +24,8 @@ class DispatchStrategy(ABC):
         self,
         context: RequestContext,
         group: UpstreamGroupConfig,
-        resolver_manager: ResolverManager,
-        registry: DispatcherRegistry,
+        resolver_manager: "ResolverManager",
+        registry: "DispatcherRegistry",
         on_result: Callable[[UpstreamResult], None] | None = None,
     ) -> UpstreamResult:
         raise NotImplementedError
@@ -45,12 +44,7 @@ class DispatchStrategy(ABC):
             return ""
         return type(result.error).__name__
 
-    @staticmethod
-    async def _cancel_pending_tasks(tasks: list[asyncio.Task[UpstreamResult]]) -> None:
-        for task in tasks:
-            if not task.done():
-                task.cancel()
-        await asyncio.gather(*tasks, return_exceptions=True)
+
 
     @classmethod
     def pick_failure_result(

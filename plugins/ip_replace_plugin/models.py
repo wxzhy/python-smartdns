@@ -2,13 +2,9 @@ from __future__ import annotations
 
 from ipaddress import ip_network
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
+from pydantic import Field, field_validator, model_validator
 
-IPV4_VERSION = 4
-
-
-class StrictPluginModel(BaseModel):
-    model_config = ConfigDict(extra="forbid")
+from dns_forwarder.plugin_api import StrictPluginModel, normalize_tag_list
 
 
 class IpReplaceRuleConfig(StrictPluginModel):
@@ -21,7 +17,7 @@ class IpReplaceRuleConfig(StrictPluginModel):
     @field_validator("match_tags", "exclude_tags", mode="before")
     @classmethod
     def normalize_tags(cls, value: list[str] | None) -> list[str]:
-        return _normalize_tags(value)
+        return normalize_tag_list(value)
 
     @field_validator("ipv4_targets", mode="before")
     @classmethod
@@ -34,7 +30,7 @@ class IpReplaceRuleConfig(StrictPluginModel):
         return _normalize_networks(value, version=6)
 
     @model_validator(mode="after")
-    def validate_targets(self) -> IpReplaceRuleConfig:
+    def validate_targets(self) -> "IpReplaceRuleConfig":
         if not self.ipv4_targets and not self.ipv6_targets:
             raise ValueError("替换规则至少需要一个 IPv4 或 IPv6 目标 CIDR")
         return self
@@ -47,7 +43,7 @@ class IpReplacePluginConfig(StrictPluginModel):
     @field_validator("skip_tags", mode="before")
     @classmethod
     def normalize_skip_tags(cls, value: list[str] | None) -> list[str]:
-        return _normalize_tags(value)
+        return normalize_tag_list(value)
 
 
 def _normalize_networks(value: list[str] | None, *, version: int) -> list[str]:
@@ -58,25 +54,11 @@ def _normalize_networks(value: list[str] | None, *, version: int) -> list[str]:
     for item in value:
         network = ip_network(str(item).strip(), strict=False)
         if network.version != version:
-            family = "IPv4" if version == IPV4_VERSION else "IPv6"
+            family = "IPv4" if version == 4 else "IPv6"
             raise ValueError(f"目标网段必须是 {family} CIDR")
         text = network.with_prefixlen
         if text in seen:
             continue
         seen.add(text)
         normalized.append(text)
-    return normalized
-
-
-def _normalize_tags(value: list[str] | None) -> list[str]:
-    if value is None:
-        return []
-    seen: set[str] = set()
-    normalized: list[str] = []
-    for item in value:
-        tag = str(item).strip()
-        if not tag or tag in seen:
-            continue
-        seen.add(tag)
-        normalized.append(tag)
     return normalized

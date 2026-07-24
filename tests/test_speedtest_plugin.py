@@ -30,12 +30,6 @@ from plugins.speedtest_plugin import (
     get_speedtest_context,
 )
 
-_TCP_PORT_80 = 80
-_TWO_IPS = 2
-_STUB_BEST_MS = 10.0
-_RACE_ELAPSED_UPPER_BOUND = 0.12
-_FALLBACK_TTL = 180
-
 
 class CountingSpeedTestService(SpeedTestService):
     def __init__(self) -> None:
@@ -143,7 +137,7 @@ class ProbeRaceService(SpeedTestService):
         return 50.0
 
     async def _probe_tcp(self, ip: str, port: int) -> float | None:
-        if port == _TCP_PORT_80:
+        if port == 80:
             await asyncio.sleep(0.01)
             self.completed.append("tcp80")
             return 10.0
@@ -235,7 +229,7 @@ async def test_speedtest_service_cache_clear_invalidates_cached_ip_result() -> N
 
     assert first.ip == "203.0.113.10"
     assert second.ip == "203.0.113.10"
-    assert service.calls == _TWO_IPS
+    assert service.calls == 2
 
 
 async def test_speedtest_service_returns_first_success_without_waiting_for_all_probes() -> None:
@@ -245,11 +239,11 @@ async def test_speedtest_service_returns_first_success_without_waiting_for_all_p
     result = await service.measure("203.0.113.10")
     elapsed = time.perf_counter() - started
 
-    assert result.best_ms == _STUB_BEST_MS
-    assert result.tcp80_ms == _STUB_BEST_MS
+    assert result.best_ms == 10.0
+    assert result.tcp80_ms == 10.0
     assert result.ping_ms is None
     assert result.tcp443_ms is None
-    assert elapsed < _RACE_ELAPSED_UPPER_BOUND
+    assert elapsed < 0.12
     assert service.completed == ["tcp80"]
 
 
@@ -292,9 +286,9 @@ async def test_speedtest_plugin_collects_unique_ip_rtts() -> None:
         "203.0.113.10",
         "203.0.113.11",
     }
-    assert len(speedtest_context.ip_rtt_results) == _TWO_IPS
+    assert len(speedtest_context.ip_rtt_results) == 2
     assert set(stub_service.calls) == {"203.0.113.10", "203.0.113.11"}
-    assert len(stub_service.calls) == _TWO_IPS
+    assert len(stub_service.calls) == 2
 
 
 async def test_speedtest_plugin_logs_resolver_and_response_ips_on_upstream_response(
@@ -370,7 +364,9 @@ async def test_speedtest_plugin_logs_each_wait_all_upstream_response(
         await asyncio.sleep(0.02)
         request = context.request
         response = dns.message.make_response(request)
-        response.answer.append(dns.rrset.from_text("example.test.", 60, "IN", "A", "203.0.113.10"))
+        response.answer.append(
+            dns.rrset.from_text("example.test.", 60, "IN", "A", "203.0.113.10")
+        )
         return UpstreamResult(
             upstream_name="resolver-a",
             duration_ms=15.0,
@@ -381,7 +377,9 @@ async def test_speedtest_plugin_logs_each_wait_all_upstream_response(
         await asyncio.sleep(0.01)
         request = context.request
         response = dns.message.make_response(request)
-        response.answer.append(dns.rrset.from_text("example.test.", 60, "IN", "A", "203.0.113.20"))
+        response.answer.append(
+            dns.rrset.from_text("example.test.", 60, "IN", "A", "203.0.113.20")
+        )
         return UpstreamResult(
             upstream_name="resolver-b",
             duration_ms=5.0,
@@ -409,7 +407,7 @@ async def test_speedtest_plugin_logs_each_wait_all_upstream_response(
 
     assert response is not None
     assert stub_service.calls == ["203.0.113.20", "203.0.113.10"]
-    assert caplog.text.count("测速收到响应") == _TWO_IPS
+    assert caplog.text.count("测速收到响应") == 2
     assert "resolver=resolver-a" in caplog.text
     assert "resolver=resolver-b" in caplog.text
 
@@ -480,7 +478,9 @@ async def test_speedtest_plugin_measures_replaced_ips_after_response_ip_replace(
         listener_name="udp",
         extensions=manager.build_context_extensions(),
         final_answer=answer,
-        upstream_results=[UpstreamResult(upstream_name="default", duration_ms=1.0, tags={"proxy"})],
+        upstream_results=[
+            UpstreamResult(upstream_name="default", duration_ms=1.0, tags={"proxy"})
+        ],
     )
 
     await manager.on_response(context)
@@ -556,7 +556,9 @@ async def test_speedtest_plugin_limits_replaced_ipv4_targets_by_rtt() -> None:
 
     request = dns.message.make_query("example.test", "A")
     response = dns.message.make_response(request)
-    response.answer.append(dns.rrset.from_text("example.test.", 60, "IN", "A", "198.51.100.20"))
+    response.answer.append(
+        dns.rrset.from_text("example.test.", 60, "IN", "A", "198.51.100.20")
+    )
     answer = build_answer_from_response(request, response)
     context = RequestContext(
         request=request,
@@ -603,7 +605,9 @@ async def test_speedtest_plugin_limits_replaced_ipv6_targets_by_rtt() -> None:
 
     request = dns.message.make_query("example.test", "AAAA")
     response = dns.message.make_response(request)
-    response.answer.append(dns.rrset.from_text("example.test.", 60, "IN", "AAAA", "2001:db8::20"))
+    response.answer.append(
+        dns.rrset.from_text("example.test.", 60, "IN", "AAAA", "2001:db8::20")
+    )
     answer = build_answer_from_response(request, response)
     context = RequestContext(
         request=request,
@@ -629,9 +633,7 @@ async def test_speedtest_plugin_limits_replaced_ipv6_targets_by_rtt() -> None:
     assert speedtest_plugin._service.calls == ["fd10::1", "fd10::2", "fd10::3"]
 
 
-async def test_speedtest_plugin_on_response_prefers_replaced_ip_from_other_wait_all_result() -> (
-    None
-):
+async def test_speedtest_plugin_on_response_prefers_replaced_ip_from_other_wait_all_result() -> None:
     config = build_wait_all_config()
     speedtest_plugin = SpeedTestPlugin()
     speedtest_plugin.bind(
@@ -650,7 +652,9 @@ async def test_speedtest_plugin_on_response_prefers_replaced_ip_from_other_wait_
         await asyncio.sleep(0.01)
         request = context.request
         response = dns.message.make_response(request)
-        response.answer.append(dns.rrset.from_text("example.test.", 60, "IN", "A", "203.0.113.10"))
+        response.answer.append(
+            dns.rrset.from_text("example.test.", 60, "IN", "A", "203.0.113.10")
+        )
         return UpstreamResult(
             upstream_name="resolver-a",
             duration_ms=5.0,
@@ -662,7 +666,9 @@ async def test_speedtest_plugin_on_response_prefers_replaced_ip_from_other_wait_
         await asyncio.sleep(0.02)
         request = context.request
         response = dns.message.make_response(request)
-        response.answer.append(dns.rrset.from_text("example.test.", 60, "IN", "A", "198.51.100.20"))
+        response.answer.append(
+            dns.rrset.from_text("example.test.", 60, "IN", "A", "198.51.100.20")
+        )
         return UpstreamResult(
             upstream_name="resolver-b",
             duration_ms=10.0,
@@ -692,6 +698,65 @@ async def test_speedtest_plugin_on_response_prefers_replaced_ip_from_other_wait_
     assert response is not None
     assert [item.address for item in response.answer[0]] == ["10.10.0.20"]
     assert speedtest_plugin._service.calls == ["203.0.113.10", "10.10.0.20"]
+
+
+async def test_speedtest_plugin_on_response_uses_other_wait_all_result_when_fastest_has_no_ip() -> None:
+    config = build_wait_all_config()
+    speedtest_plugin = SpeedTestPlugin()
+    speedtest_plugin.bind(
+        SpeedTestPluginConfig(response_ip_limit=1),
+        speedtest_plugin.variables_model(),
+    )
+    manager = await build_plugin_manager_with_ip_replace_and_speedtest(speedtest_plugin)
+    speedtest_plugin._service = MappedSpeedTestService({"10.10.0.20": 5.0})
+
+    async def resolve_empty(context: RequestContext) -> UpstreamResult:
+        await asyncio.sleep(0.01)
+        request = context.request
+        response = dns.message.make_response(request)
+        return UpstreamResult(
+            upstream_name="resolver-empty",
+            duration_ms=5.0,
+            answer=build_answer_from_response(request, response),
+            tags=set(),
+        )
+
+    async def resolve_with_ip(context: RequestContext) -> UpstreamResult:
+        await asyncio.sleep(0.02)
+        request = context.request
+        response = dns.message.make_response(request)
+        response.answer.append(
+            dns.rrset.from_text("example.test.", 60, "IN", "A", "198.51.100.20")
+        )
+        return UpstreamResult(
+            upstream_name="resolver-ip",
+            duration_ms=10.0,
+            answer=build_answer_from_response(request, response),
+            tags={"proxy"},
+        )
+
+    engine = PipelineEngine(
+        config,
+        StaticResolverManager(
+            config,
+            {
+                "resolver-a": resolve_empty,
+                "resolver-b": resolve_with_ip,
+            },
+        ),
+        DispatcherRegistry(),
+        manager,
+    )
+
+    response = await engine.handle_message(
+        dns.message.make_query("example.test", "A"),
+        ("127.0.0.1", 5300),
+        "udp",
+    )
+
+    assert response is not None
+    assert [item.address for item in response.answer[0]] == ["10.10.0.20"]
+    assert speedtest_plugin._service.calls == ["10.10.0.20"]
 
 
 async def test_speedtest_plugin_skips_measurement_for_global_skip_tags() -> None:
@@ -846,6 +911,7 @@ async def test_speedtest_plugin_on_response_replaces_answer_rrset_with_fastest_i
         final_answer=answer,
     )
     speedtest_context = get_speedtest_context(context)
+    await speedtest_context.reserve_ips(["203.0.113.10", "203.0.113.11", "203.0.113.12"])
     await speedtest_context.add_results(
         [
             IpRttResult(ip="203.0.113.10", best_ms=30.0),
@@ -857,12 +923,12 @@ async def test_speedtest_plugin_on_response_replaces_answer_rrset_with_fastest_i
     await plugin.on_response(context)
 
     assert {item.address for item in answer.rrset} == {"203.0.113.11", "203.0.113.12"}
-    assert len(answer.rrset) == _TWO_IPS
+    assert len(answer.rrset) == 2
     assert {item.address for item in answer.response.answer[0]} == {
         "203.0.113.11",
         "203.0.113.12",
     }
-    assert len(answer.response.answer[0]) == _TWO_IPS
+    assert len(answer.response.answer[0]) == 2
 
 
 @pytest.mark.parametrize(
@@ -908,6 +974,7 @@ async def test_speedtest_plugin_on_response_uses_larger_ttl_when_replacing(
         final_answer=answer,
     )
     speedtest_context = get_speedtest_context(context)
+    await speedtest_context.reserve_ips(["203.0.113.10", "203.0.113.11"])
     await speedtest_context.add_results(
         [
             IpRttResult(ip="203.0.113.10", best_ms=30.0),
@@ -951,6 +1018,7 @@ async def test_speedtest_plugin_on_response_keeps_answer_when_all_ips_timeout() 
         final_answer=answer,
     )
     speedtest_context = get_speedtest_context(context)
+    await speedtest_context.reserve_ips(["203.0.113.10", "203.0.113.11"])
     await speedtest_context.add_results(
         [
             IpRttResult(ip="203.0.113.10", best_ms=None),
@@ -961,7 +1029,7 @@ async def test_speedtest_plugin_on_response_keeps_answer_when_all_ips_timeout() 
     await plugin.on_response(context)
 
     assert {item.address for item in answer.rrset} == {"203.0.113.10", "203.0.113.11"}
-    assert len(answer.rrset) == _TWO_IPS
+    assert len(answer.rrset) == 2
 
 
 async def test_speedtest_plugin_on_response_uses_fallback_ips_when_all_ips_timeout() -> None:
@@ -1005,6 +1073,7 @@ async def test_speedtest_plugin_on_response_uses_fallback_ips_when_all_ips_timeo
         final_answer=answer,
     )
     speedtest_context = get_speedtest_context(context)
+    await speedtest_context.reserve_ips(["203.0.113.10", "203.0.113.11"])
     await speedtest_context.add_results(
         [
             IpRttResult(ip="203.0.113.10", best_ms=None),
@@ -1015,7 +1084,7 @@ async def test_speedtest_plugin_on_response_uses_fallback_ips_when_all_ips_timeo
     await plugin.on_response(context)
 
     assert [item.address for item in answer.rrset] == ["10.10.0.2", "10.10.0.3"]
-    assert answer.rrset.ttl == _FALLBACK_TTL
+    assert answer.rrset.ttl == 180
 
 
 async def test_speedtest_plugin_on_response_skips_excluded_fallback_rule() -> None:
@@ -1064,6 +1133,7 @@ async def test_speedtest_plugin_on_response_skips_excluded_fallback_rule() -> No
         final_answer=answer,
     )
     speedtest_context = get_speedtest_context(context)
+    await speedtest_context.reserve_ips(["203.0.113.10", "203.0.113.11"])
     await speedtest_context.add_results(
         [
             IpRttResult(ip="203.0.113.10", best_ms=None),
@@ -1074,7 +1144,7 @@ async def test_speedtest_plugin_on_response_skips_excluded_fallback_rule() -> No
     await plugin.on_response(context)
 
     assert [item.address for item in answer.rrset] == ["10.20.0.2", "10.20.0.3"]
-    assert answer.rrset.ttl == _FALLBACK_TTL
+    assert answer.rrset.ttl == 180
 
 
 def test_plugin_manager_build_context_extensions_creates_request_scoped_context() -> None:
@@ -1107,3 +1177,57 @@ async def test_speedtest_plugin_setup_registers_service_and_context_extensions()
     assert SPEEDTEST_SERVICE_KEY in extensions
     assert SPEEDTEST_CONTEXT_KEY in extensions
     assert isinstance(extensions[SPEEDTEST_CONTEXT_KEY], SpeedTestContext)
+
+
+async def test_speedtest_plugin_filters_out_large_rtt_gaps() -> None:
+    plugin = SpeedTestPlugin()
+    plugin.bind(
+        SpeedTestPluginConfig(
+            response_ip_limit=3,
+            rtt_tolerance_ms=50.0,
+            rtt_gap_threshold_ms=15.0,
+        ),
+        plugin.variables_model(),
+    )
+    registry = PluginRegistry()
+    await plugin.setup(registry)
+    manager = PluginManager([], registry)
+
+    stub_service = StubSpeedTestService()
+    plugin._service = stub_service
+
+    request = dns.message.make_query("example.test", "A")
+    response = dns.message.make_response(request)
+    response.answer.append(
+        dns.rrset.from_text(
+            "example.test.",
+            60,
+            "IN",
+            "A",
+            "203.0.113.10",
+            "203.0.113.11",
+            "203.0.113.12",
+        )
+    )
+    answer = build_answer_from_response(request, response)
+    context = RequestContext(
+        request=request,
+        clientaddr=("127.0.0.1", 5300),
+        listener_name="udp",
+        extensions=manager.build_context_extensions(),
+        final_answer=answer,
+    )
+    speedtest_context = get_speedtest_context(context)
+    await speedtest_context.reserve_ips(["203.0.113.10", "203.0.113.11", "203.0.113.12"])
+    await speedtest_context.add_results(
+        [
+            IpRttResult(ip="203.0.113.10", best_ms=10.0),
+            IpRttResult(ip="203.0.113.11", best_ms=15.0),
+            IpRttResult(ip="203.0.113.12", best_ms=35.0),
+        ]
+    )
+
+    await plugin.on_response(context)
+
+    assert [item.address for item in answer.rrset] == ["203.0.113.10", "203.0.113.11"]
+

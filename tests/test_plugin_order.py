@@ -16,15 +16,17 @@ class OrderedPlugin(Plugin):
         name: str,
         events: list[str],
         *,
-        orders: dict[str, int] | None = None,
+        request_order: int = 0,
+        upstream_response_order: int = 0,
+        response_order: int = 0,
+        observe_order: int = 0,
     ) -> None:
         super().__init__()
-        resolved = {} if orders is None else dict(orders)
         self.name = name
-        self.request_order = resolved.get("request", 0)
-        self.upstream_response_order = resolved.get("upstream_response", 0)
-        self.response_order = resolved.get("response", 0)
-        self.observe_order = resolved.get("observe", 0)
+        self.request_order = request_order
+        self.upstream_response_order = upstream_response_order
+        self.response_order = response_order
+        self.observe_order = observe_order
         self._events = events
 
     async def on_request(self, context: RequestContext) -> None:
@@ -64,9 +66,9 @@ async def test_plugin_manager_sorts_request_hooks_by_request_order() -> None:
     events: list[str] = []
     manager = PluginManager(
         [
-            make_loaded_plugin(OrderedPlugin("second", events, orders={"request": 20})),
-            make_loaded_plugin(OrderedPlugin("first", events, orders={"request": 10})),
-            make_loaded_plugin(OrderedPlugin("third", events, orders={"request": 20})),
+            make_loaded_plugin(OrderedPlugin("second", events, request_order=20)),
+            make_loaded_plugin(OrderedPlugin("first", events, request_order=10)),
+            make_loaded_plugin(OrderedPlugin("third", events, request_order=20)),
         ],
         PluginRegistry(),
     )
@@ -86,21 +88,24 @@ async def test_plugin_manager_sorts_upstream_and_response_hooks_independently() 
                 OrderedPlugin(
                     "first",
                     events,
-                    orders={"upstream_response": 30, "response": 20},
+                    upstream_response_order=30,
+                    response_order=20,
                 )
             ),
             make_loaded_plugin(
                 OrderedPlugin(
                     "second",
                     events,
-                    orders={"upstream_response": 10, "response": 30},
+                    upstream_response_order=10,
+                    response_order=30,
                 )
             ),
             make_loaded_plugin(
                 OrderedPlugin(
                     "third",
                     events,
-                    orders={"upstream_response": 20, "response": 10},
+                    upstream_response_order=20,
+                    response_order=10,
                 )
             ),
         ],
@@ -126,9 +131,9 @@ async def test_plugin_manager_sorts_observe_hooks_independently() -> None:
     events: list[str] = []
     manager = PluginManager(
         [
-            make_loaded_plugin(OrderedPlugin("first", events, orders={"observe": 30})),
-            make_loaded_plugin(OrderedPlugin("second", events, orders={"observe": 10})),
-            make_loaded_plugin(OrderedPlugin("third", events, orders={"observe": 20})),
+            make_loaded_plugin(OrderedPlugin("first", events, observe_order=30)),
+            make_loaded_plugin(OrderedPlugin("second", events, observe_order=10)),
+            make_loaded_plugin(OrderedPlugin("third", events, observe_order=20)),
         ],
         PluginRegistry(),
     )

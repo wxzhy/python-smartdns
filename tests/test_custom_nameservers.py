@@ -37,13 +37,6 @@ from dns_forwarder.resolver.nameservers.doh_curl_cffi import (
 from dns_forwarder.resolver.nameservers.doh_custom import DoHCustomNameserver, _get_shared_client
 from dns_forwarder.resolver.nameservers.doh_httpx import DoHHttpxNameserver
 
-_AIODNS_TIMEOUT = 2.5
-_CUSTOM_PORT = 5301
-_DEFAULT_TTL = 60
-_HTTPS_PORT = 443
-_TWO_RRSETS = 2
-_HAPPY_EYEBALLS_DELAY = 0.25
-
 
 class FakeResponse:
     def __init__(self, content: bytes) -> None:
@@ -57,7 +50,7 @@ class FakeAiohttpResponse:
     def __init__(self, content: bytes) -> None:
         self._content = content
 
-    async def __aenter__(self) -> FakeAiohttpResponse:
+    async def __aenter__(self) -> "FakeAiohttpResponse":
         return self
 
     async def __aexit__(self, exc_type, exc, traceback) -> None:
@@ -82,6 +75,10 @@ class FakeSocket:
 
     def sendall(self, data: bytes, flags: int = 0) -> None:
         self.sent.append((data, flags))
+
+    def send(self, data: bytes, flags: int = 0) -> int:
+        self.sent.append((data, flags))
+        return len(data)
 
     def close(self) -> None:
         self.closed = True
@@ -133,11 +130,13 @@ def test_aiodns_dns_resolver_query_dns_delegates_non_https() -> None:
 async def test_aiodns_get_resolver_configures_pycares_channel() -> None:
     aiodns_nameserver._RESOLVERS.clear()
     try:
-        with patch("dns_forwarder.resolver.nameservers.aiodns.AiodnsDNSResolver") as resolver_cls:
+        with patch(
+            "dns_forwarder.resolver.nameservers.aiodns.AiodnsDNSResolver"
+        ) as resolver_cls:
             result = aiodns_nameserver._get_resolver(
                 ("1.1.1.1", "1.0.0.1"),
-                _CUSTOM_PORT,
-                _AIODNS_TIMEOUT,
+                5301,
+                2.5,
                 True,
             )
 
@@ -145,9 +144,9 @@ async def test_aiodns_get_resolver_configures_pycares_channel() -> None:
         kwargs = resolver_cls.call_args.kwargs
         assert kwargs["nameservers"] == ["1.1.1.1", "1.0.0.1"]
         assert kwargs["flags"] == pycares.ARES_FLAG_USEVC
-        assert kwargs["timeout"] == _AIODNS_TIMEOUT
-        assert kwargs["tcp_port"] == _CUSTOM_PORT
-        assert kwargs["udp_port"] == _CUSTOM_PORT
+        assert kwargs["timeout"] == 2.5
+        assert kwargs["tcp_port"] == 5301
+        assert kwargs["udp_port"] == 5301
         assert kwargs["rotate"] is True
     finally:
         aiodns_nameserver._RESOLVERS.clear()
@@ -208,10 +207,10 @@ async def test_aiodns_nameserver_async_query_fills_response_sections() -> None:
     get_resolver.assert_called_once_with(nameserver.servers, 5301, 2.0, False)
     fake_resolver.query_dns.assert_awaited_once_with("example.test", "HTTPS", "IN")
     assert response.question == request.question
-    assert response.answer[0].ttl == _DEFAULT_TTL
+    assert response.answer[0].ttl == 60
     assert response.answer[0][0].priority == 1
     assert response.answer[0][0].target.to_text() == "svc.example.test."
-    assert response.answer[0][0].params[dns.rdtypes.svcbbase.ParamKey.PORT].port == _HTTPS_PORT
+    assert response.answer[0][0].params[dns.rdtypes.svcbbase.ParamKey.PORT].port == 443
     assert response.authority[0].to_text().startswith("example.test. 300 IN NS")
     assert response.additional[0].to_text().startswith("ns.example.test. 300 IN A")
 
@@ -255,7 +254,7 @@ async def test_aiodns_nameserver_async_query_supports_one_rr_per_rrset() -> None
             one_rr_per_rrset=True,
         )
 
-    assert len(response.answer) == _TWO_RRSETS
+    assert len(response.answer) == 2
     assert [rrset[0].address for rrset in response.answer] == ["192.0.2.1", "192.0.2.2"]
 
 
@@ -335,12 +334,8 @@ async def test_aiodns_nameserver_async_query_uses_tcp_for_max_size_and_maps_erro
 
 
 async def test_aiodns_close_shared_sessions_closes_cached_resolvers() -> None:
-    import asyncio
-
     resolver = AsyncMock()
-    key = aiodns_nameserver._ResolverKey(
-        id(asyncio.get_running_loop()), ("1.1.1.1",), 53, 1.0, False
-    )
+    key = aiodns_nameserver._ResolverKey(1, ("1.1.1.1",), 53, 1.0, False)
     aiodns_nameserver._RESOLVERS[key] = resolver
 
     await aiodns_nameserver.close_shared_sessions()
@@ -381,21 +376,19 @@ async def test_do53_custom_async_query_uses_tricky_tcp_socket() -> None:
     backend = object()
     nameserver = Do53CustomNameserver("127.0.0.1", 53)
 
-    with (
-        patch(
-            "dns_forwarder.resolver.nameservers.do53_custom.TrickyStreamSocket.connect",
-            AsyncMock(return_value=None),
-        ) as connect_mock,
-        patch("dns.asyncquery.tcp", AsyncMock(return_value=response)) as tcp_mock,
-    ):
-        result = await nameserver.async_query(
-            request,
-            timeout=1.0,
-            source=None,
-            source_port=0,
-            max_size=True,
-            backend=backend,
-        )
+    with patch(
+        "dns_forwarder.resolver.nameservers.do53_custom.TrickyStreamSocket.connect",
+        AsyncMock(return_value=None),
+    ) as connect_mock:
+        with patch("dns.asyncquery.tcp", AsyncMock(return_value=response)) as tcp_mock:
+            result = await nameserver.async_query(
+                request,
+                timeout=1.0,
+                source=None,
+                source_port=0,
+                max_size=True,
+                backend=backend,
+            )
 
     assert result is response
     connect_mock.assert_awaited_once()
@@ -436,21 +429,19 @@ async def test_do53_custom_async_query_keeps_custom_tcp_without_tricks() -> None
         hosts={"dns.example": ["192.0.2.10"]},
     )
 
-    with (
-        patch(
-            "dns_forwarder.resolver.nameservers.do53_custom.TrickyStreamSocket.connect",
-            AsyncMock(return_value=None),
-        ),
-        patch("dns.asyncquery.tcp", AsyncMock(return_value=response)) as tcp_mock,
+    with patch(
+        "dns_forwarder.resolver.nameservers.do53_custom.TrickyStreamSocket.connect",
+        AsyncMock(return_value=None),
     ):
-        result = await nameserver.async_query(
-            request,
-            timeout=1.0,
-            source=None,
-            source_port=0,
-            max_size=True,
-            backend=object(),
-        )
+        with patch("dns.asyncquery.tcp", AsyncMock(return_value=response)) as tcp_mock:
+            result = await nameserver.async_query(
+                request,
+                timeout=1.0,
+                source=None,
+                source_port=0,
+                max_size=True,
+                backend=object(),
+            )
 
     assert result is response
     tcp_mock.assert_awaited_once()
@@ -481,22 +472,16 @@ async def test_tricky_tcp_connect_uses_hosts_with_happy_eyeballs() -> None:
     ]
     tricky_sock = TrickyStreamSocket(socket.AF_UNSPEC, socket.SOCK_STREAM, hosts=hosts)
 
-    with (
-        patch(
-            "dns_forwarder.resolver.nameservers._trick_tcp.asyncio.get_running_loop"
-        ) as get_running_loop,
-        patch(
-            "dns_forwarder.resolver.nameservers._trick_tcp.aiohappyeyeballs.start_connection",
-            AsyncMock(return_value=fake_socket),
-        ) as start_connection,
-    ):
+    with patch(
+        "dns_forwarder.resolver.nameservers._trick_tcp.aiohappyeyeballs.start_connection",
+        AsyncMock(return_value=fake_socket),
+    ) as start_connection:
         await tricky_sock.connect(("DNS.EXAMPLE.", 53), timeout=1.0)
 
-    get_running_loop.assert_not_called()
     start_connection.assert_awaited_once()
     assert start_connection.await_args.args == (expected_addr_infos,)
     assert start_connection.await_args.kwargs["local_addr_infos"] is None
-    assert start_connection.await_args.kwargs["happy_eyeballs_delay"] == _HAPPY_EYEBALLS_DELAY
+    assert start_connection.await_args.kwargs["happy_eyeballs_delay"] == 0.25
     assert start_connection.await_args.kwargs["socket_factory"] is _tcp_socket_factory
     assert tricky_sock.family == socket.AF_INET
 
@@ -512,7 +497,6 @@ async def test_tricky_tcp_connect_falls_back_to_getaddrinfo() -> None:
             ("198.51.100.10", 53),
         )
     ]
-    fake_loop = SimpleNamespace(getaddrinfo=AsyncMock(return_value=addr_infos))
     tricky_sock = TrickyStreamSocket(
         socket.AF_UNSPEC,
         socket.SOCK_STREAM,
@@ -523,9 +507,9 @@ async def test_tricky_tcp_connect_falls_back_to_getaddrinfo() -> None:
 
     with (
         patch(
-            "dns_forwarder.resolver.nameservers._trick_tcp.asyncio.get_running_loop",
-            return_value=fake_loop,
-        ),
+            "dns_forwarder.resolver.nameservers._trick_tcp.anyio.getaddrinfo",
+            AsyncMock(return_value=addr_infos),
+        ) as getaddrinfo_mock,
         patch(
             "dns_forwarder.resolver.nameservers._trick_tcp.aiohappyeyeballs.start_connection",
             AsyncMock(return_value=fake_socket),
@@ -533,9 +517,10 @@ async def test_tricky_tcp_connect_falls_back_to_getaddrinfo() -> None:
     ):
         await tricky_sock.connect(("dns.example", 53), timeout=1.0)
 
-    fake_loop.getaddrinfo.assert_awaited_once_with(
+    getaddrinfo_mock.assert_awaited_once_with(
         "dns.example",
         53,
+        family=socket.AF_UNSPEC,
         type=socket.SOCK_STREAM,
         proto=socket.IPPROTO_TCP,
     )
@@ -579,7 +564,6 @@ def test_tricky_tcp_socket_factory_sets_tcp_nodelay() -> None:
 
 async def test_tricky_tcp_sendall_can_skip_oob_trick() -> None:
     fake_socket = FakeSocket(socket.AF_INET)
-    fake_loop = SimpleNamespace(sock_sendall=AsyncMock(return_value=None))
     data = b"x" * 64
     tricky_sock = TrickyStreamSocket(
         socket.AF_UNSPEC,
@@ -589,30 +573,32 @@ async def test_tricky_tcp_sendall_can_skip_oob_trick() -> None:
     tricky_sock._socket = fake_socket
 
     with patch(
-        "dns_forwarder.resolver.nameservers._trick_tcp.asyncio.get_running_loop",
-        return_value=fake_loop,
-    ):
+        "dns_forwarder.resolver.nameservers._trick_tcp.anyio.wait_socket_writable",
+        AsyncMock(return_value=None),
+    ) as wait_writable:
         await tricky_sock.sendall(data, timeout=1.0)
 
-    assert fake_socket.sent == []
-    fake_loop.sock_sendall.assert_awaited_once_with(fake_socket, data)
+    assert fake_socket.sent == [(data, 0)]
+    wait_writable.assert_awaited_once_with(fake_socket)
 
 
 async def test_tricky_tcp_sendall_uses_oob_trick_by_default() -> None:
     fake_socket = FakeSocket(socket.AF_INET)
-    fake_loop = SimpleNamespace(sock_sendall=AsyncMock(return_value=None))
     data = b"x" * 64
     tricky_sock = TrickyStreamSocket(socket.AF_UNSPEC, socket.SOCK_STREAM)
     tricky_sock._socket = fake_socket
 
     with patch(
-        "dns_forwarder.resolver.nameservers._trick_tcp.asyncio.get_running_loop",
-        return_value=fake_loop,
-    ):
+        "dns_forwarder.resolver.nameservers._trick_tcp.anyio.wait_socket_writable",
+        AsyncMock(return_value=None),
+    ) as wait_writable:
         await tricky_sock.sendall(data, timeout=1.0)
 
-    assert fake_socket.sent == [(data[:16] + b"\x00", socket.MSG_OOB)]
-    fake_loop.sock_sendall.assert_awaited_once_with(fake_socket, data[16:])
+    assert fake_socket.sent == [
+        (data[:16] + b"\x00", socket.MSG_OOB),
+        (data[16:], 0),
+    ]
+    wait_writable.assert_awaited_once_with(fake_socket)
 
 
 async def test_doh_custom_async_query_uses_shared_client_for_standard_settings() -> None:
@@ -836,7 +822,9 @@ async def test_doh_curl_cffi_get_query_uses_request_options_and_host_header() ->
         )
 
     assert result.question == request.question
-    expected_resolve_entries = ("cloudflare-dns.com:443:1.1.1.1,1.0.0.1,[2606:4700:4700::1111]",)
+    expected_resolve_entries = (
+        "cloudflare-dns.com:443:1.1.1.1,1.0.0.1,[2606:4700:4700::1111]",
+    )
     assert get_session.call_args.args == (expected_resolve_entries,)
     fake_session.request.assert_awaited_once()
     args = fake_session.request.await_args.args
@@ -854,7 +842,9 @@ async def test_doh_curl_cffi_get_query_uses_request_options_and_host_header() ->
 
 
 async def test_doh_aiohttp_shared_session_uses_bootstrap_resolver() -> None:
-    doh_aiohttp._SHARED.clear()
+    doh_aiohttp._SHARED_SESSION = None
+    doh_aiohttp._SHARED_BOOTSTRAP_RESOLVER = None
+    doh_aiohttp._SHARED_HOSTS = None
 
     with (
         patch("dns_forwarder.resolver.nameservers.doh_aiohttp.AsyncResolver") as resolver,
@@ -871,11 +861,15 @@ async def test_doh_aiohttp_shared_session_uses_bootstrap_resolver() -> None:
         keepalive_timeout=30,
     )
     session.assert_called_once_with(connector=connector.return_value)
-    doh_aiohttp._SHARED.clear()
+    doh_aiohttp._SHARED_SESSION = None
+    doh_aiohttp._SHARED_BOOTSTRAP_RESOLVER = None
+    doh_aiohttp._SHARED_HOSTS = None
 
 
 async def test_doh_aiohttp_hosts_resolver_returns_static_hosts() -> None:
-    resolver = doh_aiohttp.HostsAsyncResolver((("dns.example", ("192.0.2.10", "2001:db8::10")),))
+    resolver = doh_aiohttp.HostsAsyncResolver(
+        (("dns.example", ("192.0.2.10", "2001:db8::10")),)
+    )
     try:
         result = await resolver.resolve("DNS.EXAMPLE.", 443, socket.AF_UNSPEC)
     finally:
@@ -902,7 +896,9 @@ async def test_doh_aiohttp_hosts_resolver_returns_static_hosts() -> None:
 
 
 async def test_doh_aiohttp_shared_session_uses_hosts_resolver() -> None:
-    doh_aiohttp._SHARED.clear()
+    doh_aiohttp._SHARED_SESSION = None
+    doh_aiohttp._SHARED_BOOTSTRAP_RESOLVER = None
+    doh_aiohttp._SHARED_HOSTS = None
     hosts = (("cloudflare-dns.com", ("1.1.1.1", "1.0.0.1")),)
 
     with (
@@ -920,11 +916,13 @@ async def test_doh_aiohttp_shared_session_uses_hosts_resolver() -> None:
         keepalive_timeout=30,
     )
     session.assert_called_once_with(connector=connector.return_value)
-    doh_aiohttp._SHARED.clear()
+    doh_aiohttp._SHARED_SESSION = None
+    doh_aiohttp._SHARED_BOOTSTRAP_RESOLVER = None
+    doh_aiohttp._SHARED_HOSTS = None
 
 
 def test_doh_curl_cffi_shared_session_uses_single_session() -> None:
-    doh_curl_cffi._SHARED_SESSIONS.clear()
+    doh_curl_cffi._SHARED_SESSIONS = {}
 
     with patch("dns_forwarder.resolver.nameservers.doh_curl_cffi.AsyncSession") as session:
         result = get_curl_shared_session()
@@ -932,11 +930,11 @@ def test_doh_curl_cffi_shared_session_uses_single_session() -> None:
     assert result is session.return_value
     kwargs = session.call_args.kwargs
     assert kwargs == {"max_clients": 500}
-    doh_curl_cffi._SHARED_SESSIONS.clear()
+    doh_curl_cffi._SHARED_SESSIONS = {}
 
 
 def test_doh_curl_cffi_shared_session_uses_curl_resolve_entries() -> None:
-    doh_curl_cffi._SHARED_SESSIONS.clear()
+    doh_curl_cffi._SHARED_SESSIONS = {}
     resolve_entries = ("cloudflare-dns.com:443:1.1.1.1,1.0.0.1",)
 
     with patch("dns_forwarder.resolver.nameservers.doh_curl_cffi.AsyncSession") as session:
@@ -948,4 +946,4 @@ def test_doh_curl_cffi_shared_session_uses_curl_resolve_entries() -> None:
         "max_clients": 500,
         "curl_options": {doh_curl_cffi.CurlOpt.RESOLVE: list(resolve_entries)},
     }
-    doh_curl_cffi._SHARED_SESSIONS.clear()
+    doh_curl_cffi._SHARED_SESSIONS = {}

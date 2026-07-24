@@ -11,12 +11,6 @@ from dns_forwarder.core.runtime import RuntimeManager
 from dns_forwarder.server.doh import DOH_DNS_QUERY_PATH, DOH_MEDIA_TYPE
 from dns_forwarder.webui import create_webui_app
 
-_HTTP_OK = 200
-_HTTP_BAD_REQUEST = 400
-_HTTP_UNAUTHORIZED = 401
-_HTTP_NOT_ACCEPTABLE = 406
-_HTTP_UNSUPPORTED_MEDIA_TYPE = 415
-
 
 def write_config(path: Path) -> None:
     plugin_dir = str((Path(__file__).resolve().parents[1] / "plugins").resolve())
@@ -94,7 +88,7 @@ async def test_doh_get_supports_base64url_query_and_dns_message_response(tmp_pat
             headers={"Accept": DOH_MEDIA_TYPE},
         )
 
-    assert response.status_code == _HTTP_OK
+    assert response.status_code == 200
     assert response.headers["content-type"].startswith(DOH_MEDIA_TYPE)
     assert response.headers["cache-control"] == "max-age=30"
     message = dns.message.from_wire(response.content)
@@ -120,7 +114,7 @@ async def test_doh_post_supports_application_dns_message_body(tmp_path: Path) ->
             },
         )
 
-    assert response.status_code == _HTTP_OK
+    assert response.status_code == 200
     assert response.headers["content-type"].startswith(DOH_MEDIA_TYPE)
     assert "cache-control" not in response.headers
     message = dns.message.from_wire(response.content)
@@ -143,7 +137,7 @@ async def test_doh_rejects_unacceptable_accept_header(tmp_path: Path) -> None:
             headers={"Accept": "application/json"},
         )
 
-    assert response.status_code == _HTTP_NOT_ACCEPTABLE
+    assert response.status_code == 406
 
 
 async def test_doh_rejects_invalid_post_media_type(tmp_path: Path) -> None:
@@ -162,7 +156,7 @@ async def test_doh_rejects_invalid_post_media_type(tmp_path: Path) -> None:
             headers={"Content-Type": "application/octet-stream"},
         )
 
-    assert response.status_code == _HTTP_UNSUPPORTED_MEDIA_TYPE
+    assert response.status_code == 415
 
 
 async def test_doh_rejects_invalid_base64url_query(tmp_path: Path) -> None:
@@ -176,7 +170,7 @@ async def test_doh_rejects_invalid_base64url_query(tmp_path: Path) -> None:
     async with AsyncClient(transport=transport, base_url="http://testserver") as client:
         response = await client.get(DOH_DNS_QUERY_PATH, params={"dns": "not-valid@@"})
 
-    assert response.status_code == _HTTP_BAD_REQUEST
+    assert response.status_code == 400
 
 
 async def test_doh_endpoint_does_not_require_webui_basic_auth(tmp_path: Path) -> None:
@@ -203,8 +197,8 @@ async def test_doh_endpoint_does_not_require_webui_basic_auth(tmp_path: Path) ->
             headers={"Accept": DOH_MEDIA_TYPE},
         )
 
-    assert config_response.status_code == _HTTP_UNAUTHORIZED
-    assert doh_response.status_code == _HTTP_OK
+    assert config_response.status_code == 401
+    assert doh_response.status_code == 200
 
 
 async def test_runtime_can_start_shared_http_server_for_doh(tmp_path: Path) -> None:

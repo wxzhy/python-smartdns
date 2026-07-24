@@ -2,15 +2,14 @@ from __future__ import annotations
 
 from copy import deepcopy
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Any
+from typing import Any
+
+from pydantic import BaseModel
 
 from dns_forwarder.config.models import PluginConfig
 
 from .base import Plugin, PluginManager
 from .static_plugins import iter_static_plugin_module_names
-
-if TYPE_CHECKING:
-    from pydantic import BaseModel
 
 
 @dataclass(frozen=True, slots=True)

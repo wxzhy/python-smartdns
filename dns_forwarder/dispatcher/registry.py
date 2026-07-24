@@ -1,20 +1,15 @@
 from __future__ import annotations
 
-import asyncio
-from typing import TYPE_CHECKING
 
+from collections.abc import Callable, Iterable
+
+from dns_forwarder.config import DispatchStrategyType, UpstreamGroupConfig
 from dns_forwarder.logging import get_logger
 from dns_forwarder.pipeline.context import RequestContext, UpstreamResult, inherit_request_tags
 
+from .base import DispatchStrategy
 from .race import RaceDispatchStrategy
 from .wait_all import WaitAllDispatchStrategy
-
-if TYPE_CHECKING:
-    from collections.abc import Callable, Iterable
-
-    from dns_forwarder.config import DispatchStrategyType, UpstreamGroupConfig
-
-    from .base import DispatchStrategy
 
 logger = get_logger("dispatcher.registry")
 
@@ -104,8 +99,7 @@ class DispatcherRegistry:
             if on_result is not None:
                 on_result(result)
             return result
-        except asyncio.CancelledError:
-            raise
+
         except Exception as exc:
             logger.warning(
                 "调度目标执行失败 request_id=%s target=%s error=%s",

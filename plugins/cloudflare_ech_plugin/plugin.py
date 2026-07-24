@@ -34,11 +34,9 @@ class CloudflareEchPlugin(Plugin):
     config_model = CloudflareEchPluginConfig
     variables_model = EmptyModel
     response_order = 700
-    ui_meta = {  # noqa: RUF012  # read-only frozen-style plugin metadata
+    ui_meta = {
         "title": "Cloudflare ECH Plugin",
-        "description": (
-            "按 tag 为 HTTPS 响应补充 Cloudflare ECH 参数，并在必要时通过 subquery 判定目标域名。"
-        ),
+        "description": "按 tag 为 HTTPS 响应补充 Cloudflare ECH 参数，并在必要时通过 subquery 判定目标域名。",
     }
 
     def __init__(self) -> None:
@@ -55,6 +53,7 @@ class CloudflareEchPlugin(Plugin):
     async def setup(self, registry: PluginRegistry) -> None:
         if not self.runtime_config.match_tags:
             raise ValueError("cloudflare_ech_plugin 至少需要一个 match_tags")
+        return None
 
     async def on_response(self, context: RequestContext) -> None:
         if context.request.question[0].rdtype != dns.rdatatype.HTTPS:
@@ -78,8 +77,52 @@ class CloudflareEchPlugin(Plugin):
             )
             return
 
-        if not await self._should_apply_ech(context):
+        base_tags = (
+            set(context.upstream_results[-1].tags)
+            if context.upstream_results
+            else set(context.tags)
+        )
+        if self._has_any_tag(base_tags, self.runtime_config.exclude_tags):
+            self._logger.debug(
+                "跳过 Cloudflare ECH：命中 exclude_tags request_id=%s tags=%s",
+                context.request_id,
+                format_tags(base_tags),
+            )
             return
+        if not self._has_any_tag(base_tags, self.runtime_config.match_tags):
+            if HAS_HINT_TAG in base_tags:
+                self._logger.debug(
+                    "跳过 Cloudflare ECH：存在 hints 但未命中 match_tags request_id=%s tags=%s",
+                    context.request_id,
+                    format_tags(base_tags),
+                )
+                return
+            subquery_tags = await self._resolve_address_tags(context, get_ipset(context))
+            if self._has_any_tag(subquery_tags, self.runtime_config.exclude_tags):
+                self._logger.debug(
+                    "跳过 Cloudflare ECH：A subquery 命中 exclude_tags request_id=%s tags=%s",
+                    context.request_id,
+                    format_tags(subquery_tags),
+                )
+                return
+            if not self._has_any_tag(subquery_tags, self.runtime_config.match_tags):
+                self._logger.debug(
+                    "跳过 Cloudflare ECH：A subquery 未命中 match_tags request_id=%s tags=%s",
+                    context.request_id,
+                    format_tags(subquery_tags),
+                )
+                return
+            self._logger.debug(
+                "Cloudflare ECH 通过 A subquery 命中 request_id=%s tags=%s",
+                context.request_id,
+                format_tags(subquery_tags),
+            )
+        else:
+            self._logger.debug(
+                "Cloudflare ECH 直接命中基础 tags request_id=%s tags=%s",
+                context.request_id,
+                format_tags(base_tags),
+            )
 
         ech_payload = await self._load_cloudflare_ech_for_context(context)
         if ech_payload is None:
@@ -93,55 +136,6 @@ class CloudflareEchPlugin(Plugin):
                 context.request.question[0].name.to_text().rstrip("."),
                 updated_records,
             )
-
-    async def _should_apply_ech(self, context: RequestContext) -> bool:
-        base_tags = (
-            set(context.upstream_results[-1].tags)
-            if context.upstream_results
-            else set(context.tags)
-        )
-        if self._has_any_tag(base_tags, self.runtime_config.exclude_tags):
-            self._logger.debug(
-                "跳过 Cloudflare ECH：命中 exclude_tags request_id=%s tags=%s",
-                context.request_id,
-                format_tags(base_tags),
-            )
-            return False
-        if not self._has_any_tag(base_tags, self.runtime_config.match_tags):
-            if HAS_HINT_TAG in base_tags:
-                self._logger.debug(
-                    "跳过 Cloudflare ECH：存在 hints 但未命中 match_tags request_id=%s tags=%s",
-                    context.request_id,
-                    format_tags(base_tags),
-                )
-                return False
-            subquery_tags = await self._resolve_address_tags(context, get_ipset(context))
-            if self._has_any_tag(subquery_tags, self.runtime_config.exclude_tags):
-                self._logger.debug(
-                    "跳过 Cloudflare ECH：A subquery 命中 exclude_tags request_id=%s tags=%s",
-                    context.request_id,
-                    format_tags(subquery_tags),
-                )
-                return False
-            if not self._has_any_tag(subquery_tags, self.runtime_config.match_tags):
-                self._logger.debug(
-                    "跳过 Cloudflare ECH：A subquery 未命中 match_tags request_id=%s tags=%s",
-                    context.request_id,
-                    format_tags(subquery_tags),
-                )
-                return False
-            self._logger.debug(
-                "Cloudflare ECH 通过 A subquery 命中 request_id=%s tags=%s",
-                context.request_id,
-                format_tags(subquery_tags),
-            )
-        else:
-            self._logger.debug(
-                "Cloudflare ECH 直接命中基础 tags request_id=%s tags=%s",
-                context.request_id,
-                format_tags(base_tags),
-            )
-        return True
 
     def _get_https_answer(self, context: RequestContext) -> dns.resolver.Answer | None:
         answer = context.final_answer
@@ -160,10 +154,6 @@ class CloudflareEchPlugin(Plugin):
         if rrset is not None and rrset.rdtype != dns.rdatatype.HTTPS:
             return None
         return answer
-
-    @staticmethod
-    def _has_any_tag(current_tags: set[str], configured_tags: list[str]) -> bool:
-        return bool(current_tags.intersection(configured_tags))
 
     @staticmethod
     def _has_any_ech(answer: dns.resolver.Answer) -> bool:

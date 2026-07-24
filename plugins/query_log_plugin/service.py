@@ -2,14 +2,11 @@ from __future__ import annotations
 
 import threading
 from collections import deque
-from typing import TYPE_CHECKING
+from collections.abc import AsyncIterator
 
 import anyio
 
 from .models import QueryLogEntry, QueryLogPayload
-
-if TYPE_CHECKING:
-    from collections.abc import AsyncIterator
 
 
 class _Subscription:

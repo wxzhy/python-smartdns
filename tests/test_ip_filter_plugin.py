@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
+from pathlib import Path
 
 import dns.message
 import dns.rcode
@@ -8,9 +8,6 @@ import dns.rdatatype
 import dns.resolver
 import dns.rrset
 import pytest
-
-if TYPE_CHECKING:
-    from pathlib import Path
 
 from dns_forwarder.config import AppConfig, PluginConfig
 from dns_forwarder.core import DOMAINSET_CONTEXT_KEY, IPSET_CONTEXT_KEY, DomainSet, IPSet

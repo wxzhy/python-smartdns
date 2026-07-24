@@ -1,8 +1,11 @@
 from __future__ import annotations
 
+from typing import TYPE_CHECKING
+
 import dns.nameserver
 
-from dns_forwarder.config import DoTNameserverConfig
+if TYPE_CHECKING:
+    from dns_forwarder.config import DoTNameserverConfig
 
 
 def build_nameserver(config: DoTNameserverConfig) -> dns.nameserver.DoTNameserver:

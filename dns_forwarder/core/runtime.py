@@ -2,23 +2,20 @@ from __future__ import annotations
 
 import argparse
 import asyncio
-from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+import anyio.to_thread
+
 from dns_forwarder.config import AppConfig, ListenerProtocol, load_config
-from dns_forwarder.dispatcher import DispatcherRegistry
 from dns_forwarder.logging import configure_logging, get_logger
-from dns_forwarder.pipeline.engine import PipelineEngine
-from dns_forwarder.plugin_api import PluginManager
-from dns_forwarder.resolver import ResolverManager
-from dns_forwarder.resolver.nameservers import close_shared_sessions as close_nameserver_sessions
 from dns_forwarder.server import TcpDnsServer, UdpDnsServer
 from dns_forwarder.webui import WEBUI_RELOAD_ENDPOINT, ManagedUvicornServer, create_webui_app
 from plugins.query_log_plugin import QUERY_LOG_STORE_KEY, QueryLogStore
 
 from .domainset import DOMAINSET_CONTEXT_KEY, DomainSet
 from .ipset import IPSET_CONTEXT_KEY, IPSet
+from .worker import PortalWorker, RuntimeState, build_runtime_state
 
 logger = get_logger("core.runtime")
 
@@ -28,20 +25,13 @@ def _format_address(address: tuple[str, int] | None) -> str | None:
     return f"{address[0]}:{address[1]}" if address else None
 
 
-@dataclass(slots=True)
-class RuntimeState:
-    config: AppConfig
-    plugin_manager: PluginManager
-    resolver_manager: ResolverManager
-    dispatcher_registry: DispatcherRegistry
-    pipeline: PipelineEngine
-
-
 class RuntimeManager:
     def __init__(self, config_path: str | Path = "config.json") -> None:
         self.config_path = Path(config_path)
         self._lock = asyncio.Lock()
         self._state: RuntimeState | None = None
+        self._workers: list[PortalWorker] = []
+        self._next_worker_index = 0
         self._listeners: list[UdpDnsServer | TcpDnsServer] = []
         self._webui_server: ManagedUvicornServer | None = None
 
@@ -51,19 +41,27 @@ class RuntimeManager:
 
     async def load(self) -> RuntimeState:
         async with self._lock:
-            self._state = await self._build_state()
+            config = load_config(self.config_path)
+            configure_logging(config.runtime.log_level)
+            self._state = await self._build_worker_state(config)
             logger.info("运行时已加载 config=%s", self.config_path)
             return self._state
 
     async def start(self) -> None:
         async with self._lock:
             if self._state is None:
-                self._state = await self._build_state()
-            if self._listeners or self._webui_server is not None:
+                config = load_config(self.config_path)
+                configure_logging(config.runtime.log_level)
+            else:
+                config = self._state.config
+            if self._workers or self._listeners or self._webui_server is not None:
                 logger.debug("运行时已启动，忽略重复 start config=%s", self.config_path)
                 return
-            logger.info("启动运行时 config=%s", self.config_path)
-            await self._start_services(self._state.config)
+            logger.info(
+                "启动运行时 config=%s workers=%s", self.config_path, config.runtime.workers
+            )
+            await self._start_workers(config)
+            await self._start_services(config)
 
     async def stop(self) -> None:
         async with self._lock:
@@ -74,26 +72,46 @@ class RuntimeManager:
             for listener in self._listeners:
                 await listener.stop()
             self._listeners.clear()
-            await close_nameserver_sessions()
+            await self._stop_workers()
 
     async def reload(self) -> RuntimeState:
         async with self._lock:
             logger.info("开始 reload config=%s", self.config_path)
-            new_state = await self._build_state()
+            config = load_config(self.config_path)
+            configure_logging(config.runtime.log_level)
+            self._log_config_loaded(config)
             if (
                 self._state is not None
                 and self._services_started()
                 and self._service_signature(self._state.config)
-                != self._service_signature(new_state.config)
+                != self._service_signature(config)
             ):
                 message = "listener 或 webui 地址变更需要重启进程"
                 logger.error("reload 失败 config=%s error=%s", self.config_path, message)
                 raise RuntimeError(message)
-            self._state = new_state
+            if self._workers:
+                shared_contexts = self._build_shared_contexts(config)
+                # 串行重建各 worker 状态，避免并发读取同一域名集/IP集文件。
+                # 主侧状态与 worker 0 保持一致（webui 读取 config/plugin 描述用）。
+                first = True
+                for worker in self._workers:
+                    new_state = await anyio.to_thread.run_sync(worker.reload, shared_contexts)
+                    if first:
+                        self._state = new_state
+                        first = False
+            else:
+                self._state = await self._build_worker_state(config)
             logger.info("reload 完成 config=%s", self.config_path)
-            return new_state
+            return self._state
 
     async def process_query(self, request: Any, clientaddr: Any, listener_name: str) -> Any:
+        if self._workers:
+            worker = self._pick_worker()
+            # BlockingPortal.call 是阻塞调用且要求 anyio worker 线程，
+            # 必须经 anyio.to_thread 转发，不能直接在主 loop 内调用。
+            return await anyio.to_thread.run_sync(
+                worker.process_query_blocking, request, clientaddr, listener_name
+            )
         state = self.get_state()
         return await state.pipeline.handle_message(request, clientaddr, listener_name)
 
@@ -145,9 +163,41 @@ class RuntimeManager:
             return None
         return registration.value
 
-    async def _build_state(self) -> RuntimeState:
-        config = load_config(self.config_path)
-        configure_logging(config.runtime.log_level)
+    async def _start_workers(self, config: AppConfig) -> None:
+        shared_contexts = self._build_shared_contexts(config)
+        workers = [
+            PortalWorker(index, self.config_path, shared_contexts)
+            for index in range(config.runtime.workers)
+        ]
+        try:
+            # 逐个启动并等待各自完成初始化，保证先初始化后收包。
+            for worker in workers:
+                await anyio.to_thread.run_sync(worker.start)
+        except BaseException:
+            for worker in workers:
+                await anyio.to_thread.run_sync(worker.stop)
+            raise
+        self._workers = workers
+        self._next_worker_index = 0
+        self._state = workers[0].state
+        logger.info("worker 已全部启动 count=%s", len(workers))
+
+    async def _stop_workers(self) -> None:
+        workers, self._workers = self._workers, []
+        self._state = None
+        for worker in workers:
+            await anyio.to_thread.run_sync(worker.stop)
+
+    def _pick_worker(self) -> PortalWorker:
+        worker = self._workers[self._next_worker_index % len(self._workers)]
+        self._next_worker_index += 1
+        return worker
+
+    async def _build_worker_state(self, config: AppConfig) -> RuntimeState:
+        """构建一份主侧 RuntimeState（仅在 worker 尚未启动的 load 阶段使用）。"""
+        return await build_runtime_state(self.config_path, self._build_shared_contexts(config))
+
+    def _log_config_loaded(self, config: AppConfig) -> None:
         logger.info(
             "加载配置完成 config=%s listeners=%s upstreams=%s plugins=%s log_level=%s",
             self.config_path,
@@ -155,21 +205,6 @@ class RuntimeManager:
             len(config.upstreams),
             len(config.plugins),
             config.runtime.log_level,
-        )
-        plugin_manager = await PluginManager.build(
-            config.plugins,
-            config.runtime.plugin_dirs,
-            shared_contexts=self._build_shared_contexts(config),
-        )
-        resolver_manager = ResolverManager(config, plugin_manager.registry)
-        dispatcher_registry = DispatcherRegistry()
-        pipeline = PipelineEngine(config, resolver_manager, dispatcher_registry, plugin_manager)
-        return RuntimeState(
-            config=config,
-            plugin_manager=plugin_manager,
-            resolver_manager=resolver_manager,
-            dispatcher_registry=dispatcher_registry,
-            pipeline=pipeline,
         )
 
     def _build_shared_contexts(self, config: AppConfig) -> dict[str, Any]:
@@ -232,7 +267,7 @@ class RuntimeManager:
             config.webui.host,
             config.webui.port,
         )
-        return listeners, webui
+        return listeners, webui, config.runtime.workers
 
     @staticmethod
     def _is_query_log_plugin_enabled(config: AppConfig) -> bool:
@@ -250,7 +285,7 @@ def install_loop_policy(loop_policy: str) -> None:
         return
     if loop_policy in {"auto", "winuvloop"}:
         try:
-            import winuvloop
+            import winuvloop  # noqa: PLC0415 - optional dependency, imported lazily
         except ImportError:
             if loop_policy == "winuvloop":
                 logger.error("请求使用 winuvloop，但依赖未安装")

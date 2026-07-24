@@ -4,6 +4,8 @@ from ipaddress import ip_network
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
+IPV4_VERSION = 4
+
 
 class StrictPluginModel(BaseModel):
     model_config = ConfigDict(extra="forbid")
@@ -56,7 +58,7 @@ def _normalize_networks(value: list[str] | None, *, version: int) -> list[str]:
     for item in value:
         network = ip_network(str(item).strip(), strict=False)
         if network.version != version:
-            family = "IPv4" if version == 4 else "IPv6"
+            family = "IPv4" if version == IPV4_VERSION else "IPv6"
             raise ValueError(f"目标网段必须是 {family} CIDR")
         text = network.with_prefixlen
         if text in seen:

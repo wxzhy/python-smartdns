@@ -5,7 +5,7 @@ import ipaddress
 import socket
 import struct
 from time import time
-from typing import Final
+from typing import TYPE_CHECKING, Final
 
 import dns.asyncbackend
 import dns.message
@@ -21,13 +21,19 @@ from nacl.public import Box, PrivateKey, PublicKey
 from nacl.signing import VerifyKey
 from nacl.utils import random
 
-from dns_forwarder.config import DNSCryptNameserverConfig
+if TYPE_CHECKING:
+    from dns_forwarder.config import DNSCryptNameserverConfig
 
 DNSCRYPT_MINIMUM_SIZE: Final[int] = 256
 DNSCRYPT_MODULO_SIZE: Final[int] = 64
 DNSCRYPT_NONCE_SIZE: Final[int] = 12
 DNSCRYPT_RESOLVER_MAGIC: Final[bytes] = b"r6fnvWj8"
 DNSCRYPT_CERT_MAGIC: Final[bytes] = b"DNSC"
+# DNSCrypt 证书查询/响应的最小长度（协议字段定长）。
+DNSCRYPT_CERT_QUERY_MIN_SIZE: Final[int] = 52
+DNSCRYPT_CERT_HEADER_SIZE: Final[int] = 8
+DNSCRYPT_RESPONSE_MIN_SIZE: Final[int] = 32
+PORT_MAX: Final[int] = 65535
 
 
 def _normalize_hex(value: str) -> bytes:
@@ -36,7 +42,7 @@ def _normalize_hex(value: str) -> bytes:
 
 def _parse_port_text(port_text: str) -> int:
     port = int(port_text)
-    if not (1 <= port <= 65535):
+    if not (1 <= port <= PORT_MAX):
         raise ValueError("端口号超出范围")
     return port
 
@@ -89,7 +95,7 @@ def _is_multicast(address: str) -> bool:
 
 
 class DNSCryptResolver:
-    def __init__(
+    def __init__(  # noqa: PLR0913  # 形参与 dnspython Nameserver 接口一致
         self,
         address: str,
         provider_name: str,
@@ -164,10 +170,10 @@ class DNSCryptResolver:
         for rrset in answer.answer:
             for rdata in rrset:
                 candidate = b"".join(rdata.strings)
-                if len(candidate) <= 8:
+                if len(candidate) <= DNSCRYPT_CERT_HEADER_SIZE:
                     continue
                 magic, es_version, _minor_version, signed = struct.unpack(
-                    f"!4sHH{len(candidate) - 8}s",
+                    f"!4sHH{len(candidate) - DNSCRYPT_CERT_HEADER_SIZE}s",
                     candidate,
                 )
                 if magic != DNSCRYPT_CERT_MAGIC or es_version != 1:
@@ -178,7 +184,7 @@ class DNSCryptResolver:
                 except BadSignatureError:
                     continue
 
-                if len(data) <= 52:
+                if len(data) <= DNSCRYPT_CERT_QUERY_MIN_SIZE:
                     continue
                 pk, client_magic, serial, start, expire, _ = struct.unpack(
                     f"!32s8sIII{len(data) - 52}s",
@@ -213,7 +219,7 @@ class DNSCryptResolver:
         one_rr_per_rrset: bool,
         ignore_trailing: bool,
     ) -> dns.message.Message:
-        if len(wire) < 32:
+        if len(wire) < DNSCRYPT_RESPONSE_MIN_SIZE:
             raise FormError("DNSCrypt response too short")
 
         magic, nonce, data = struct.unpack(f"!8s24s{len(wire) - 32}s", wire)
@@ -227,7 +233,7 @@ class DNSCryptResolver:
             one_rr_per_rrset=one_rr_per_rrset,
         )
 
-    def query(
+    def query(  # noqa: PLR0913  # 形参与 dnspython Nameserver 接口一致
         self,
         request: dns.message.QueryMessage,
         timeout: float,
@@ -266,7 +272,7 @@ class DNSCryptResolver:
             )
         return response
 
-    def tcp(
+    def tcp(  # noqa: PLR0913  # 形参与 dnspython Nameserver 接口一致
         self,
         request: dns.message.QueryMessage,
         timeout: float,
@@ -306,7 +312,7 @@ class DNSCryptResolver:
             raise dns.query.BadResponse
         return response
 
-    def udp(
+    def udp(  # noqa: PLR0913  # 形参与 dnspython Nameserver 接口一致
         self,
         request: dns.message.QueryMessage,
         timeout: float,
@@ -358,7 +364,7 @@ class DNSCryptResolver:
 
 
 class DNSCryptNameserver(dns.nameserver.Nameserver):
-    def __init__(
+    def __init__(  # noqa: PLR0913  # 形参与 dnspython Nameserver 接口一致
         self,
         address: str,
         provider_name: str,
@@ -396,7 +402,7 @@ class DNSCryptNameserver(dns.nameserver.Nameserver):
     def answer_port(self) -> int:
         return self.port
 
-    def query(
+    def query(  # noqa: PLR0913  # 形参与 dnspython Nameserver 接口一致
         self,
         request: dns.message.QueryMessage,
         timeout: float,
@@ -416,10 +422,10 @@ class DNSCryptNameserver(dns.nameserver.Nameserver):
             ignore_trailing=ignore_trailing,
         )
 
-    async def async_query(
+    async def async_query(  # noqa: PLR0913  # 形参与 dnspython Nameserver 接口一致
         self,
         request: dns.message.QueryMessage,
-        timeout: float,
+        timeout: float,  # noqa: ASYNC109  # timeout 属 dnspython/socket 接口契约
         source: str | None,
         source_port: int,
         max_size: bool,

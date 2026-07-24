@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import time
-from collections.abc import Sequence
+from typing import TYPE_CHECKING
 
 import dns.asyncresolver
 import dns.edns
@@ -10,11 +10,15 @@ import dns.rdataclass
 import dns.rdatatype
 import dns.resolver
 
-from dns_forwarder.config import UpstreamConfig
 from dns_forwarder.logging import format_tags, get_logger
 from dns_forwarder.pipeline.context import RequestContext, UpstreamResult
 
 from .base import BaseUpstreamResolver
+
+if TYPE_CHECKING:
+    from collections.abc import Sequence
+
+    from dns_forwarder.config import UpstreamConfig
 
 logger = get_logger("resolver.upstream")
 

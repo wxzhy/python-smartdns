@@ -1,7 +1,7 @@
 from __future__ import annotations
 
-from pathlib import Path
 from types import SimpleNamespace
+from typing import TYPE_CHECKING
 
 import dns.message
 import dns.rdataclass
@@ -12,6 +12,9 @@ from dns_forwarder.core import DOMAINSET_CONTEXT_KEY, IPSET_CONTEXT_KEY, DomainS
 from dns_forwarder.pipeline import RequestContext, UpstreamResult, build_answer_from_response
 from dns_forwarder.plugin_api import PluginManager, PluginRegistry
 from plugins.tag_plugin import HAS_HINT_TAG, TagPlugin, get_domainset, get_ipset
+
+if TYPE_CHECKING:
+    from pathlib import Path
 
 
 def _write_lines(path: Path, lines: list[str]) -> None:

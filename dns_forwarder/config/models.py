@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 from enum import StrEnum
 from ipaddress import IPv4Network, IPv6Network, ip_address, ip_network
 from typing import Annotated, Any, Literal
@@ -64,6 +65,7 @@ class StrictConfigModel(BaseModel):
 class RuntimeConfig(StrictConfigModel):
     plugin_dirs: list[str] = Field(default_factory=lambda: ["plugins"])
     loop_policy: str = "auto"
+    workers: int = Field(default_factory=lambda: os.cpu_count() or 1, ge=1, le=64)
     default_upstream_group: str = "default"
     default_upstream_policy: DispatchStrategyType = DispatchStrategyType.RACE
     bootstrap_resolver: list[str] = Field(default_factory=list)

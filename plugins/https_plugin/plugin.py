@@ -20,7 +20,7 @@ class HttpsPlugin(Plugin):
     config_model = EmptyModel
     variables_model = EmptyModel
     response_order = 800
-    ui_meta = {
+    ui_meta = {  # noqa: RUF012  # read-only frozen-style plugin metadata
         "title": "HTTPS Plugin",
         "description": "清洗 HTTPS 记录中的 h3 ALPN 与 IPv4/IPv6 hints，保留其余参数不变。",
     }

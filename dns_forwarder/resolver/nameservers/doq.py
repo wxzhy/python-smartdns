@@ -1,8 +1,11 @@
 from __future__ import annotations
 
+from typing import TYPE_CHECKING
+
 import dns.nameserver
 
-from dns_forwarder.config import DoQNameserverConfig
+if TYPE_CHECKING:
+    from dns_forwarder.config import DoQNameserverConfig
 
 
 def build_nameserver(config: DoQNameserverConfig) -> dns.nameserver.DoQNameserver:

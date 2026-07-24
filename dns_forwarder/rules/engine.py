@@ -1,12 +1,15 @@
 from __future__ import annotations
 
-from collections.abc import Iterable
 from dataclasses import dataclass
+from typing import TYPE_CHECKING
 
 import dns.rdatatype
 
-from dns_forwarder.config import DispatchStrategyType, RuleConfig
-from dns_forwarder.pipeline.context import RequestContext
+if TYPE_CHECKING:
+    from collections.abc import Iterable
+
+    from dns_forwarder.config import DispatchStrategyType, RuleConfig
+    from dns_forwarder.pipeline.context import RequestContext
 
 
 @dataclass(frozen=True, slots=True)

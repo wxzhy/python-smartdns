@@ -21,6 +21,11 @@ from plugins.query_log_plugin import (
 )
 from plugins.sample_plugin import SamplePlugin, SamplePluginConfig, SamplePluginVariables
 
+_LOG_DURATION_MS = 12.5
+_LOG_ENTRY_COUNT = 2
+_LOG_REPLAY_ID = 3
+_LOG_PUSHED_ID = 4
+
 
 def build_config() -> AppConfig:
     return AppConfig.model_validate(
@@ -155,7 +160,7 @@ async def test_query_log_plugin_records_upstream_answer_once() -> None:
     def handler(upstream_name: str, context: RequestContext) -> UpstreamResult:
         return UpstreamResult(
             upstream_name=upstream_name,
-            duration_ms=12.5,
+            duration_ms=_LOG_DURATION_MS,
             answer=make_answer(context.request, "203.0.113.10"),
         )
 
@@ -180,7 +185,7 @@ async def test_query_log_plugin_records_upstream_answer_once() -> None:
     assert items[0].rcode == "NOERROR"
     assert items[0].result_summary == "A 203.0.113.10"
     assert items[0].upstream == "upstream-a"
-    assert items[0].duration_ms == 12.5
+    assert items[0].duration_ms == _LOG_DURATION_MS
 
 
 async def test_query_log_plugin_records_static_and_cache_short_circuit_requests() -> None:
@@ -220,7 +225,7 @@ async def test_query_log_plugin_records_static_and_cache_short_circuit_requests(
     assert second is not None
     assert resolver_manager.calls == 0
     items = await get_query_log_store(manager).list_recent(10)
-    assert len(items) == 2
+    assert len(items) == _LOG_ENTRY_COUNT
     assert items[0].result_summary == "A 127.0.0.1"
     assert items[0].upstream is None
     assert items[1].result_summary == "A 127.0.0.1"
@@ -330,12 +335,12 @@ async def test_query_log_store_rotates_replays_and_pushes_new_entries() -> None:
         )
 
     recent = await store.list_recent(10)
-    assert [item.id for item in recent] == [2, 3]
+    assert [item.id for item in recent] == [2, _LOG_REPLAY_ID]
 
     stream = store.subscribe(after_id=2)
     replayed = await anext(stream)
     assert replayed is not None
-    assert replayed.id == 3
+    assert replayed.id == _LOG_REPLAY_ID
 
     await store.append(
         QueryLogPayload(
@@ -349,7 +354,7 @@ async def test_query_log_store_rotates_replays_and_pushes_new_entries() -> None:
     )
     pushed = await anext(stream)
     assert pushed is not None
-    assert pushed.id == 4
+    assert pushed.id == _LOG_PUSHED_ID
     await stream.aclose()
 
 

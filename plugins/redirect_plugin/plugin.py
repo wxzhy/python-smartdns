@@ -21,7 +21,7 @@ class RedirectPlugin(Plugin):
     config_model = RedirectPluginConfig
     variables_model = EmptyModel
     request_order = 50
-    ui_meta = {
+    ui_meta = {  # noqa: RUF012  # read-only frozen-style plugin metadata
         "title": "Redirect Plugin",
         "description": "按域名映射发起内部子查询，并返回源域名 CNAME 加目标域名结果。",
     }

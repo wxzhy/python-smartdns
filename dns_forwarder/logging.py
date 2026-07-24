@@ -16,10 +16,12 @@ from __future__ import annotations
 import contextlib
 import logging
 import sys
-from collections.abc import Collection
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from loguru import logger as _root_logger
+
+if TYPE_CHECKING:
+    from collections.abc import Collection
 
 LOGGER_NAME = "dns_forwarder"
 _VALID_LEVELS = {"CRITICAL", "ERROR", "WARNING", "INFO", "DEBUG", "TRACE"}

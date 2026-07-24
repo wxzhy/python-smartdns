@@ -37,6 +37,13 @@ from dns_forwarder.resolver.nameservers.doh_curl_cffi import (
 from dns_forwarder.resolver.nameservers.doh_custom import DoHCustomNameserver, _get_shared_client
 from dns_forwarder.resolver.nameservers.doh_httpx import DoHHttpxNameserver
 
+_AIODNS_TIMEOUT = 2.5
+_CUSTOM_PORT = 5301
+_DEFAULT_TTL = 60
+_HTTPS_PORT = 443
+_TWO_RRSETS = 2
+_HAPPY_EYEBALLS_DELAY = 0.25
+
 
 class FakeResponse:
     def __init__(self, content: bytes) -> None:
@@ -129,8 +136,8 @@ async def test_aiodns_get_resolver_configures_pycares_channel() -> None:
         with patch("dns_forwarder.resolver.nameservers.aiodns.AiodnsDNSResolver") as resolver_cls:
             result = aiodns_nameserver._get_resolver(
                 ("1.1.1.1", "1.0.0.1"),
-                5301,
-                2.5,
+                _CUSTOM_PORT,
+                _AIODNS_TIMEOUT,
                 True,
             )
 
@@ -138,9 +145,9 @@ async def test_aiodns_get_resolver_configures_pycares_channel() -> None:
         kwargs = resolver_cls.call_args.kwargs
         assert kwargs["nameservers"] == ["1.1.1.1", "1.0.0.1"]
         assert kwargs["flags"] == pycares.ARES_FLAG_USEVC
-        assert kwargs["timeout"] == 2.5
-        assert kwargs["tcp_port"] == 5301
-        assert kwargs["udp_port"] == 5301
+        assert kwargs["timeout"] == _AIODNS_TIMEOUT
+        assert kwargs["tcp_port"] == _CUSTOM_PORT
+        assert kwargs["udp_port"] == _CUSTOM_PORT
         assert kwargs["rotate"] is True
     finally:
         aiodns_nameserver._RESOLVERS.clear()
@@ -201,10 +208,10 @@ async def test_aiodns_nameserver_async_query_fills_response_sections() -> None:
     get_resolver.assert_called_once_with(nameserver.servers, 5301, 2.0, False)
     fake_resolver.query_dns.assert_awaited_once_with("example.test", "HTTPS", "IN")
     assert response.question == request.question
-    assert response.answer[0].ttl == 60
+    assert response.answer[0].ttl == _DEFAULT_TTL
     assert response.answer[0][0].priority == 1
     assert response.answer[0][0].target.to_text() == "svc.example.test."
-    assert response.answer[0][0].params[dns.rdtypes.svcbbase.ParamKey.PORT].port == 443
+    assert response.answer[0][0].params[dns.rdtypes.svcbbase.ParamKey.PORT].port == _HTTPS_PORT
     assert response.authority[0].to_text().startswith("example.test. 300 IN NS")
     assert response.additional[0].to_text().startswith("ns.example.test. 300 IN A")
 
@@ -248,7 +255,7 @@ async def test_aiodns_nameserver_async_query_supports_one_rr_per_rrset() -> None
             one_rr_per_rrset=True,
         )
 
-    assert len(response.answer) == 2
+    assert len(response.answer) == _TWO_RRSETS
     assert [rrset[0].address for rrset in response.answer] == ["192.0.2.1", "192.0.2.2"]
 
 
@@ -485,7 +492,7 @@ async def test_tricky_tcp_connect_uses_hosts_with_happy_eyeballs() -> None:
     start_connection.assert_awaited_once()
     assert start_connection.await_args.args == (expected_addr_infos,)
     assert start_connection.await_args.kwargs["local_addr_infos"] is None
-    assert start_connection.await_args.kwargs["happy_eyeballs_delay"] == 0.25
+    assert start_connection.await_args.kwargs["happy_eyeballs_delay"] == _HAPPY_EYEBALLS_DELAY
     assert start_connection.await_args.kwargs["socket_factory"] is _tcp_socket_factory
     assert tricky_sock.family == socket.AF_INET
 
@@ -843,9 +850,7 @@ async def test_doh_curl_cffi_get_query_uses_request_options_and_host_header() ->
 
 
 async def test_doh_aiohttp_shared_session_uses_bootstrap_resolver() -> None:
-    doh_aiohttp._SHARED_SESSION = None
-    doh_aiohttp._SHARED_BOOTSTRAP_RESOLVER = None
-    doh_aiohttp._SHARED_HOSTS = None
+    doh_aiohttp._SHARED.clear()
 
     with (
         patch("dns_forwarder.resolver.nameservers.doh_aiohttp.AsyncResolver") as resolver,
@@ -862,9 +867,7 @@ async def test_doh_aiohttp_shared_session_uses_bootstrap_resolver() -> None:
         keepalive_timeout=30,
     )
     session.assert_called_once_with(connector=connector.return_value)
-    doh_aiohttp._SHARED_SESSION = None
-    doh_aiohttp._SHARED_BOOTSTRAP_RESOLVER = None
-    doh_aiohttp._SHARED_HOSTS = None
+    doh_aiohttp._SHARED.clear()
 
 
 async def test_doh_aiohttp_hosts_resolver_returns_static_hosts() -> None:
@@ -895,9 +898,7 @@ async def test_doh_aiohttp_hosts_resolver_returns_static_hosts() -> None:
 
 
 async def test_doh_aiohttp_shared_session_uses_hosts_resolver() -> None:
-    doh_aiohttp._SHARED_SESSION = None
-    doh_aiohttp._SHARED_BOOTSTRAP_RESOLVER = None
-    doh_aiohttp._SHARED_HOSTS = None
+    doh_aiohttp._SHARED.clear()
     hosts = (("cloudflare-dns.com", ("1.1.1.1", "1.0.0.1")),)
 
     with (
@@ -915,13 +916,11 @@ async def test_doh_aiohttp_shared_session_uses_hosts_resolver() -> None:
         keepalive_timeout=30,
     )
     session.assert_called_once_with(connector=connector.return_value)
-    doh_aiohttp._SHARED_SESSION = None
-    doh_aiohttp._SHARED_BOOTSTRAP_RESOLVER = None
-    doh_aiohttp._SHARED_HOSTS = None
+    doh_aiohttp._SHARED.clear()
 
 
 def test_doh_curl_cffi_shared_session_uses_single_session() -> None:
-    doh_curl_cffi._SHARED_SESSIONS = {}
+    doh_curl_cffi._SHARED_SESSIONS.clear()
 
     with patch("dns_forwarder.resolver.nameservers.doh_curl_cffi.AsyncSession") as session:
         result = get_curl_shared_session()
@@ -929,11 +928,11 @@ def test_doh_curl_cffi_shared_session_uses_single_session() -> None:
     assert result is session.return_value
     kwargs = session.call_args.kwargs
     assert kwargs == {"max_clients": 500}
-    doh_curl_cffi._SHARED_SESSIONS = {}
+    doh_curl_cffi._SHARED_SESSIONS.clear()
 
 
 def test_doh_curl_cffi_shared_session_uses_curl_resolve_entries() -> None:
-    doh_curl_cffi._SHARED_SESSIONS = {}
+    doh_curl_cffi._SHARED_SESSIONS.clear()
     resolve_entries = ("cloudflare-dns.com:443:1.1.1.1,1.0.0.1",)
 
     with patch("dns_forwarder.resolver.nameservers.doh_curl_cffi.AsyncSession") as session:
@@ -945,4 +944,4 @@ def test_doh_curl_cffi_shared_session_uses_curl_resolve_entries() -> None:
         "max_clients": 500,
         "curl_options": {doh_curl_cffi.CurlOpt.RESOLVE: list(resolve_entries)},
     }
-    doh_curl_cffi._SHARED_SESSIONS = {}
+    doh_curl_cffi._SHARED_SESSIONS.clear()

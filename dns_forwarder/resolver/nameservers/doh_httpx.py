@@ -1,12 +1,11 @@
 from __future__ import annotations
 
-from typing import Any
+import asyncio
+from typing import TYPE_CHECKING, Any
 
 import dns.asyncbackend
 import dns.message
 import dns.nameserver
-
-from dns_forwarder.config import DoHHttpxNameserverConfig, HTTPVersionType
 
 from .doh_client_common import (
     build_doh_request,
@@ -15,21 +14,34 @@ from .doh_client_common import (
     url_port,
 )
 
+if TYPE_CHECKING:
+    from dns_forwarder.config import DoHHttpxNameserverConfig, HTTPVersionType
+
 try:  # pragma: no cover - dependency availability is checked at build time
     import httpx
 except ImportError:  # pragma: no cover
     httpx = None  # type: ignore[assignment]
 
 
-_SHARED_CLIENT: Any | None = None
+# 模块级共享 httpx 客户端缓存：以事件循环 id 为键，每个 loop（含 portal worker 线程）
+# 持有独立客户端，避免跨 loop 复用。仅在无运行中 loop 的环境（如同步测试）回退到键 None。
+_SHARED_CLIENTS: dict[int | None, Any] = {}
+
+
+def _loop_key() -> int | None:
+    try:
+        return id(asyncio.get_running_loop())
+    except RuntimeError:
+        return None
 
 
 def _get_shared_client() -> Any:
-    global _SHARED_CLIENT
-    if _SHARED_CLIENT is None:
+    key = _loop_key()
+    client = _SHARED_CLIENTS.get(key)
+    if client is None:
         if httpx is None:  # pragma: no cover
             raise RuntimeError("httpx is required for httpx nameserver")
-        _SHARED_CLIENT = httpx.AsyncClient(
+        client = httpx.AsyncClient(
             http2=True,
             limits=httpx.Limits(
                 max_connections=500,
@@ -38,19 +50,19 @@ def _get_shared_client() -> Any:
             ),
             verify=True,
         )
-    return _SHARED_CLIENT
+        _SHARED_CLIENTS[key] = client
+    return client
 
 
 async def close_shared_sessions() -> None:
-    global _SHARED_CLIENT
-    client = _SHARED_CLIENT
-    _SHARED_CLIENT = None
+    # 仅关闭并移除当前运行 loop 的客户端，保证在持有它的 loop 内完成关闭。
+    client = _SHARED_CLIENTS.pop(_loop_key(), None)
     if client is not None:
         await client.aclose()
 
 
 class DoHHttpxNameserver(dns.nameserver.Nameserver):
-    def __init__(
+    def __init__(  # noqa: PLR0913  # 形参与 dnspython Nameserver 接口一致
         self,
         url: str,
         *,
@@ -82,7 +94,7 @@ class DoHHttpxNameserver(dns.nameserver.Nameserver):
     def answer_port(self) -> int:
         return url_port(self.url)
 
-    def query(
+    def query(  # noqa: PLR0913  # 形参与 dnspython Nameserver 接口一致
         self,
         request: dns.message.QueryMessage,
         timeout: float,
@@ -94,10 +106,10 @@ class DoHHttpxNameserver(dns.nameserver.Nameserver):
     ) -> dns.message.Message:
         raise NotImplementedError("httpx nameserver only supports async queries")
 
-    async def async_query(
+    async def async_query(  # noqa: PLR0913  # 形参与 dnspython Nameserver 接口一致
         self,
         request: dns.message.QueryMessage,
-        timeout: float,
+        timeout: float,  # noqa: ASYNC109  # timeout 属 dnspython/socket 接口契约
         source: str | None,
         source_port: int,
         max_size: bool,

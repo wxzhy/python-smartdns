@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from pathlib import Path
+from typing import TYPE_CHECKING
 
 import dns.message
 import dns.rrset
@@ -15,6 +15,13 @@ from dns_forwarder.pipeline.engine import PipelineEngine
 from dns_forwarder.plugin_api import EmptyModel, LoadedPlugin, Plugin, PluginManager, PluginRegistry
 from plugins.block_plugin import BlockPlugin, BlockPluginConfig, BlockPluginRuleConfig
 from plugins.tag_plugin import TagPlugin
+
+if TYPE_CHECKING:
+    from pathlib import Path
+
+
+_BLOCK_TTL_LONG = 7200
+_BLOCK_TTL_SHORT = 600
 
 
 def _write_lines(path: Path, lines: list[str]) -> None:
@@ -106,17 +113,17 @@ def build_plugin(*rules: BlockPluginRuleConfig) -> BlockPlugin:
 def build_rule(
     *,
     match_tags: list[str],
+    addresses: dict[str, list[str]] | None = None,
     exclude_tags: list[str] | None = None,
-    ipv4_addresses: list[str] | None = None,
-    ipv6_addresses: list[str] | None = None,
     block_other: bool = False,
     response_ttl_seconds: int = 86400,
 ) -> BlockPluginRuleConfig:
+    resolved = {} if addresses is None else dict(addresses)
     return BlockPluginRuleConfig(
         match_tags=match_tags,
         exclude_tags=[] if exclude_tags is None else exclude_tags,
-        ipv4_addresses=[] if ipv4_addresses is None else ipv4_addresses,
-        ipv6_addresses=[] if ipv6_addresses is None else ipv6_addresses,
+        ipv4_addresses=resolved.get("ipv4", []),
+        ipv6_addresses=resolved.get("ipv6", []),
         block_other=block_other,
         response_ttl_seconds=response_ttl_seconds,
     )
@@ -186,8 +193,8 @@ async def test_block_plugin_short_circuits_request_for_a() -> None:
     plugin = build_plugin(
         build_rule(
             match_tags=["blackhole"],
-            ipv4_addresses=["127.0.0.1", "127.0.0.2"],
-            response_ttl_seconds=7200,
+            addresses={"ipv4": ["127.0.0.1", "127.0.0.2"]},
+            response_ttl_seconds=_BLOCK_TTL_LONG,
         )
     )
     registry = PluginRegistry()
@@ -207,13 +214,13 @@ async def test_block_plugin_short_circuits_request_for_a() -> None:
     assert context.final_answer is not None
     assert context.final_answer.rrset is not None
     assert set(answer_addresses(context.final_answer)) == {"127.0.0.1", "127.0.0.2"}
-    assert context.final_answer.rrset.ttl == 7200
+    assert context.final_answer.rrset.ttl == _BLOCK_TTL_LONG
     assert context.stop_processing is True
 
 
 async def test_block_plugin_short_circuits_request_for_aaaa() -> None:
     plugin = build_plugin(
-        build_rule(match_tags=["blackhole"], ipv6_addresses=["::1", "2001:db8::1"])
+        build_rule(match_tags=["blackhole"], addresses={"ipv6": ["::1", "2001:db8::1"]})
     )
     registry = PluginRegistry()
     await plugin.setup(registry)
@@ -236,8 +243,7 @@ async def test_block_plugin_skips_non_address_query() -> None:
     plugin = build_plugin(
         build_rule(
             match_tags=["blackhole"],
-            ipv4_addresses=["127.0.0.1"],
-            ipv6_addresses=["::1"],
+            addresses={"ipv4": ["127.0.0.1"], "ipv6": ["::1"]},
         )
     )
     registry = PluginRegistry()
@@ -287,8 +293,8 @@ async def test_block_plugin_rewrites_final_response_for_matching_result_tags() -
     plugin = build_plugin(
         build_rule(
             match_tags=["blackhole"],
-            ipv4_addresses=["127.0.0.1", "127.0.0.2"],
-            response_ttl_seconds=600,
+            addresses={"ipv4": ["127.0.0.1", "127.0.0.2"]},
+            response_ttl_seconds=_BLOCK_TTL_SHORT,
         )
     )
     registry = PluginRegistry()
@@ -314,11 +320,11 @@ async def test_block_plugin_rewrites_final_response_for_matching_result_tags() -
     assert context.final_answer is not None
     assert context.final_answer.rrset is not None
     assert set(answer_addresses(context.final_answer)) == {"127.0.0.1", "127.0.0.2"}
-    assert context.final_answer.rrset.ttl == 600
+    assert context.final_answer.rrset.ttl == _BLOCK_TTL_SHORT
     assert context.stop_processing is True
 
 
-async def test_block_plugin_rewrites_non_address_response_to_empty_noerror_when_block_other_enabled() -> (
+async def test_block_plugin_rewrites_non_address_response_to_empty_noerror_when_block_other_enabled() -> (  # noqa: E501
     None
 ):
     plugin = build_plugin(
@@ -359,8 +365,8 @@ async def test_block_plugin_honors_exclude_tags() -> None:
     plugin = build_plugin(
         build_rule(
             match_tags=["blackhole"],
+            addresses={"ipv4": ["127.0.0.1"]},
             exclude_tags=["direct"],
-            ipv4_addresses=["127.0.0.1"],
         )
     )
     registry = PluginRegistry()
@@ -381,8 +387,8 @@ async def test_block_plugin_honors_exclude_tags() -> None:
 
 async def test_block_plugin_uses_first_rule_with_current_qtype_values() -> None:
     plugin = build_plugin(
-        build_rule(match_tags=["proxy"], ipv6_addresses=["fd00::1"]),
-        build_rule(match_tags=["proxy"], ipv4_addresses=["127.0.0.8"]),
+        build_rule(match_tags=["proxy"], addresses={"ipv6": ["fd00::1"]}),
+        build_rule(match_tags=["proxy"], addresses={"ipv4": ["127.0.0.8"]}),
     )
     registry = PluginRegistry()
     await plugin.setup(registry)
@@ -402,7 +408,7 @@ async def test_block_plugin_uses_first_rule_with_current_qtype_values() -> None:
 
 async def test_block_plugin_uses_later_block_other_rule_for_non_address_query() -> None:
     plugin = build_plugin(
-        build_rule(match_tags=["proxy"], ipv4_addresses=["127.0.0.8"]),
+        build_rule(match_tags=["proxy"], addresses={"ipv4": ["127.0.0.8"]}),
         build_rule(match_tags=["proxy"], block_other=True),
     )
     registry = PluginRegistry()
@@ -424,8 +430,8 @@ async def test_block_plugin_uses_later_block_other_rule_for_non_address_query() 
 
 async def test_block_plugin_uses_first_matching_rule_when_multiple_have_current_qtype() -> None:
     plugin = build_plugin(
-        build_rule(match_tags=["proxy"], ipv4_addresses=["127.0.0.10"]),
-        build_rule(match_tags=["proxy"], ipv4_addresses=["127.0.0.20"]),
+        build_rule(match_tags=["proxy"], addresses={"ipv4": ["127.0.0.10"]}),
+        build_rule(match_tags=["proxy"], addresses={"ipv4": ["127.0.0.20"]}),
     )
     registry = PluginRegistry()
     await plugin.setup(registry)
@@ -455,7 +461,9 @@ async def test_block_plugin_works_after_tag_plugin_in_request_phase(tmp_path: Pa
     tag_plugin.bind(tag_plugin.config_model(), tag_plugin.variables_model())
     await tag_plugin.setup(registry)
 
-    block_plugin = build_plugin(build_rule(match_tags=["blackhole"], ipv4_addresses=["127.0.0.1"]))
+    block_plugin = build_plugin(
+        build_rule(match_tags=["blackhole"], addresses={"ipv4": ["127.0.0.1"]})
+    )
     await block_plugin.setup(registry)
 
     plugin_manager = PluginManager(
@@ -501,7 +509,9 @@ async def test_block_plugin_stops_later_plugins_after_static_request_answer() ->
     tag_plugin.bind(tag_plugin.config_model(), tag_plugin.variables_model())
     await tag_plugin.setup(registry)
 
-    block_plugin = build_plugin(build_rule(match_tags=["blackhole"], ipv4_addresses=["127.0.0.1"]))
+    block_plugin = build_plugin(
+        build_rule(match_tags=["blackhole"], addresses={"ipv4": ["127.0.0.1"]})
+    )
     await block_plugin.setup(registry)
 
     observer = RecordingPlugin("observer", request_order=100, response_order=100)
@@ -540,7 +550,9 @@ async def test_block_plugin_stops_later_plugins_after_static_request_answer() ->
 async def test_block_plugin_stops_later_response_plugins_after_rewrite() -> None:
     registry = PluginRegistry()
 
-    block_plugin = build_plugin(build_rule(match_tags=["blackhole"], ipv4_addresses=["127.0.0.1"]))
+    block_plugin = build_plugin(
+        build_rule(match_tags=["blackhole"], addresses={"ipv4": ["127.0.0.1"]})
+    )
     await block_plugin.setup(registry)
 
     observer = RecordingPlugin("observer", response_order=1000)

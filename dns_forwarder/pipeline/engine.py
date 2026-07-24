@@ -1,8 +1,7 @@
 from __future__ import annotations
 
 import asyncio
-from collections.abc import Callable
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import dns.message
 import dns.opcode
@@ -11,8 +10,6 @@ import dns.rdataclass
 import dns.rdatatype
 import dns.resolver
 
-from dns_forwarder.config import AppConfig
-from dns_forwarder.dispatcher import DispatcherRegistry
 from dns_forwarder.logging import format_tags, get_logger
 from dns_forwarder.pipeline.context import (
     NestedResolveRecursionError,
@@ -23,9 +20,15 @@ from dns_forwarder.pipeline.context import (
     make_error_response,
     sync_answer_response,
 )
-from dns_forwarder.plugin_api import PluginManager
-from dns_forwarder.resolver import ResolverManager
 from dns_forwarder.rules import RuleEngine
+
+if TYPE_CHECKING:
+    from collections.abc import Callable
+
+    from dns_forwarder.config import AppConfig
+    from dns_forwarder.dispatcher import DispatcherRegistry
+    from dns_forwarder.plugin_api import PluginManager
+    from dns_forwarder.resolver import ResolverManager
 
 
 class PipelineEngine:
@@ -220,10 +223,16 @@ class PipelineEngine:
         clientaddr: Any,
         listener_name: str,
         *,
-        extensions: dict[str, Any] | None = None,
-        answer_registry_refs: dict[str, Any] | None = None,
-        nested_resolve_chain: tuple[tuple[str, str], ...] = (),
+        nested_state: tuple[
+            dict[str, Any] | None,
+            dict[str, Any] | None,
+            tuple[tuple[str, str], ...],
+        ]
+        | None = None,
     ) -> RequestContext:
+        extensions, answer_registry_refs, nested_resolve_chain = (
+            nested_state if nested_state is not None else (None, None, ())
+        )
         return RequestContext(
             request=request,
             clientaddr=clientaddr,
@@ -300,9 +309,11 @@ class PipelineEngine:
             request=nested_request,
             clientaddr=context.clientaddr,
             listener_name=context.listener_name,
-            extensions=context.extensions,
-            answer_registry_refs=context.answer_registry_refs,
-            nested_resolve_chain=(*context._nested_resolve_chain, signature),
+            nested_state=(
+                context.extensions,
+                context.answer_registry_refs,
+                (*context._nested_resolve_chain, signature),
+            ),
         )
         self._logger.debug(
             "发起内部解析 outer_request_id=%s request_id=%s qname=%s qtype=%s depth=%s",

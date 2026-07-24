@@ -13,6 +13,8 @@ from dns_forwarder.plugin_api import EmptyModel, Plugin, PluginRegistry
 
 logger = get_logger("plugins.block")
 
+IPV4_VERSION = 4
+
 
 class StrictPluginModel(BaseModel):
     model_config = ConfigDict(extra="forbid")
@@ -58,7 +60,7 @@ class BlockPlugin(Plugin):
     variables_model = EmptyModel
     request_order = -50
     response_order = 900
-    ui_meta = {
+    ui_meta = {  # noqa: RUF012  # read-only frozen-style plugin metadata
         "title": "Static Answer Plugin",
         "description": "按 tag 返回静态 A/AAAA 结果，或对非 A/AAAA 查询直接返回空的 NOERROR。",
     }
@@ -178,7 +180,7 @@ def _normalize_addresses(value: list[str] | None, *, version: int) -> list[str]:
     for item in value:
         address = ip_address(str(item).strip())
         if address.version != version:
-            family = "IPv4" if version == 4 else "IPv6"
+            family = "IPv4" if version == IPV4_VERSION else "IPv6"
             raise ValueError(f"静态应答地址必须是 {family}")
         text = address.compressed
         if text in seen:

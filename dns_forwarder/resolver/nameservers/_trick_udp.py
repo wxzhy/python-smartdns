@@ -5,6 +5,9 @@ import socket
 
 import dns.asyncbackend
 
+# 阈值常量：tricks 协议过滤短数据包。
+_TRICK_MIN_BYTES = 32
+
 
 class _TrickyDatagramProtocol(asyncio.DatagramProtocol):
     def __init__(self) -> None:
@@ -24,7 +27,10 @@ class _TrickyDatagramProtocol(asyncio.DatagramProtocol):
         self.transport = None
         self._queue.put_nowait(exc or EOFError("EOF"))
 
-    async def recvfrom(self, timeout: float | None) -> tuple[bytes, tuple[str, int]]:
+    async def recvfrom(
+        self,
+        timeout: float | None,  # noqa: ASYNC109  # timeout 属 dnspython/socket 接口契约
+    ) -> tuple[bytes, tuple[str, int]]:
         if timeout is None:
             item = await self._queue.get()
         else:
@@ -70,7 +76,7 @@ class TrickyDatagramSocket(dns.asyncbackend.DatagramSocket):
         self,
         what: bytes,
         where: tuple[str, int],
-        timeout: float | None,
+        timeout: float | None,  # noqa: ASYNC109  # timeout 属 dnspython/socket 接口契约
     ) -> int:
         _ = timeout
         await self._ensure_endpoint()
@@ -81,13 +87,13 @@ class TrickyDatagramSocket(dns.asyncbackend.DatagramSocket):
     async def recvfrom(
         self,
         size: int,
-        timeout: float | None,
+        timeout: float | None,  # noqa: ASYNC109  # timeout 属 dnspython/socket 接口契约
     ) -> tuple[bytes, tuple[str, int]]:
         _ = size
         await self._ensure_endpoint()
         for _ in range(5):
             data, addr = await self._protocol.recvfrom(timeout)
-            if len(data) > 32 and data[10:12] == b"\x00\x01":
+            if len(data) > _TRICK_MIN_BYTES and data[10:12] == b"\x00\x01":
                 return data, addr
         raise TimeoutError("UDP recvfrom timeout")
 
@@ -111,5 +117,5 @@ class TrickyDatagramSocket(dns.asyncbackend.DatagramSocket):
     async def getsockname(self) -> tuple[str, int]:
         return self._socket.getsockname()
 
-    async def getpeercert(self, timeout: float | None) -> None:
+    async def getpeercert(self, timeout: float | None) -> None:  # noqa: ASYNC109 -- 实现 dns backend 接口契约
         _ = timeout

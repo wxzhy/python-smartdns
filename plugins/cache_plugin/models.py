@@ -1,8 +1,10 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from typing import TYPE_CHECKING
 
-import dns.resolver
+if TYPE_CHECKING:
+    import dns.resolver
 
 CACHE_CONTEXT_KEY = "cache.context"
 CACHE_SERVICE_KEY = "cache.service"

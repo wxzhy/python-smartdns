@@ -1,9 +1,11 @@
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
+from typing import TYPE_CHECKING
 
-from dns_forwarder.config import UpstreamConfig
-from dns_forwarder.pipeline.context import RequestContext, UpstreamResult
+if TYPE_CHECKING:
+    from dns_forwarder.config import UpstreamConfig
+    from dns_forwarder.pipeline.context import RequestContext, UpstreamResult
 
 
 class BaseUpstreamResolver(ABC):

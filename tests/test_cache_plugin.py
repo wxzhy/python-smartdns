@@ -14,6 +14,9 @@ from dns_forwarder.pipeline.engine import PipelineEngine
 from dns_forwarder.plugin_api import EmptyModel, LoadedPlugin, Plugin, PluginManager, PluginRegistry
 from plugins.cache_plugin import CachePlugin, CachePluginConfig, DnsCacheService, get_cache_context
 
+_CACHE_TTL_FULL = 60
+_CACHE_TTL_REDUCED = 47
+
 
 def build_config() -> AppConfig:
     return AppConfig.model_validate(
@@ -326,8 +329,8 @@ async def test_dns_cache_service_reduces_ttl_on_cache_hit(monkeypatch) -> None:
 
     assert cached is not None
     assert cached.rrset is not None
-    assert cached.rrset.ttl == 47
-    assert cached.response.answer[0].ttl == 47
+    assert cached.rrset.ttl == _CACHE_TTL_REDUCED
+    assert cached.response.answer[0].ttl == _CACHE_TTL_REDUCED
 
 
 async def test_dns_cache_service_shares_pending_response_by_cache_key() -> None:
@@ -520,5 +523,5 @@ async def test_cache_plugin_pending_followers_recheck_cache_and_receive_reduced_
 
     assert first_response is not None
     assert second_response is not None
-    assert first_response.answer[0].ttl == 60
-    assert second_response.answer[0].ttl == 47
+    assert first_response.answer[0].ttl == _CACHE_TTL_FULL
+    assert second_response.answer[0].ttl == _CACHE_TTL_REDUCED

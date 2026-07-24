@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from ipaddress import IPv4Address, IPv4Network, IPv6Address, IPv6Network, ip_address, ip_network
+from typing import TYPE_CHECKING
 
 import dns.rcode
 import dns.rdatatype
@@ -11,9 +12,12 @@ import dns.rrset
 from dns_forwarder.logging import format_tags, get_logger
 from dns_forwarder.pipeline import sync_answer_rrset_to_response
 
-from .models import IpReplaceRuleConfig
+if TYPE_CHECKING:
+    from .models import IpReplaceRuleConfig
 
 logger = get_logger("plugins.ip_replace")
+
+IPV4_VERSION = 4
 
 
 @dataclass(frozen=True, slots=True)
@@ -43,11 +47,9 @@ class IpReplaceService:
         if not self._is_normal_address_answer(answer):
             return False
 
-        original_addresses = self._extract_addresses(answer)
-        if not original_addresses:
-            return False
-
-        rule = self._match_rule(tags, version=4 if answer.rdtype == dns.rdatatype.A else 6)
+        rule = self._match_rule(
+            tags, version=IPV4_VERSION if answer.rdtype == dns.rdatatype.A else 6
+        )
         if rule is None:
             logger.debug(
                 "IP 替换未命中规则 stage=%s qname=%s qtype=%s tags=%s",
@@ -56,6 +58,19 @@ class IpReplaceService:
                 dns.rdatatype.to_text(answer.rdtype),
                 format_tags(tags),
             )
+            return False
+
+        return self._apply_replacement(answer, tags, rule, stage)
+
+    def _apply_replacement(
+        self,
+        answer: dns.resolver.Answer,
+        tags: set[str],
+        rule: CompiledIpReplaceRule,
+        stage: str,
+    ) -> bool:
+        original_addresses = self._extract_addresses(answer)
+        if not original_addresses:
             return False
 
         targets = rule.ipv4_targets if answer.rdtype == dns.rdatatype.A else rule.ipv6_targets
@@ -120,7 +135,7 @@ class IpReplaceService:
                 continue
             if rule.exclude_tags.intersection(tags):
                 continue
-            targets = rule.ipv4_targets if version == 4 else rule.ipv6_targets
+            targets = rule.ipv4_targets if version == IPV4_VERSION else rule.ipv6_targets
             if targets:
                 return rule
         return None

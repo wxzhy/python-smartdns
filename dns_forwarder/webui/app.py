@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import json
 import secrets
+from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Annotated
 
@@ -21,7 +22,6 @@ from dns_forwarder.config import (
 from dns_forwarder.logging import get_logger
 from dns_forwarder.plugin_api import discover_available_plugins
 from dns_forwarder.server.doh import register_doh_routes
-from plugins.query_log_plugin import QueryLogStore
 
 TEMPLATES = Jinja2Templates(directory=str(Path(__file__).parent / "templates"))
 logger = get_logger("webui.app")
@@ -32,11 +32,44 @@ QUERY_LOG_PAGE_SIZE = 100
 
 if TYPE_CHECKING:
     from dns_forwarder.core.runtime import RuntimeManager
+    from plugins.query_log_plugin import QueryLogStore
 
 
-def create_webui_app(runtime_manager: RuntimeManager) -> FastAPI:
-    security = HTTPBasic()
+@dataclass(frozen=True, slots=True)
+class ConfigEditorView:
+    """配置编辑器视图所需的数据集合。"""
 
+    config_text: str
+    available_plugins: list
+    plugin_dirs: list[str]
+    editor_mode: str
+    message: str
+    error: str
+
+
+def _build_config_context(
+    runtime_manager: RuntimeManager,
+    *,
+    view: ConfigEditorView,
+) -> dict:
+    """构造配置编辑器页面的模板上下文。"""
+    return runtime_manager.get_status() | {
+        "config_text": view.config_text,
+        "config_schema": build_config_json_schema(view.plugin_dirs),
+        "available_plugins": [item.describe() for item in view.available_plugins],
+        "editor_mode": view.editor_mode,
+        "config_filename": runtime_manager.config_path.name,
+        "jsoneditor_js_url": JSONEDITOR_JS_URL,
+        "jsoneditor_css_url": JSONEDITOR_CSS_URL,
+        "message": view.message,
+        "error": view.error,
+    }
+
+
+def _authorize_webui(
+    runtime_manager: RuntimeManager,
+    security: HTTPBasic,
+):
     def authorize_webui(
         # FastAPI 的依赖注入惯用法：在参数默认值中调用 Depends。
         credentials: HTTPBasicCredentials = Depends(security),  # noqa: B008
@@ -59,6 +92,13 @@ def create_webui_app(runtime_manager: RuntimeManager) -> FastAPI:
             detail="Incorrect username or password",
             headers={"WWW-Authenticate": "Basic"},
         )
+
+    return authorize_webui
+
+
+def create_webui_app(runtime_manager: RuntimeManager) -> FastAPI:
+    security = HTTPBasic()
+    authorize_webui = _authorize_webui(runtime_manager, security)
 
     app = FastAPI(title="dns-forwarder http", docs_url=None, redoc_url=None)
 
@@ -103,18 +143,17 @@ def create_webui_app(runtime_manager: RuntimeManager) -> FastAPI:
             return TEMPLATES.TemplateResponse(
                 request=request,
                 name="config.html",
-                context=runtime_manager.get_status()
-                | {
-                    "config_text": dump_config_text(state.config),
-                    "config_schema": build_config_json_schema(state.config.runtime.plugin_dirs),
-                    "available_plugins": [item.describe() for item in available_plugins],
-                    "editor_mode": "tree",
-                    "config_filename": runtime_manager.config_path.name,
-                    "jsoneditor_js_url": JSONEDITOR_JS_URL,
-                    "jsoneditor_css_url": JSONEDITOR_CSS_URL,
-                    "message": "",
-                    "error": "",
-                },
+                context=_build_config_context(
+                    runtime_manager,
+                    view=ConfigEditorView(
+                        config_text=dump_config_text(state.config),
+                        available_plugins=available_plugins,
+                        plugin_dirs=state.config.runtime.plugin_dirs,
+                        editor_mode="tree",
+                        message="",
+                        error="",
+                    ),
+                ),
             )
 
         @app.post("/config", response_class=HTMLResponse, dependencies=[Depends(authorize_webui)])
@@ -129,24 +168,21 @@ def create_webui_app(runtime_manager: RuntimeManager) -> FastAPI:
             except Exception as exc:
                 logger.warning("保存配置失败 path=%s error=%s", runtime_manager.config_path, exc)
                 state = runtime_manager.get_state()
+                available_plugins = discover_available_plugins(state.config.runtime.plugin_dirs)
                 return TEMPLATES.TemplateResponse(
                     request=request,
                     name="config.html",
-                    context=runtime_manager.get_status()
-                    | {
-                        "config_text": config_text,
-                        "config_schema": build_config_json_schema(state.config.runtime.plugin_dirs),
-                        "available_plugins": [
-                            item.describe()
-                            for item in discover_available_plugins(state.config.runtime.plugin_dirs)
-                        ],
-                        "editor_mode": "code",
-                        "config_filename": runtime_manager.config_path.name,
-                        "jsoneditor_js_url": JSONEDITOR_JS_URL,
-                        "jsoneditor_css_url": JSONEDITOR_CSS_URL,
-                        "message": "",
-                        "error": str(exc),
-                    },
+                    context=_build_config_context(
+                        runtime_manager,
+                        view=ConfigEditorView(
+                            config_text=config_text,
+                            available_plugins=available_plugins,
+                            plugin_dirs=state.config.runtime.plugin_dirs,
+                            editor_mode="code",
+                            message="",
+                            error=str(exc),
+                        ),
+                    ),
                     status_code=400,
                 )
 
@@ -154,18 +190,17 @@ def create_webui_app(runtime_manager: RuntimeManager) -> FastAPI:
             return TEMPLATES.TemplateResponse(
                 request=request,
                 name="config.html",
-                context=runtime_manager.get_status()
-                | {
-                    "config_text": dump_config_text(config),
-                    "config_schema": build_config_json_schema(config.runtime.plugin_dirs),
-                    "available_plugins": [item.describe() for item in available_plugins],
-                    "editor_mode": "tree",
-                    "config_filename": runtime_manager.config_path.name,
-                    "jsoneditor_js_url": JSONEDITOR_JS_URL,
-                    "jsoneditor_css_url": JSONEDITOR_CSS_URL,
-                    "message": "配置已保存，请手动 reload 使其生效。",
-                    "error": "",
-                },
+                context=_build_config_context(
+                    runtime_manager,
+                    view=ConfigEditorView(
+                        config_text=dump_config_text(config),
+                        available_plugins=available_plugins,
+                        plugin_dirs=config.runtime.plugin_dirs,
+                        editor_mode="tree",
+                        message="配置已保存，请手动 reload 使其生效。",
+                        error="",
+                    ),
+                ),
             )
 
         @app.post(

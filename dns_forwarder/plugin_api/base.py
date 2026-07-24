@@ -2,7 +2,6 @@ from __future__ import annotations
 
 from collections.abc import Callable
 from dataclasses import dataclass, field
-from types import ModuleType
 from typing import TYPE_CHECKING, Any
 
 from pydantic import BaseModel
@@ -12,6 +11,8 @@ from dns_forwarder.logging import get_logger
 from .static_plugins import load_static_plugin_module
 
 if TYPE_CHECKING:
+    from types import ModuleType
+
     import dns.message
 
     from dns_forwarder.config.models import PluginConfig
@@ -74,7 +75,7 @@ class Plugin:
     name = "plugin"
     config_model: type[BaseModel] = EmptyModel
     variables_model: type[BaseModel] = EmptyModel
-    ui_meta: dict[str, Any] = {}
+    ui_meta: dict[str, Any] = {}  # noqa: RUF012 - read-only class-level metadata default
     request_order: int = 0
     upstream_response_order: int = 0
     response_order: int = 0

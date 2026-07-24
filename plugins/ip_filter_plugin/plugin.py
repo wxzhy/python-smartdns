@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from typing import TYPE_CHECKING
+
 import dns.rcode
 import dns.rdatatype
 import dns.resolver
@@ -7,10 +9,12 @@ import dns.rrset
 
 from dns_forwarder.core import IPSET_CONTEXT_KEY, IPSet
 from dns_forwarder.logging import format_tags, get_logger
-from dns_forwarder.pipeline import RequestContext, UpstreamResult
 from dns_forwarder.plugin_api import EmptyModel, Plugin, PluginRegistry
 
 from .models import IpFilterPluginConfig
+
+if TYPE_CHECKING:
+    from dns_forwarder.pipeline import RequestContext, UpstreamResult
 
 logger = get_logger("plugins.ip_filter")
 
@@ -30,7 +34,7 @@ class IpFilterPlugin(Plugin):
     config_model = IpFilterPluginConfig
     variables_model = EmptyModel
     upstream_response_order = 50
-    ui_meta = {
+    ui_meta = {  # noqa: RUF012  # read-only frozen-style plugin metadata
         "title": "IP Filter Plugin",
         "description": "按请求 tags 与 IPSet tags 过滤 A/AAAA 响应中的地址。",
     }

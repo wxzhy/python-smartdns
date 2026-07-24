@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import socket
+from typing import TYPE_CHECKING
 
 import dns.asyncbackend
 import dns.asyncquery
@@ -8,10 +9,11 @@ import dns.inet
 import dns.message
 import dns.nameserver
 
-from dns_forwarder.config import Do53CustomNameserverConfig
-
 from ._trick_tcp import FrozenHosts, TrickyStreamSocket
 from ._trick_udp import TrickyDatagramSocket
+
+if TYPE_CHECKING:
+    from dns_forwarder.config import Do53CustomNameserverConfig
 
 
 def _freeze_hosts(hosts: dict[str, list[str]] | None) -> FrozenHosts:
@@ -46,10 +48,10 @@ class Do53CustomNameserver(dns.nameserver.Do53Nameserver):
         self.use_tricks = use_tricks
         self.hosts = _freeze_hosts(hosts)
 
-    async def async_query(
+    async def async_query(  # noqa: PLR0913  # 形参与 dnspython Nameserver 接口一致
         self,
         request: dns.message.QueryMessage,
-        timeout: float,
+        timeout: float,  # noqa: ASYNC109  # timeout 属 dnspython/socket 接口契约
         source: str | None,
         source_port: int,
         max_size: bool,

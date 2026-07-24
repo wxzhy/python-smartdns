@@ -4,7 +4,7 @@ import asyncio
 import ipaddress
 import socket
 import time
-from collections.abc import Awaitable
+from typing import TYPE_CHECKING
 
 from async_lru import alru_cache
 from icmplib import async_ping
@@ -13,11 +13,16 @@ from dns_forwarder.logging import get_logger
 
 from .models import IpRttResult
 
+if TYPE_CHECKING:
+    from collections.abc import Awaitable
+
 logger = get_logger("plugins.speedtest")
+
+IPV4_VERSION = 4
 
 
 class SpeedTestService:
-    def __init__(
+    def __init__(  # noqa: PLR0913  # grouped config params; kept explicit for clarity
         self,
         *,
         cache_ttl_seconds: int,
@@ -150,7 +155,7 @@ class SpeedTestService:
     @staticmethod
     def _build_socket_target(ip: str, port: int) -> tuple[socket.AddressFamily, tuple]:
         parsed = ipaddress.ip_address(ip)
-        if parsed.version == 4:
+        if parsed.version == IPV4_VERSION:
             return socket.AF_INET, (ip, port)
         if not socket.has_ipv6:
             raise ValueError("当前环境不支持 IPv6")

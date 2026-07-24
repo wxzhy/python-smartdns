@@ -1,18 +1,19 @@
 from __future__ import annotations
 
 import asyncio
-from collections.abc import Callable
 from typing import TYPE_CHECKING
 
 import dns.resolver
 
 from dns_forwarder.config import DispatchStrategyType, UpstreamGroupConfig
 from dns_forwarder.logging import format_tags, get_logger
-from dns_forwarder.pipeline.context import RequestContext, UpstreamResult
 
 from .base import DispatchStrategy
 
 if TYPE_CHECKING:
+    from collections.abc import Callable
+
+    from dns_forwarder.pipeline.context import RequestContext, UpstreamResult
     from dns_forwarder.resolver import ResolverManager
 
     from .registry import DispatcherRegistry

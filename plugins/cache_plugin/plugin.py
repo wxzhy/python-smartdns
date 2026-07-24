@@ -35,7 +35,7 @@ class CachePlugin(Plugin):
     config_model = CachePluginConfig
     variables_model = EmptyModel
     response_order = 1000
-    ui_meta = {
+    ui_meta = {  # noqa: RUF012  # read-only frozen-style plugin metadata
         "title": "Cache Plugin",
         "description": (
             "在 request 阶段查 dnspython 缓存，并合并相同 cache key 的并发请求；"

@@ -40,7 +40,7 @@ class SamplePlugin(Plugin):
     name = "sample-plugin"
     config_model = SamplePluginConfig
     variables_model = SamplePluginVariables
-    ui_meta = {
+    ui_meta = {  # noqa: RUF012  # read-only frozen-style plugin metadata
         "title": "Sample Plugin",
         "description": "示例插件：通过修改 dns.resolver.Answer.rrset 返回一个静态 A 记录。",
     }

@@ -1,13 +1,17 @@
 from __future__ import annotations
 
+from typing import TYPE_CHECKING
+
 import dns.rdatatype
 import dns.rdtypes.svcbbase
 import dns.resolver
 
 from dns_forwarder.core import DOMAINSET_CONTEXT_KEY, IPSET_CONTEXT_KEY, DomainSet, IPSet
 from dns_forwarder.logging import format_tags, get_logger
-from dns_forwarder.pipeline import RequestContext, UpstreamResult
 from dns_forwarder.plugin_api import EmptyModel, Plugin, PluginRegistry
+
+if TYPE_CHECKING:
+    from dns_forwarder.pipeline import RequestContext, UpstreamResult
 
 logger = get_logger("plugins.tag")
 
@@ -34,7 +38,7 @@ class TagPlugin(Plugin):
     config_model = EmptyModel
     variables_model = EmptyModel
     request_order = -100
-    ui_meta = {
+    ui_meta = {  # noqa: RUF012  # read-only frozen-style plugin metadata
         "title": "Tag Plugin",
         "description": "基于域名和应答 IP 命中 tag 文件，为请求和上游结果追加标签。",
     }
@@ -86,7 +90,7 @@ class TagPlugin(Plugin):
         self._log_result_tags(context, result, before_tags, cname_domains, hint_ip_count, has_hints)
 
     @staticmethod
-    def _log_result_tags(
+    def _log_result_tags(  # noqa: PLR0913  # diagnostic context fields; grouped for one log call
         context: RequestContext,
         result: UpstreamResult,
         before_tags: set[str],

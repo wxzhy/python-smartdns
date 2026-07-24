@@ -1,17 +1,20 @@
 from __future__ import annotations
 
 import time
+from typing import TYPE_CHECKING
 
 import dns.rcode
 import dns.rdatatype
 import dns.resolver
 
 from dns_forwarder.logging import get_logger
-from dns_forwarder.pipeline import RequestContext
 from dns_forwarder.plugin_api import EmptyModel, Plugin, PluginRegistry
 
 from .models import QUERY_LOG_STORE_KEY, QueryLogPayload, QueryLogPluginConfig
 from .service import QueryLogStore
+
+if TYPE_CHECKING:
+    from dns_forwarder.pipeline import RequestContext
 
 logger = get_logger("plugins.query_log")
 
@@ -27,7 +30,7 @@ class QueryLogPlugin(Plugin):
     name = "query-log-plugin"
     config_model = QueryLogPluginConfig
     variables_model = EmptyModel
-    ui_meta = {
+    ui_meta = {  # noqa: RUF012  # read-only frozen-style plugin metadata
         "title": "Query Log Plugin",
         "description": "记录外部查询的时间、类型和结果摘要，并供 WebUI 实时观测。",
     }
@@ -92,23 +95,27 @@ class QueryLogPlugin(Plugin):
             return "NOERROR empty"
 
         if answer.rdtype in {dns.rdatatype.A, dns.rdatatype.AAAA}:
-            addresses = [
-                record.address
-                for record in answer.rrset
-                if getattr(record, "address", None) is not None
-            ]
-            if not addresses:
-                return f"{dns.rdatatype.to_text(answer.rdtype)} x{len(answer.rrset)}"
-            display = ", ".join(addresses[:3])
-            extra = len(addresses) - 3
-            if extra > 0:
-                return f"{dns.rdatatype.to_text(answer.rdtype)} {display} +{extra}"
-            return f"{dns.rdatatype.to_text(answer.rdtype)} {display}"
+            return QueryLogPlugin._format_address_summary(answer)
 
         if answer.rdtype == dns.rdatatype.HTTPS:
             return f"HTTPS x{len(answer.rrset)}"
 
         return f"{dns.rdatatype.to_text(answer.rdtype)} x{len(answer.rrset)}"
+
+    @staticmethod
+    def _format_address_summary(answer: dns.resolver.Answer) -> str:
+        addresses = [
+            record.address
+            for record in answer.rrset
+            if getattr(record, "address", None) is not None
+        ]
+        if not addresses:
+            return f"{dns.rdatatype.to_text(answer.rdtype)} x{len(answer.rrset)}"
+        display = ", ".join(addresses[:3])
+        extra = len(addresses) - 3
+        if extra > 0:
+            return f"{dns.rdatatype.to_text(answer.rdtype)} {display} +{extra}"
+        return f"{dns.rdatatype.to_text(answer.rdtype)} {display}"
 
 
 plugin = QueryLogPlugin()

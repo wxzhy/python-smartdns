@@ -13,13 +13,20 @@ from starlette.requests import Request
 from dns_forwarder.core.runtime import RuntimeManager, main
 from dns_forwarder.webui import WEBUI_RELOAD_ENDPOINT, ManagedUvicornServer, create_webui_app
 
+_HTTP_OK = 200
+_HTTP_BAD_REQUEST = 400
+_HTTP_UNAUTHORIZED = 401
+_HTTP_REDIRECT = 303
+_HTTP_SERVICE_UNAVAILABLE = 503
+_EXPECTED_LOG_ENTRIES = 2
+
 
 def _basic_auth_headers(username: str = "admin", password: str = "change-me") -> dict[str, str]:
     token = base64.b64encode(f"{username}:{password}".encode()).decode("ascii")
     return {"Authorization": f"Basic {token}"}
 
 
-def write_config(
+def write_config(  # noqa: PLR0913 - test helper with explicit kwargs is clearer than a dict
     path: Path,
     *,
     upstream_port: int = 5301,
@@ -132,7 +139,7 @@ async def test_webui_save_and_reload_success(tmp_path: Path, capture_dns_logs, c
     transport = ASGITransport(app=app)
     async with AsyncClient(transport=transport, base_url="http://testserver") as client:
         editor = await client.get("/config", headers=_basic_auth_headers())
-        assert editor.status_code == 200
+        assert editor.status_code == _HTTP_OK
 
         current_data = json.loads(config_path.read_text(encoding="utf-8"))
         current_data["plugins"][0]["variables"]["address"] = "127.0.0.2"
@@ -140,7 +147,7 @@ async def test_webui_save_and_reload_success(tmp_path: Path, capture_dns_logs, c
         saved = await client.post(
             "/config", data={"config_text": current_text}, headers=_basic_auth_headers()
         )
-        assert saved.status_code == 200
+        assert saved.status_code == _HTTP_OK
         assert "配置已保存" in saved.text
         assert "jsoneditor.min.js" in saved.text
         assert '"oneOf"' in saved.text
@@ -148,7 +155,7 @@ async def test_webui_save_and_reload_success(tmp_path: Path, capture_dns_logs, c
         reloaded = await client.post(
             WEBUI_RELOAD_ENDPOINT, follow_redirects=False, headers=_basic_auth_headers()
         )
-        assert reloaded.status_code == 303
+        assert reloaded.status_code == _HTTP_REDIRECT
         assert "保存配置成功" in caplog.text
         assert "手动 reload 完成" in caplog.text
 
@@ -176,9 +183,9 @@ async def test_webui_reload_failure_keeps_old_runtime(
         saved = await client.post(
             "/config", data={"config_text": changed_text}, headers=_basic_auth_headers()
         )
-        assert saved.status_code == 200
+        assert saved.status_code == _HTTP_OK
         failed = await client.post(WEBUI_RELOAD_ENDPOINT, headers=_basic_auth_headers())
-        assert failed.status_code == 400
+        assert failed.status_code == _HTTP_BAD_REQUEST
         assert "需要重启进程" in failed.text
         assert "手动 reload 失败" in caplog.text
         assert "reload 失败" in caplog.text
@@ -207,10 +214,10 @@ async def test_webui_requires_basic_auth(tmp_path: Path) -> None:
         )
         authorized = await client.get("/config", headers=_basic_auth_headers())
 
-    assert unauthorized.status_code == 401
+    assert unauthorized.status_code == _HTTP_UNAUTHORIZED
     assert unauthorized.headers["www-authenticate"] == "Basic"
-    assert forbidden.status_code == 401
-    assert authorized.status_code == 200
+    assert forbidden.status_code == _HTTP_UNAUTHORIZED
+    assert authorized.status_code == _HTTP_OK
 
 
 def test_webui_server_uses_current_event_loop() -> None:
@@ -261,14 +268,14 @@ async def test_webui_query_logs_page_and_api_require_auth_and_support_limit(tmp_
         page = await client.get("/queries", headers=_basic_auth_headers())
         api = await client.get("/api/query-logs?limit=2", headers=_basic_auth_headers())
 
-    assert unauthorized_page.status_code == 401
-    assert unauthorized_api.status_code == 401
-    assert unauthorized_stream.status_code == 401
-    assert page.status_code == 200
+    assert unauthorized_page.status_code == _HTTP_UNAUTHORIZED
+    assert unauthorized_api.status_code == _HTTP_UNAUTHORIZED
+    assert unauthorized_stream.status_code == _HTTP_UNAUTHORIZED
+    assert page.status_code == _HTTP_OK
     assert "查询日志" in page.text
-    assert api.status_code == 200
+    assert api.status_code == _HTTP_OK
     payload = api.json()
-    assert len(payload) == 2
+    assert len(payload) == _EXPECTED_LOG_ENTRIES
     assert [item["id"] for item in payload] == [2, 3]
     assert payload[0]["qname"] == "sample.internal"
     assert payload[0]["rcode"] == "NOERROR"
@@ -318,7 +325,7 @@ async def test_webui_query_logs_stream_replays_entries_after_id(tmp_path: Path) 
     chunks: list[str] = []
     async for chunk in body_iterator:
         chunks.append(chunk.decode("utf-8") if isinstance(chunk, bytes) else chunk)
-        if len(chunks) == 2:
+        if len(chunks) == _EXPECTED_LOG_ENTRIES:
             break
     await body_iterator.aclose()
 
@@ -341,7 +348,7 @@ async def test_webui_query_logs_routes_show_message_and_return_503_when_plugin_d
         api = await client.get("/api/query-logs", headers=_basic_auth_headers())
         stream = await client.get("/api/query-logs/stream", headers=_basic_auth_headers())
 
-    assert page.status_code == 200
+    assert page.status_code == _HTTP_OK
     assert "查询日志插件未启用" in page.text
-    assert api.status_code == 503
-    assert stream.status_code == 503
+    assert api.status_code == _HTTP_SERVICE_UNAVAILABLE
+    assert stream.status_code == _HTTP_SERVICE_UNAVAILABLE

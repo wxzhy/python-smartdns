@@ -1,6 +1,7 @@
 from __future__ import annotations
 
-from pathlib import Path
+from dataclasses import dataclass
+from typing import TYPE_CHECKING
 
 import dns.message
 import dns.rcode
@@ -20,7 +21,22 @@ from plugins.cloudflare_ech_plugin import CloudflareEchPlugin, CloudflareEchPlug
 from plugins.https_plugin import HttpsPlugin
 from plugins.tag_plugin import HAS_HINT_TAG
 
+if TYPE_CHECKING:
+    from pathlib import Path
+
 HTTPS_PARAM_KEY = dns.rdtypes.svcbbase.ParamKey
+
+
+@dataclass(frozen=True, slots=True)
+class FinalState:
+    answer: dns.resolver.Answer | None = None
+    response: dns.message.Message | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class TagSpec:
+    request: set[str] | None = None
+    result: set[str] | None = None
 
 
 def _write_lines(path: Path, lines: list[str]) -> None:
@@ -95,29 +111,30 @@ def make_address_answer(
 def make_context(
     request: dns.message.Message,
     *,
-    final_answer: dns.resolver.Answer | None = None,
-    final_response: dns.message.Message | None = None,
-    tags: set[str] | None = None,
-    result_tags: set[str] | None = None,
+    final: FinalState | None = None,
+    tags: TagSpec | None = None,
     ipset: IPSet | None = None,
     resolve_handler=None,
 ) -> RequestContext:
+    final_answer = None if final is None else final.answer
+    final_response = None if final is None else final.response
+    request_tags = set() if tags is None else set(tags.request or ())
     context = RequestContext(
         request=request,
         clientaddr=("127.0.0.1", 5300),
         listener_name="udp",
         final_answer=final_answer,
         final_response=final_response,
-        tags=set() if tags is None else set(tags),
+        tags=request_tags,
         extensions={} if ipset is None else {IPSET_CONTEXT_KEY: ipset},
         _resolve_handler=resolve_handler,
     )
-    if result_tags is not None:
+    if tags is not None and tags.result is not None:
         context.upstream_results.append(
             UpstreamResult(
                 upstream_name="upstream-a",
                 duration_ms=1.0,
-                tags=set(result_tags),
+                tags=set(tags.result),
             )
         )
     return context
@@ -217,8 +234,8 @@ async def test_cloudflare_ech_plugin_injects_ech_when_result_tags_match() -> Non
     )
     context = make_context(
         request,
-        final_answer=answer,
-        result_tags={"cf"},
+        final=FinalState(answer=answer),
+        tags=TagSpec(result={"cf"}),
         resolve_handler=recorder.resolve,
     )
 
@@ -246,8 +263,8 @@ async def test_cloudflare_ech_plugin_injects_service_mode_record_into_empty_noer
     )
     context = make_context(
         request,
-        final_answer=answer,
-        result_tags={"cf"},
+        final=FinalState(answer=answer),
+        tags=TagSpec(result={"cf"}),
         resolve_handler=recorder.resolve,
     )
 
@@ -278,8 +295,8 @@ async def test_cloudflare_ech_plugin_caches_cloudflare_ech_between_responses() -
         answer = make_https_answer(request, '1 . alpn="h2"')
         context = make_context(
             request,
-            final_answer=answer,
-            result_tags={"cf"},
+            final=FinalState(answer=answer),
+            tags=TagSpec(result={"cf"}),
             resolve_handler=recorder.resolve,
         )
         await plugin.on_response(context)
@@ -295,7 +312,10 @@ async def test_cloudflare_ech_plugin_skips_non_https_nxdomain_and_existing_ech()
     request_a = dns.message.make_query("example.test", "A")
     answer_a = make_address_answer(request_a, "203.0.113.10")
     context_a = make_context(
-        request_a, final_answer=answer_a, result_tags={"cf"}, resolve_handler=recorder.resolve
+        request_a,
+        final=FinalState(answer=answer_a),
+        tags=TagSpec(result={"cf"}),
+        resolve_handler=recorder.resolve,
     )
     await plugin.on_response(context_a)
     assert answer_a.rdtype == dns.rdatatype.A
@@ -305,8 +325,8 @@ async def test_cloudflare_ech_plugin_skips_non_https_nxdomain_and_existing_ech()
     response_nx.set_rcode(dns.rcode.NXDOMAIN)
     context_nx = make_context(
         request_https,
-        final_response=response_nx,
-        result_tags={"cf"},
+        final=FinalState(response=response_nx),
+        tags=TagSpec(result={"cf"}),
         resolve_handler=recorder.resolve,
     )
     await plugin.on_response(context_nx)
@@ -314,8 +334,8 @@ async def test_cloudflare_ech_plugin_skips_non_https_nxdomain_and_existing_ech()
     answer_with_ech = make_https_answer(request_https, '1 . ech="AA=="')
     context_existing = make_context(
         request_https,
-        final_answer=answer_with_ech,
-        result_tags={"cf"},
+        final=FinalState(answer=answer_with_ech),
+        tags=TagSpec(result={"cf"}),
         resolve_handler=recorder.resolve,
     )
     await plugin.on_response(context_existing)
@@ -339,8 +359,8 @@ async def test_cloudflare_ech_plugin_skips_non_https_request_even_if_final_answe
     )
     context = make_context(
         request,
-        final_answer=answer,
-        result_tags={"cf"},
+        final=FinalState(answer=answer),
+        tags=TagSpec(result={"cf"}),
         resolve_handler=recorder.resolve,
     )
 
@@ -358,8 +378,8 @@ async def test_cloudflare_ech_plugin_skips_when_exclude_tag_matches() -> None:
     recorder = ResolveRecorder({})
     context = make_context(
         request,
-        final_answer=answer,
-        result_tags={"cf", "skip"},
+        final=FinalState(answer=answer),
+        tags=TagSpec(result={"cf", "skip"}),
         resolve_handler=recorder.resolve,
     )
 
@@ -377,9 +397,8 @@ async def test_cloudflare_ech_plugin_skips_when_request_tag_matches_skip_tags() 
     recorder = ResolveRecorder({})
     context = make_context(
         request,
-        final_answer=answer,
-        tags={"direct"},
-        result_tags={"cf"},
+        final=FinalState(answer=answer),
+        tags=TagSpec(request={"direct"}, result={"cf"}),
         resolve_handler=recorder.resolve,
     )
 
@@ -409,9 +428,8 @@ async def test_cloudflare_ech_plugin_skip_tags_short_circuits_before_a_subquery_
     )
     context = make_context(
         request,
-        final_answer=answer,
-        tags={"direct"},
-        result_tags=set(),
+        final=FinalState(answer=answer),
+        tags=TagSpec(request={"direct"}, result=set()),
         resolve_handler=recorder.resolve,
     )
 
@@ -436,8 +454,8 @@ async def test_cloudflare_ech_plugin_uses_hint_tags_without_a_subquery() -> None
     )
     context = make_context(
         request,
-        final_answer=answer,
-        result_tags={"cf", HAS_HINT_TAG},
+        final=FinalState(answer=answer),
+        tags=TagSpec(result={"cf", HAS_HINT_TAG}),
         resolve_handler=recorder.resolve,
     )
 
@@ -456,8 +474,8 @@ async def test_cloudflare_ech_plugin_skips_hint_miss_without_a_subquery() -> Non
     recorder = ResolveRecorder({})
     context = make_context(
         request,
-        final_answer=answer,
-        result_tags={HAS_HINT_TAG},
+        final=FinalState(answer=answer),
+        tags=TagSpec(result={HAS_HINT_TAG}),
         resolve_handler=recorder.resolve,
     )
 
@@ -486,8 +504,8 @@ async def test_cloudflare_ech_plugin_uses_a_subquery_when_no_hints(tmp_path: Pat
     )
     context = make_context(
         request,
-        final_answer=answer,
-        result_tags=set(),
+        final=FinalState(answer=answer),
+        tags=TagSpec(result=set()),
         ipset=ipset,
         resolve_handler=recorder.resolve,
     )
@@ -515,8 +533,8 @@ async def test_cloudflare_ech_plugin_skips_when_a_subquery_misses_or_fails(tmp_p
     )
     miss_context = make_context(
         miss_request,
-        final_answer=miss_answer,
-        result_tags=set(),
+        final=FinalState(answer=miss_answer),
+        tags=TagSpec(result=set()),
         ipset=ipset,
         resolve_handler=miss_recorder.resolve,
     )
@@ -528,8 +546,8 @@ async def test_cloudflare_ech_plugin_skips_when_a_subquery_misses_or_fails(tmp_p
     fail_recorder = ResolveRecorder({("fail.test", "A"): RuntimeError("boom")})
     fail_context = make_context(
         fail_request,
-        final_answer=fail_answer,
-        result_tags=set(),
+        final=FinalState(answer=fail_answer),
+        tags=TagSpec(result=set()),
         ipset=ipset,
         resolve_handler=fail_recorder.resolve,
     )
@@ -551,8 +569,8 @@ async def test_cloudflare_ech_plugin_skips_when_cloudflare_query_fails_or_has_no
     )
     no_ech_context = make_context(
         no_ech_request,
-        final_answer=no_ech_answer,
-        result_tags={"cf"},
+        final=FinalState(answer=no_ech_answer),
+        tags=TagSpec(result={"cf"}),
         resolve_handler=no_ech_recorder.resolve,
     )
     await plugin_no_ech.on_response(no_ech_context)
@@ -565,8 +583,8 @@ async def test_cloudflare_ech_plugin_skips_when_cloudflare_query_fails_or_has_no
     fail_recorder = ResolveRecorder({("cloudflare-ech.com", "HTTPS"): RuntimeError("boom")})
     fail_context = make_context(
         fail_request,
-        final_answer=fail_answer,
-        result_tags={"cf"},
+        final=FinalState(answer=fail_answer),
+        tags=TagSpec(result={"cf"}),
         resolve_handler=fail_recorder.resolve,
     )
     await plugin_fail.on_response(fail_context)
@@ -595,8 +613,8 @@ async def test_cloudflare_ech_plugin_injects_all_service_mode_records_and_keeps_
     )
     context = make_context(
         request,
-        final_answer=answer,
-        result_tags={"cf"},
+        final=FinalState(answer=answer),
+        tags=TagSpec(result={"cf"}),
         resolve_handler=recorder.resolve,
     )
 
@@ -671,7 +689,7 @@ async def test_cloudflare_ech_plugin_runs_before_https_and_cache_plugins() -> No
     cloudflare_plugin._load_cloudflare_ech.cache_clear()
 
 
-async def test_cloudflare_ech_plugin_handles_empty_noerror_answers_before_https_and_cache_plugins() -> (
+async def test_cloudflare_ech_plugin_handles_empty_noerror_answers_before_https_and_cache_plugins() -> (  # noqa: E501
     None
 ):
     cloudflare_plugin = build_plugin(match_tags=["cf"])

@@ -9,6 +9,8 @@ from dns_forwarder.pipeline import RequestContext, build_answer_from_response
 from dns_forwarder.plugin_api import PluginRegistry
 from plugins.redirect_plugin import RedirectPlugin, RedirectPluginConfig
 
+_EXPECTED_ANSWER_RRSETS = 2
+
 
 def make_answer(qname: str, qtype: str, *items: str):
     request = dns.message.make_query(qname, qtype)
@@ -73,7 +75,7 @@ async def test_redirect_plugin_builds_cname_plus_subquery_answer() -> None:
     assert context.final_answer.rrset is not None
     assert context.final_answer.rrset.rdtype == dns.rdatatype.A
     assert [item.address for item in context.final_answer.rrset] == ["203.0.113.10"]
-    assert len(context.final_answer.response.answer) == 2
+    assert len(context.final_answer.response.answer) == _EXPECTED_ANSWER_RRSETS
     assert context.final_answer.response.answer[0].rdtype == dns.rdatatype.CNAME
     assert context.final_answer.response.answer[0][0].target.to_text().rstrip(".") == (
         "target.example"

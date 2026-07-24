@@ -31,6 +31,12 @@ from dns_forwarder.pipeline import RequestContext, build_answer_from_response
 from dns_forwarder.resolver.manager import UpstreamResolver
 from dns_forwarder.resolver.nameservers import build_nameserver, build_nameserver_map
 
+_DO53_PORT_A = 5301
+_DO53_PORT_B = 5302
+_AIODNS_TIMEOUT = 2.5
+_DNSCRYPT_PORT = 443
+_EXPECTED_NAMESERVER_COUNT = 2
+
 
 def test_build_nameserver_supports_do53() -> None:
     nameserver = build_nameserver(
@@ -39,7 +45,7 @@ def test_build_nameserver_supports_do53() -> None:
 
     assert isinstance(nameserver, dns.nameserver.Do53Nameserver)
     assert nameserver.address == "127.0.0.1"
-    assert nameserver.port == 5301
+    assert nameserver.port == _DO53_PORT_A
 
 
 def test_build_nameserver_supports_do53_custom() -> None:
@@ -50,7 +56,7 @@ def test_build_nameserver_supports_do53_custom() -> None:
 
     assert nameserver.__class__.__name__ == "Do53CustomNameserver"
     assert nameserver.address == "127.0.0.1"
-    assert nameserver.port == 5302
+    assert nameserver.port == _DO53_PORT_B
     assert nameserver.use_tricks is True
     assert nameserver.hosts == (("dns.example", ("192.0.2.10",)),)
 
@@ -82,9 +88,9 @@ def test_build_nameserver_supports_aiodns() -> None:
 
     assert nameserver.__class__.__name__ == "AiodnsNameserver"
     assert nameserver.servers == ("1.1.1.1", "1.0.0.1")
-    assert nameserver.port == 5301
+    assert nameserver.port == _DO53_PORT_A
     assert nameserver.tcp is True
-    assert nameserver.timeout == 2.5
+    assert nameserver.timeout == _AIODNS_TIMEOUT
     assert nameserver.is_always_max_size() is True
 
 
@@ -229,7 +235,7 @@ def test_build_nameserver_supports_dnscrypt() -> None:
 
     assert nameserver.__class__.__name__ == "DNSCryptNameserver"
     assert nameserver.address == "208.67.220.220"
-    assert nameserver.port == 443
+    assert nameserver.port == _DNSCRYPT_PORT
     resolver_cls.assert_called_once()
 
 
@@ -276,7 +282,7 @@ def test_upstream_resolver_enables_rotate_for_multiple_nameservers() -> None:
         ],
     )
 
-    assert len(resolver.resolver.nameservers) == 2
+    assert len(resolver.resolver.nameservers) == _EXPECTED_NAMESERVER_COUNT
     assert resolver.resolver.rotate is True
 
 

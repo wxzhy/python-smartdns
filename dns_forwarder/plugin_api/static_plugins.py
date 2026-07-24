@@ -1,7 +1,10 @@
 from __future__ import annotations
 
 from functools import cache
-from types import ModuleType
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from types import ModuleType
 
 STATIC_PLUGIN_MODULE_NAMES = (
     "block_plugin",
@@ -26,7 +29,7 @@ def iter_static_plugin_module_names() -> tuple[str, ...]:
 def _load_all_static_plugin_modules() -> dict[str, ModuleType]:
     # Keep the built-in plugin list explicit, but delay the imports until runtime
     # so plugin_api can finish initializing before plugins import it back.
-    from plugins import (
+    from plugins import (  # noqa: PLC0415 - lazy to break circular import with plugins
         block_plugin,
         cache_plugin,
         cloudflare_ech_plugin,

@@ -5,10 +5,10 @@ from typing import TYPE_CHECKING
 
 import dns.message
 
-from dns_forwarder.config import ListenerConfig
 from dns_forwarder.logging import get_logger
 
 if TYPE_CHECKING:
+    from dns_forwarder.config import ListenerConfig
     from dns_forwarder.core.runtime import RuntimeManager
 
 

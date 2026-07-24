@@ -2,9 +2,12 @@ from __future__ import annotations
 
 import asyncio
 from collections import deque
-from collections.abc import AsyncIterator
+from typing import TYPE_CHECKING
 
 from .models import QueryLogEntry, QueryLogPayload
+
+if TYPE_CHECKING:
+    from collections.abc import AsyncIterator
 
 
 class QueryLogStore:

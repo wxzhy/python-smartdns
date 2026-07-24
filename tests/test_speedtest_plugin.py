@@ -30,6 +30,12 @@ from plugins.speedtest_plugin import (
     get_speedtest_context,
 )
 
+_TCP_PORT_80 = 80
+_TWO_IPS = 2
+_STUB_BEST_MS = 10.0
+_RACE_ELAPSED_UPPER_BOUND = 0.12
+_FALLBACK_TTL = 180
+
 
 class CountingSpeedTestService(SpeedTestService):
     def __init__(self) -> None:
@@ -137,7 +143,7 @@ class ProbeRaceService(SpeedTestService):
         return 50.0
 
     async def _probe_tcp(self, ip: str, port: int) -> float | None:
-        if port == 80:
+        if port == _TCP_PORT_80:
             await asyncio.sleep(0.01)
             self.completed.append("tcp80")
             return 10.0
@@ -229,7 +235,7 @@ async def test_speedtest_service_cache_clear_invalidates_cached_ip_result() -> N
 
     assert first.ip == "203.0.113.10"
     assert second.ip == "203.0.113.10"
-    assert service.calls == 2
+    assert service.calls == _TWO_IPS
 
 
 async def test_speedtest_service_returns_first_success_without_waiting_for_all_probes() -> None:
@@ -239,11 +245,11 @@ async def test_speedtest_service_returns_first_success_without_waiting_for_all_p
     result = await service.measure("203.0.113.10")
     elapsed = time.perf_counter() - started
 
-    assert result.best_ms == 10.0
-    assert result.tcp80_ms == 10.0
+    assert result.best_ms == _STUB_BEST_MS
+    assert result.tcp80_ms == _STUB_BEST_MS
     assert result.ping_ms is None
     assert result.tcp443_ms is None
-    assert elapsed < 0.12
+    assert elapsed < _RACE_ELAPSED_UPPER_BOUND
     assert service.completed == ["tcp80"]
 
 
@@ -286,9 +292,9 @@ async def test_speedtest_plugin_collects_unique_ip_rtts() -> None:
         "203.0.113.10",
         "203.0.113.11",
     }
-    assert len(speedtest_context.ip_rtt_results) == 2
+    assert len(speedtest_context.ip_rtt_results) == _TWO_IPS
     assert set(stub_service.calls) == {"203.0.113.10", "203.0.113.11"}
-    assert len(stub_service.calls) == 2
+    assert len(stub_service.calls) == _TWO_IPS
 
 
 async def test_speedtest_plugin_logs_resolver_and_response_ips_on_upstream_response(
@@ -403,7 +409,7 @@ async def test_speedtest_plugin_logs_each_wait_all_upstream_response(
 
     assert response is not None
     assert stub_service.calls == ["203.0.113.20", "203.0.113.10"]
-    assert caplog.text.count("测速收到响应") == 2
+    assert caplog.text.count("测速收到响应") == _TWO_IPS
     assert "resolver=resolver-a" in caplog.text
     assert "resolver=resolver-b" in caplog.text
 
@@ -851,12 +857,12 @@ async def test_speedtest_plugin_on_response_replaces_answer_rrset_with_fastest_i
     await plugin.on_response(context)
 
     assert {item.address for item in answer.rrset} == {"203.0.113.11", "203.0.113.12"}
-    assert len(answer.rrset) == 2
+    assert len(answer.rrset) == _TWO_IPS
     assert {item.address for item in answer.response.answer[0]} == {
         "203.0.113.11",
         "203.0.113.12",
     }
-    assert len(answer.response.answer[0]) == 2
+    assert len(answer.response.answer[0]) == _TWO_IPS
 
 
 @pytest.mark.parametrize(
@@ -955,7 +961,7 @@ async def test_speedtest_plugin_on_response_keeps_answer_when_all_ips_timeout() 
     await plugin.on_response(context)
 
     assert {item.address for item in answer.rrset} == {"203.0.113.10", "203.0.113.11"}
-    assert len(answer.rrset) == 2
+    assert len(answer.rrset) == _TWO_IPS
 
 
 async def test_speedtest_plugin_on_response_uses_fallback_ips_when_all_ips_timeout() -> None:
@@ -1009,7 +1015,7 @@ async def test_speedtest_plugin_on_response_uses_fallback_ips_when_all_ips_timeo
     await plugin.on_response(context)
 
     assert [item.address for item in answer.rrset] == ["10.10.0.2", "10.10.0.3"]
-    assert answer.rrset.ttl == 180
+    assert answer.rrset.ttl == _FALLBACK_TTL
 
 
 async def test_speedtest_plugin_on_response_skips_excluded_fallback_rule() -> None:
@@ -1068,7 +1074,7 @@ async def test_speedtest_plugin_on_response_skips_excluded_fallback_rule() -> No
     await plugin.on_response(context)
 
     assert [item.address for item in answer.rrset] == ["10.20.0.2", "10.20.0.3"]
-    assert answer.rrset.ttl == 180
+    assert answer.rrset.ttl == _FALLBACK_TTL
 
 
 def test_plugin_manager_build_context_extensions_creates_request_scoped_context() -> None:

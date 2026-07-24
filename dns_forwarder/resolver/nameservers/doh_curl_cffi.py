@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 from ipaddress import ip_address
 from typing import Any
 
@@ -26,11 +27,22 @@ except ImportError:  # pragma: no cover
 
 
 FrozenHosts = tuple[tuple[str, tuple[str, ...]], ...]
-_SHARED_SESSIONS: dict[tuple[str, ...], Any] = {}
+# 共享会话以 (loop id, resolve_entries) 为键：每个事件循环（含 portal worker 线程）
+# 持有独立会话，避免跨 loop 复用；无运行中 loop 时 loop 部分回退为 None。
+_SHARED_SESSIONS: dict[tuple[int | None, tuple[str, ...]], Any] = {}
+IPV6_VERSION = 6
+
+
+def _loop_key() -> int | None:
+    try:
+        return id(asyncio.get_running_loop())
+    except RuntimeError:
+        return None
 
 
 def _get_shared_session(resolve_entries: tuple[str, ...] = ()) -> Any:
-    session = _SHARED_SESSIONS.get(resolve_entries)
+    key = (_loop_key(), resolve_entries)
+    session = _SHARED_SESSIONS.get(key)
     if session is None:
         if AsyncSession is None:  # pragma: no cover
             raise RuntimeError("curl_cffi is required for curl nameserver")
@@ -40,19 +52,20 @@ def _get_shared_session(resolve_entries: tuple[str, ...] = ()) -> Any:
                 raise RuntimeError("curl_cffi is required for curl nameserver")
             kwargs["curl_options"] = {CurlOpt.RESOLVE: list(resolve_entries)}
         session = AsyncSession(**kwargs)
-        _SHARED_SESSIONS[resolve_entries] = session
+        _SHARED_SESSIONS[key] = session
     return session
 
 
 async def close_shared_sessions() -> None:
-    sessions = list(_SHARED_SESSIONS.values())
-    _SHARED_SESSIONS.clear()
-    for session in sessions:
-        await session.close()
+    # 仅关闭并移除当前运行 loop 的会话，保证在持有它的 loop 内完成关闭。
+    loop_key = _loop_key()
+    keys = [key for key in _SHARED_SESSIONS if key[0] == loop_key]
+    for key in keys:
+        await _SHARED_SESSIONS.pop(key).close()
 
 
 class DoHCurlCffiNameserver(dns.nameserver.Nameserver):
-    def __init__(
+    def __init__(  # noqa: PLR0913  # 形参与 dnspython Nameserver 接口一致
         self,
         url: str,
         *,
@@ -88,7 +101,7 @@ class DoHCurlCffiNameserver(dns.nameserver.Nameserver):
     def answer_port(self) -> int:
         return url_port(self.url)
 
-    def query(
+    def query(  # noqa: PLR0913  # 形参与 dnspython Nameserver 接口一致
         self,
         request: dns.message.QueryMessage,
         timeout: float,
@@ -100,10 +113,10 @@ class DoHCurlCffiNameserver(dns.nameserver.Nameserver):
     ) -> dns.message.Message:
         raise NotImplementedError("curl nameserver only supports async queries")
 
-    async def async_query(
+    async def async_query(  # noqa: PLR0913  # 形参与 dnspython Nameserver 接口一致
         self,
         request: dns.message.QueryMessage,
-        timeout: float,
+        timeout: float,  # noqa: ASYNC109  # timeout 属 dnspython/socket 接口契约
         source: str | None,
         source_port: int,
         max_size: bool,
@@ -162,7 +175,7 @@ def _curl_resolve_entries(hosts: FrozenHosts, port: int) -> tuple[str, ...]:
 
 def _curl_resolve_address(address: str) -> str:
     ip = ip_address(address)
-    if ip.version == 6:
+    if ip.version == IPV6_VERSION:
         return f"[{ip.compressed}]"
     return ip.compressed
 

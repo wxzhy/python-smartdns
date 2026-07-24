@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import ipaddress
 import time
+from typing import TYPE_CHECKING
 
 import dns.rdatatype
 import dns.resolver
@@ -10,7 +11,7 @@ import dns.rrset
 from pydantic import BaseModel, Field, field_validator, model_validator
 
 from dns_forwarder.logging import format_tags, get_logger
-from dns_forwarder.pipeline import RequestContext, UpstreamResult, sync_answer_rrset_to_response
+from dns_forwarder.pipeline import sync_answer_rrset_to_response
 from dns_forwarder.plugin_api import EmptyModel, Plugin, PluginRegistry
 
 from .models import (
@@ -20,7 +21,12 @@ from .models import (
 )
 from .service import SpeedTestService
 
+if TYPE_CHECKING:
+    from dns_forwarder.pipeline import RequestContext, UpstreamResult
+
 logger = get_logger("plugins.speedtest")
+
+IPV4_VERSION = 4
 
 
 ADDRESS_TYPES = {dns.rdatatype.A, dns.rdatatype.AAAA}
@@ -85,7 +91,7 @@ class SpeedTestPlugin(Plugin):
     variables_model = EmptyModel
     upstream_response_order = 200
     response_order = 600
-    ui_meta = {
+    ui_meta = {  # noqa: RUF012  # read-only frozen-style plugin metadata
         "title": "SpeedTest Plugin",
         "description": (
             "在 upstream_response 阶段对响应 IP 执行 ICMP/TCP(80/443) 并发测速，"
@@ -363,7 +369,7 @@ def _normalize_addresses(value: list[str] | None, *, version: int) -> list[str]:
     for item in value:
         address = ipaddress.ip_address(str(item).strip())
         if address.version != version:
-            family = "IPv4" if version == 4 else "IPv6"
+            family = "IPv4" if version == IPV4_VERSION else "IPv6"
             raise ValueError(f"fallback 地址必须是 {family}")
         text = address.compressed
         if text in seen:

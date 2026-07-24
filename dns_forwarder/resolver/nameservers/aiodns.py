@@ -102,9 +102,11 @@ def _get_resolver(
 
 
 async def close_shared_sessions() -> None:
-    resolvers = list(_RESOLVERS.values())
-    _RESOLVERS.clear()
-    for resolver in resolvers:
+    # 仅关闭当前 loop 的 resolver，与其他 nameserver 模块行为一致。
+    current_loop_id = id(asyncio.get_running_loop())
+    stale_keys = [key for key in _RESOLVERS if key.loop_id == current_loop_id]
+    for key in stale_keys:
+        resolver = _RESOLVERS.pop(key)
         await resolver.close()
 
 

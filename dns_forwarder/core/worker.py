@@ -168,6 +168,9 @@ class PortalWorker:
         logger.info("worker %s 初始化完成", self.index)
 
     async def _async_reload(self) -> RuntimeState:
+        # 先关闭本 loop 持有的共享 nameserver 会话：配置（bootstrap/hosts/
+        # servers/verify 等）变更后旧会话不复用，避免运行期报错或泄漏。
+        await close_nameserver_sessions()
         self._state = await build_runtime_state(self._config_path, self._shared_contexts)
         return self._state
 

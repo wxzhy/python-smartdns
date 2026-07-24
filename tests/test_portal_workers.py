@@ -235,3 +235,42 @@ async def test_udp_listener_serves_through_portal(tmp_path: Path) -> None:
     finally:
         await manager.stop()
         upstream_transport.close()
+
+
+async def test_reload_closes_shared_sessions_before_rebuild(tmp_path: Path) -> None:
+    """reload 必须先关闭本 loop 的共享 nameserver 会话，否则配置变更后
+    aiohttp 会话因 bootstrap 不一致而对后续每个查询 raise。"""
+    import dns_forwarder.resolver.nameservers.doh_aiohttp as doh_aiohttp
+
+    upstream_transport, upstream_port = await start_fake_upstream("203.0.113.10")
+    config_path = tmp_path / "config.json"
+    write_worker_config(config_path, upstream_port)
+    worker = PortalWorker(0, config_path, {})
+    try:
+        await anyio.to_thread.run_sync(worker.start)
+
+        def inject_and_reload() -> None:
+            """在 worker loop 内注入一个 bootstrap 为 ("8.8.8.8",) 的 aiohttp 会话，然后 reload。"""
+
+            async def _inject() -> None:
+                import aiohttp
+
+                key = doh_aiohttp._loop_key()
+                doh_aiohttp._SHARED[key] = (("8.8.8.8",), frozenset(), aiohttp.ClientSession())
+
+            worker._portal.call(_inject)
+            # reload 应已关闭并移除旧会话；若未关闭，会话仍残留在 _SHARED 中。
+            worker.reload({})
+
+        def check_removed() -> bool:
+            async def _check() -> bool:
+                return doh_aiohttp._loop_key() in doh_aiohttp._SHARED
+
+            return worker._portal.call(_check)
+
+        await anyio.to_thread.run_sync(inject_and_reload)
+        key_present = await anyio.to_thread.run_sync(check_removed)
+        assert not key_present
+    finally:
+        await anyio.to_thread.run_sync(worker.stop)
+        upstream_transport.close()

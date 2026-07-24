@@ -335,8 +335,12 @@ async def test_aiodns_nameserver_async_query_uses_tcp_for_max_size_and_maps_erro
 
 
 async def test_aiodns_close_shared_sessions_closes_cached_resolvers() -> None:
+    import asyncio
+
     resolver = AsyncMock()
-    key = aiodns_nameserver._ResolverKey(1, ("1.1.1.1",), 53, 1.0, False)
+    key = aiodns_nameserver._ResolverKey(
+        id(asyncio.get_running_loop()), ("1.1.1.1",), 53, 1.0, False
+    )
     aiodns_nameserver._RESOLVERS[key] = resolver
 
     await aiodns_nameserver.close_shared_sessions()

@@ -1,10 +1,16 @@
 from __future__ import annotations
 
+import asyncio
+import inspect
+
+import anyio
+import anyio.from_thread
 import dns.message
 import dns.rdatatype
 import dns.resolver
 import dns.rrset
 
+import plugins.query_log_plugin.service as query_log_service
 from dns_forwarder.config import AppConfig, PluginConfig
 from dns_forwarder.dispatcher import DispatcherRegistry
 from dns_forwarder.pipeline import RequestContext, UpstreamResult, build_answer_from_response
@@ -364,3 +370,51 @@ async def test_query_log_store_emits_heartbeat_when_idle() -> None:
     heartbeat = await anext(stream)
     assert heartbeat is None
     await stream.aclose()
+
+
+async def test_query_log_store_cross_loop_append_and_subscribe() -> None:
+    """worker 线程（独立 loop）append，当前 loop subscribe —— 复现跨 loop 崩溃场景。"""
+    store = QueryLogStore(max_entries=4, heartbeat_seconds=5.0)
+    payload = QueryLogPayload(
+        timestamp_ms=1,
+        qname="cross.test",
+        qtype="A",
+        listener="udp",
+        rcode="NOERROR",
+        result_summary="A 203.0.113.1",
+    )
+
+    def append_in_portal() -> None:
+        async def _append() -> None:
+            await store.append(payload)
+
+        with anyio.from_thread.start_blocking_portal(backend="asyncio") as portal:
+            portal.call(_append)
+
+    stream = store.subscribe()
+    await anyio.to_thread.run_sync(append_in_portal)
+    item = await anext(stream)
+    assert item is not None
+    assert item.qname == "cross.test"
+    await stream.aclose()
+
+
+async def test_query_log_store_avoids_loop_bound_asyncio_primitives() -> None:
+    """跨 loop 安全的结构性断言：共享状态不得依赖绑定单个 loop 的 asyncio 原语。
+
+    asyncio.Condition/Lock 等基于 _LoopBoundMixin，被多个事件循环（worker 线程
+    各自的 loop + 主 loop）共享时会崩溃或死锁。单发场景下该竞态窗口极窄、无法
+    确定性复现，故此处直接断言实现不使用这些原语（改用 threading.Lock +
+    anyio.Event 等跨线程安全机制）。
+    """
+    store = QueryLogStore(max_entries=4)
+    for value in vars(store).values():
+        assert not isinstance(
+            value, asyncio.Condition | asyncio.Lock | asyncio.Event | asyncio.Semaphore
+        ), f"store 持有 loop 绑定的 asyncio 原语: {value!r}"
+    loop_bound_names = {
+        name
+        for name, obj in vars(query_log_service).items()
+        if inspect.isclass(obj) and issubclass(obj, asyncio.mixins._LoopBoundMixin)
+    }
+    assert not loop_bound_names, f"service 模块定义了 loop 绑定类型: {loop_bound_names}"
